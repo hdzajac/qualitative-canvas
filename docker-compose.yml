@@ -5,17 +5,20 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: http://backend:5000
+        VITE_API_URL: http://localhost:${BACKEND_HOST_PORT:-5001}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     environment:
-      - VITE_API_URL=http://backend:5000
+      - VITE_API_URL=http://localhost:${BACKEND_HOST_PORT:-5001}
     depends_on:
-      - backend
+      backend:
+        condition: service_started
     restart: unless-stopped
 
   backend:
     build: ./backend
+    ports:
+      - "${BACKEND_HOST_PORT:-5001}:5000"
     expose:
       - "5000"
     environment:
