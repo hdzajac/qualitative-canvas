@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => ({
     port: 3000,
     proxy: process.env.VITE_API_URL ? undefined : {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'http://localhost:5002',
         changeOrigin: true,
       }
     }
