@@ -103,7 +103,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     });
 
     setNodes(newNodes);
-  }, [highlights, themes, insights, annotations, onUpdate, setNodes, selectedCodeIds]);
+  }, [highlights, themes, insights, annotations, onUpdate, selectedCodeIds]);
 
   // Build edges from relationships
   const buildEdges = useCallback(() => {
@@ -134,7 +134,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     });
 
     setEdges(newEdges);
-  }, [themes, insights, setEdges]);
+  }, [themes, insights]);
 
   // Rebuild when data changes
   useEffect(() => {

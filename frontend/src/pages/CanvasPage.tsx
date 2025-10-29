@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getFiles, getHighlights, getThemes, getInsights, getAnnotations } from '@/services/api';
 import type { Highlight, Theme, Insight, Annotation } from '@/types';
@@ -40,6 +40,13 @@ export default function CanvasPage() {
         refetchOnWindowFocus: false,
     });
 
+    const handleUpdate = useCallback(() => {
+        qc.invalidateQueries({ queryKey: ['highlights', projectId] });
+        qc.invalidateQueries({ queryKey: ['themes', projectId] });
+        qc.invalidateQueries({ queryKey: ['insights', projectId] });
+        qc.invalidateQueries({ queryKey: ['annotations', projectId] });
+    }, [qc, projectId]);
+
     return (
         <div className="container mx-auto p-6 space-y-4">
             <div className="flex items-center gap-3">
@@ -52,12 +59,7 @@ export default function CanvasPage() {
                     themes={themes}
                     insights={insights}
                     annotations={annotations}
-                    onUpdate={() => {
-                        qc.invalidateQueries({ queryKey: ['highlights', projectId] });
-                        qc.invalidateQueries({ queryKey: ['themes', projectId] });
-                        qc.invalidateQueries({ queryKey: ['insights', projectId] });
-                        qc.invalidateQueries({ queryKey: ['annotations', projectId] });
-                    }}
+                    onUpdate={handleUpdate}
                 />
             </div>
         </div>
