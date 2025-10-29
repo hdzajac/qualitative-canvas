@@ -7,7 +7,7 @@ services:
       args:
         VITE_API_URL: http://backend:5000
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
       - VITE_API_URL=http://backend:5000
     depends_on:
@@ -16,8 +16,8 @@ services:
 
   backend:
     build: ./backend
-    ports:
-      - "5000:5000"
+    expose:
+      - "5000"
     environment:
       - DATABASE_URL=postgres://postgres:postgres@db:5432/qda
       - PORT=5000
