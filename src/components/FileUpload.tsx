@@ -35,23 +35,28 @@ export const FileUpload = ({ onFileUploaded }: FileUploadProps) => {
     }
   };
 
+  const handleButtonClick = () => {
+    document.getElementById('file-input')?.click();
+  };
+
   return (
     <Card className="p-8 border-2 border-dashed border-border hover:border-primary transition-colors">
-      <label className="flex flex-col items-center justify-center cursor-pointer">
+      <div className="flex flex-col items-center justify-center">
         <Upload className="w-12 h-12 text-muted-foreground mb-4" />
         <h3 className="text-lg font-semibold mb-2">Upload Transcript</h3>
         <p className="text-sm text-muted-foreground mb-4">Click to select a .txt file</p>
-        <Button type="button" disabled={uploading}>
+        <Button type="button" disabled={uploading} onClick={handleButtonClick}>
           {uploading ? 'Uploading...' : 'Select File'}
         </Button>
         <input
+          id="file-input"
           type="file"
           accept=".txt"
           onChange={handleFileChange}
           className="hidden"
           disabled={uploading}
         />
-      </label>
+      </div>
     </Card>
   );
 };
