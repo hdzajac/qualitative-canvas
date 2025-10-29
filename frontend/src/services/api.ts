@@ -38,202 +38,72 @@ const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && impor
   || (typeof window !== 'undefined' ? `${window.location.origin}` : 'http://localhost:5000');
 const BASE_URL = `${API_BASE.replace(/\/$/, '')}/api`;
 
-// Mock storage for development (remove when backend is ready)
-const mockStorage = {
-  files: [] as UploadedFile[],
-  highlights: [] as Highlight[],
-  themes: [] as Theme[],
-  insights: [] as Insight[],
-  annotations: [] as Annotation[],
-};
-
-// Load from localStorage
-if (typeof window !== 'undefined') {
-  const stored = localStorage.getItem('qualitative-data');
-  if (stored) {
-    Object.assign(mockStorage, JSON.parse(stored));
+async function http<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+    ...init,
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(msg || `HTTP ${res.status}`);
   }
+  // 204 No Content
+  if (res.status === 204) return undefined as unknown as T;
+  return res.json() as Promise<T>;
 }
 
-const saveMockStorage = () => {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('qualitative-data', JSON.stringify(mockStorage));
-  }
-};
+// Files
+export const uploadFile = (filename: string, content: string): Promise<UploadedFile> =>
+  http<UploadedFile>('/files', { method: 'POST', body: JSON.stringify({ filename, content }) });
 
-// File APIs
-export const uploadFile = async (filename: string, content: string): Promise<UploadedFile> => {
-  // TODO: Replace with actual API call
-  // const response = await fetch(`${BASE_URL}/files`, {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify({ filename, content }),
-  // });
-  // return response.json();
-  
-  const file: UploadedFile = {
-    id: Date.now().toString(),
-    filename,
-    content,
-    createdAt: new Date().toISOString(),
-  };
-  mockStorage.files.push(file);
-  saveMockStorage();
-  return file;
-};
+export const getFiles = (): Promise<UploadedFile[]> => http<UploadedFile[]>('/files');
 
-export const getFiles = async (): Promise<UploadedFile[]> => {
-  // TODO: Replace with actual API call
-  // const response = await fetch(`${BASE_URL}/files`);
-  // return response.json();
-  
-  return mockStorage.files;
-};
+export const getFile = (id: string): Promise<UploadedFile> => http<UploadedFile>(`/files/${id}`);
 
-export const getFile = async (id: string): Promise<UploadedFile | null> => {
-  // TODO: Replace with actual API call
-  // const response = await fetch(`${BASE_URL}/files/${id}`);
-  // return response.json();
-  
-  return mockStorage.files.find(f => f.id === id) || null;
-};
+// Highlights
+export const createHighlight = (highlight: Omit<Highlight, 'id' | 'createdAt'>): Promise<Highlight> =>
+  http<Highlight>('/highlights', { method: 'POST', body: JSON.stringify(highlight) });
 
-// Highlight APIs
-export const createHighlight = async (highlight: Omit<Highlight, 'id' | 'createdAt'>): Promise<Highlight> => {
-  // TODO: Replace with actual API call
-  const newHighlight: Highlight = {
-    ...highlight,
-    id: Date.now().toString(),
-    createdAt: new Date().toISOString(),
-  };
-  mockStorage.highlights.push(newHighlight);
-  saveMockStorage();
-  return newHighlight;
-};
+export const getHighlights = (): Promise<Highlight[]> => http<Highlight[]>('/highlights');
 
-export const getHighlights = async (): Promise<Highlight[]> => {
-  // TODO: Replace with actual API call
-  return mockStorage.highlights;
-};
+export const updateHighlight = (id: string, updates: Partial<Highlight>): Promise<Highlight> =>
+  http<Highlight>(`/highlights/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
-export const updateHighlight = async (id: string, updates: Partial<Highlight>): Promise<Highlight> => {
-  // TODO: Replace with actual API call
-  const index = mockStorage.highlights.findIndex(h => h.id === id);
-  if (index !== -1) {
-    mockStorage.highlights[index] = { ...mockStorage.highlights[index], ...updates };
-    saveMockStorage();
-    return mockStorage.highlights[index];
-  }
-  throw new Error('Highlight not found');
-};
+export const deleteHighlight = (id: string): Promise<void> =>
+  http<void>(`/highlights/${id}`, { method: 'DELETE' });
 
-export const deleteHighlight = async (id: string): Promise<void> => {
-  // TODO: Replace with actual API call
-  mockStorage.highlights = mockStorage.highlights.filter(h => h.id !== id);
-  saveMockStorage();
-};
+// Themes
+export const createTheme = (theme: Omit<Theme, 'id' | 'createdAt'>): Promise<Theme> =>
+  http<Theme>('/themes', { method: 'POST', body: JSON.stringify(theme) });
 
-// Theme APIs
-export const createTheme = async (theme: Omit<Theme, 'id' | 'createdAt'>): Promise<Theme> => {
-  // TODO: Replace with actual API call
-  const newTheme: Theme = {
-    ...theme,
-    id: Date.now().toString(),
-    createdAt: new Date().toISOString(),
-  };
-  mockStorage.themes.push(newTheme);
-  saveMockStorage();
-  return newTheme;
-};
+export const getThemes = (): Promise<Theme[]> => http<Theme[]>('/themes');
 
-export const getThemes = async (): Promise<Theme[]> => {
-  // TODO: Replace with actual API call
-  return mockStorage.themes;
-};
+export const updateTheme = (id: string, updates: Partial<Theme>): Promise<Theme> =>
+  http<Theme>(`/themes/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
-export const updateTheme = async (id: string, updates: Partial<Theme>): Promise<Theme> => {
-  // TODO: Replace with actual API call
-  const index = mockStorage.themes.findIndex(t => t.id === id);
-  if (index !== -1) {
-    mockStorage.themes[index] = { ...mockStorage.themes[index], ...updates };
-    saveMockStorage();
-    return mockStorage.themes[index];
-  }
-  throw new Error('Theme not found');
-};
+export const deleteTheme = (id: string): Promise<void> =>
+  http<void>(`/themes/${id}`, { method: 'DELETE' });
 
-export const deleteTheme = async (id: string): Promise<void> => {
-  // TODO: Replace with actual API call
-  mockStorage.themes = mockStorage.themes.filter(t => t.id !== id);
-  saveMockStorage();
-};
+// Insights
+export const createInsight = (insight: Omit<Insight, 'id' | 'createdAt'>): Promise<Insight> =>
+  http<Insight>('/insights', { method: 'POST', body: JSON.stringify(insight) });
 
-// Insight APIs
-export const createInsight = async (insight: Omit<Insight, 'id' | 'createdAt'>): Promise<Insight> => {
-  // TODO: Replace with actual API call
-  const newInsight: Insight = {
-    ...insight,
-    id: Date.now().toString(),
-    createdAt: new Date().toISOString(),
-  };
-  mockStorage.insights.push(newInsight);
-  saveMockStorage();
-  return newInsight;
-};
+export const getInsights = (): Promise<Insight[]> => http<Insight[]>('/insights');
 
-export const getInsights = async (): Promise<Insight[]> => {
-  // TODO: Replace with actual API call
-  return mockStorage.insights;
-};
+export const updateInsight = (id: string, updates: Partial<Insight>): Promise<Insight> =>
+  http<Insight>(`/insights/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
-export const updateInsight = async (id: string, updates: Partial<Insight>): Promise<Insight> => {
-  // TODO: Replace with actual API call
-  const index = mockStorage.insights.findIndex(i => i.id === id);
-  if (index !== -1) {
-    mockStorage.insights[index] = { ...mockStorage.insights[index], ...updates };
-    saveMockStorage();
-    return mockStorage.insights[index];
-  }
-  throw new Error('Insight not found');
-};
+export const deleteInsight = (id: string): Promise<void> =>
+  http<void>(`/insights/${id}`, { method: 'DELETE' });
 
-export const deleteInsight = async (id: string): Promise<void> => {
-  // TODO: Replace with actual API call
-  mockStorage.insights = mockStorage.insights.filter(i => i.id !== id);
-  saveMockStorage();
-};
+// Annotations
+export const createAnnotation = (annotation: Omit<Annotation, 'id' | 'createdAt'>): Promise<Annotation> =>
+  http<Annotation>('/annotations', { method: 'POST', body: JSON.stringify(annotation) });
 
-// Annotation APIs
-export const createAnnotation = async (annotation: Omit<Annotation, 'id' | 'createdAt'>): Promise<Annotation> => {
-  // TODO: Replace with actual API call
-  const newAnnotation: Annotation = {
-    ...annotation,
-    id: Date.now().toString(),
-    createdAt: new Date().toISOString(),
-  };
-  mockStorage.annotations.push(newAnnotation);
-  saveMockStorage();
-  return newAnnotation;
-};
+export const getAnnotations = (): Promise<Annotation[]> => http<Annotation[]>('/annotations');
 
-export const getAnnotations = async (): Promise<Annotation[]> => {
-  // TODO: Replace with actual API call
-  return mockStorage.annotations;
-};
+export const updateAnnotation = (id: string, updates: Partial<Annotation>): Promise<Annotation> =>
+  http<Annotation>(`/annotations/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
-export const updateAnnotation = async (id: string, updates: Partial<Annotation>): Promise<Annotation> => {
-  // TODO: Replace with actual API call
-  const index = mockStorage.annotations.findIndex(a => a.id === id);
-  if (index !== -1) {
-    mockStorage.annotations[index] = { ...mockStorage.annotations[index], ...updates };
-    saveMockStorage();
-    return mockStorage.annotations[index];
-  }
-  throw new Error('Annotation not found');
-};
-
-export const deleteAnnotation = async (id: string): Promise<void> => {
-  // TODO: Replace with actual API call
-  mockStorage.annotations = mockStorage.annotations.filter(a => a.id !== id);
-  saveMockStorage();
-};
+export const deleteAnnotation = (id: string): Promise<void> =>
+  http<void>(`/annotations/${id}`, { method: 'DELETE' });
