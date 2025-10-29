@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +7,7 @@ import { Highlight } from '@/types';
 import { createHighlight } from '@/services/api';
 import { toast } from 'sonner';
 import { Highlighter } from 'lucide-react';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 interface TextViewerProps {
   fileId: string;
@@ -17,7 +18,10 @@ interface TextViewerProps {
 
 export const TextViewer = ({ fileId, content, highlights, onHighlightCreated }: TextViewerProps) => {
   const [selectedText, setSelectedText] = useState<{ text: string; start: number; end: number } | null>(null);
+  const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [codeName, setCodeName] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
 
   const handleSelection = useCallback(() => {
@@ -26,8 +30,12 @@ export const TextViewer = ({ fileId, content, highlights, onHighlightCreated }: 
 
     const range = selection.getRangeAt(0);
     const text = selection.toString().trim();
-    
-    if (text.length === 0 || !textRef.current) return;
+
+    if (!textRef.current || text.length === 0) {
+      setSelectedText(null);
+      setSelectionRect(null);
+      return;
+    }
 
     // Calculate offsets relative to the content
     const preRange = document.createRange();
@@ -36,8 +44,23 @@ export const TextViewer = ({ fileId, content, highlights, onHighlightCreated }: 
     const start = preRange.toString().length;
     const end = start + text.length;
 
+    const rect = range.getBoundingClientRect();
+
     setSelectedText({ text, start, end });
+    setSelectionRect(rect);
   }, []);
+
+  useEffect(() => {
+    if (sheetOpen && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [sheetOpen]);
+
+  const openAddCode = () => {
+    if (!selectedText) return;
+    setSheetOpen(true);
+  };
 
   const handleCreateCode = async () => {
     if (!selectedText || !codeName.trim()) {
@@ -55,7 +78,9 @@ export const TextViewer = ({ fileId, content, highlights, onHighlightCreated }: 
       });
       toast.success('Code created');
       setSelectedText(null);
+      setSelectionRect(null);
       setCodeName('');
+      setSheetOpen(false);
       onHighlightCreated();
     } catch (error) {
       toast.error('Failed to create code');
@@ -102,7 +127,7 @@ export const TextViewer = ({ fileId, content, highlights, onHighlightCreated }: 
   };
 
   return (
-    <div className="space-y-4">
+    <div className="relative space-y-4">
       <Card className="p-6">
         <div
           ref={textRef}
@@ -113,49 +138,47 @@ export const TextViewer = ({ fileId, content, highlights, onHighlightCreated }: 
         </div>
       </Card>
 
-      {selectedText && (
-        <Card className="p-4 border-primary">
-          <div className="space-y-3">
-            <div className="flex items-start gap-2">
-              <Highlighter className="w-5 h-5 text-primary mt-1" />
-              <div className="flex-1">
-                <Label htmlFor="codeName" className="text-sm font-medium">
-                  Selected Text
-                </Label>
-                <p className="text-sm text-muted-foreground italic mt-1">
-                  "{selectedText.text}"
-                </p>
+      {/* Floating action above selection */}
+      {selectedText && selectionRect && (
+        <div
+          className="fixed z-50 bg-black text-white text-xs px-2 py-1 rounded shadow-md"
+          style={{ top: Math.max(8, selectionRect.top - 32), left: Math.max(8, selectionRect.left) }}
+        >
+          <button className="underline" onClick={openAddCode}>Add code</button>
+        </div>
+      )}
+
+      {/* Side sheet for adding code name */}
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent side="right" className="rounded-none border-l-4 border-black">
+          <SheetHeader>
+            <SheetTitle className="uppercase tracking-wide">Add Code</SheetTitle>
+          </SheetHeader>
+          {selectedText && (
+            <div className="space-y-3 mt-4">
+              <div>
+                <Label className="text-sm font-medium">Selected Text</Label>
+                <p className="text-sm text-muted-foreground italic mt-1">"{selectedText.text}"</p>
+              </div>
+              <div>
+                <Label htmlFor="codeName">Code Name</Label>
+                <Input
+                  id="codeName"
+                  ref={inputRef}
+                  value={codeName}
+                  onChange={(e) => setCodeName(e.target.value)}
+                  placeholder="Enter a code name for this highlight"
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreateCode()}
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={handleCreateCode} className="brutal-button">Create Code</Button>
+                <Button variant="outline" onClick={() => { setSheetOpen(false); setCodeName(''); }}>Cancel</Button>
               </div>
             </div>
-            
-            <div>
-              <Label htmlFor="codeName">Code Name</Label>
-              <Input
-                id="codeName"
-                value={codeName}
-                onChange={(e) => setCodeName(e.target.value)}
-                placeholder="Enter a code name for this highlight"
-                onKeyDown={(e) => e.key === 'Enter' && handleCreateCode()}
-              />
-            </div>
-            
-            <div className="flex gap-2">
-              <Button onClick={handleCreateCode} className="flex-1">
-                Create Code
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSelectedText(null);
-                  setCodeName('');
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };

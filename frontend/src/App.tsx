@@ -7,6 +7,10 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import Projects from "./pages/Projects";
 import Documents from "./pages/Documents";
+import DocumentDetail from "./pages/DocumentDetail";
+import CanvasPage from "./pages/CanvasPage";
+import Themes from "./pages/Themes";
+import Insights from "./pages/Insights";
 import { getProjects } from "@/services/api";
 import { useSelectedProject } from "./hooks/useSelectedProject";
 import { Button } from "@/components/ui/button";
@@ -67,6 +71,9 @@ const App = () => (
           <nav className="flex gap-6">
             <Link className="hover:underline decoration-[3px] underline-offset-4" to="/projects">Projects</Link>
             <Link className="hover:underline decoration-[3px] underline-offset-4" to="/documents">Documents</Link>
+            <Link className="hover:underline decoration-[3px] underline-offset-4" to="/themes">Themes</Link>
+            <Link className="hover:underline decoration-[3px] underline-offset-4" to="/insights">Insights</Link>
+            <Link className="hover:underline decoration-[3px] underline-offset-4" to="/canvas">Canvas</Link>
           </nav>
           <div className="ml-auto">
             <ProjectBadge />
@@ -75,14 +82,13 @@ const App = () => (
         <Routes>
           <Route path="/" element={<GuardHome />} />
           <Route path="/projects" element={<Projects />} />
-
-          {/* Protected routes: add all future pages under this wrapper to enforce project context */}
           <Route element={<RequireProject />}>
             <Route path="/documents" element={<Documents />} />
-            {/* Future protected routes go here */}
+            <Route path="/documents/:id" element={<DocumentDetail />} />
+            <Route path="/themes" element={<Themes />} />
+            <Route path="/insights" element={<Insights />} />
+            <Route path="/canvas" element={<CanvasPage />} />
           </Route>
-
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
