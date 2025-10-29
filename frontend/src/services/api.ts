@@ -1,4 +1,4 @@
-import type { UploadedFile, Highlight, Theme, Insight, Annotation } from '@/types';
+import type { UploadedFile, Highlight, Theme, Insight, Annotation, Project } from '@/types';
 
 /**
  * API Service Layer
@@ -31,6 +31,11 @@ import type { UploadedFile, Highlight, Theme, Insight, Annotation } from '@/type
  * GET    /api/annotations        - Get all annotations
  * PUT    /api/annotations/:id    - Update an annotation
  * DELETE /api/annotations/:id    - Delete an annotation
+ * 
+ * POST   /api/projects           - Create a project
+ * GET    /api/projects           - Get all projects
+ * PUT    /api/projects/:id       - Update a project
+ * DELETE /api/projects/:id       - Delete a project
  */
 
 // Update: use Vite env for API base URL in Docker or local dev
@@ -53,12 +58,19 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 // Files
-export const uploadFile = (filename: string, content: string): Promise<UploadedFile> =>
-  http<UploadedFile>('/files', { method: 'POST', body: JSON.stringify({ filename, content }) });
+export const uploadFile = (filename: string, content: string, projectId?: string): Promise<UploadedFile> =>
+  http<UploadedFile>('/files', { method: 'POST', body: JSON.stringify({ filename, content, projectId }) });
 
-export const getFiles = (): Promise<UploadedFile[]> => http<UploadedFile[]>('/files');
+export const getFiles = (projectId?: string): Promise<UploadedFile[]> =>
+  http<UploadedFile[]>(projectId ? `/files?projectId=${encodeURIComponent(projectId)}` : '/files');
 
 export const getFile = (id: string): Promise<UploadedFile> => http<UploadedFile>(`/files/${id}`);
+
+export const updateFile = (id: string, updates: Partial<UploadedFile>): Promise<UploadedFile> =>
+  http<UploadedFile>(`/files/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
+
+export const deleteFile = (id: string): Promise<void> =>
+  http<void>(`/files/${id}`, { method: 'DELETE' });
 
 // Highlights
 export const createHighlight = (highlight: Omit<Highlight, 'id' | 'createdAt'>): Promise<Highlight> =>
@@ -107,3 +119,10 @@ export const updateAnnotation = (id: string, updates: Partial<Annotation>): Prom
 
 export const deleteAnnotation = (id: string): Promise<void> =>
   http<void>(`/annotations/${id}`, { method: 'DELETE' });
+
+// Projects
+export interface ProjectInput { name: string; description?: string }
+export const getProjects = (): Promise<Project[]> => http<Project[]>('/projects');
+export const createProject = (data: ProjectInput): Promise<Project> => http<Project>('/projects', { method: 'POST', body: JSON.stringify(data) });
+export const updateProject = (id: string, data: Partial<ProjectInput>): Promise<Project> => http<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const deleteProject = (id: string): Promise<void> => http<void>(`/projects/${id}`, { method: 'DELETE' });

@@ -1,8 +1,16 @@
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+}
+
 export interface UploadedFile {
   id: string;
   filename: string;
   content: string;
   createdAt: string;
+  projectId?: string;
 }
 
 export interface Highlight {

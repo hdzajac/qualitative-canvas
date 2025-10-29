@@ -8,6 +8,8 @@ import highlightsRoutes from './routes/highlights.js';
 import themesRoutes from './routes/themes.js';
 import insightsRoutes from './routes/insights.js';
 import annotationsRoutes from './routes/annotations.js';
+import projectsRoutes from './routes/projects.js';
+import { runMigrations } from './db/migrate.js';
 
 dotenv.config();
 
@@ -84,6 +86,7 @@ app.get('/api/health', async (_req, res) => {
 });
 
 // Routes
+app.use('/api/projects', projectsRoutes(pool));
 app.use('/api/files', filesRoutes(pool));
 app.use('/api/highlights', highlightsRoutes(pool));
 app.use('/api/themes', themesRoutes(pool));
@@ -98,9 +101,10 @@ app.use((err, _req, res, _next) => {
 });
 
 // Start
-initDb()
+runMigrations()
+  .then(() => initDb())
   .then(() => app.listen(port, () => console.log(`Backend listening on port ${port}`)))
   .catch((e) => {
-    console.error('Failed to init DB', e);
+    console.error('Startup failed', e);
     process.exit(1);
   });
