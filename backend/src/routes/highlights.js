@@ -16,7 +16,25 @@ export default function highlightsRoutes(pool) {
     createdAt: r.created_at.toISOString(),
   });
 
-  router.get('/', asyncHandler(async (_req, res) => {
+  router.get('/', asyncHandler(async (req, res) => {
+    const { fileId, projectId } = req.query;
+    // Filter by fileId
+    if (fileId) {
+      const r = await pool.query('SELECT * FROM highlights WHERE file_id = $1 ORDER BY created_at DESC', [fileId]);
+      return res.json(r.rows.map(map));
+    }
+    // Filter by projectId via files join
+    if (projectId) {
+      const r = await pool.query(
+        `SELECT h.* FROM highlights h
+         JOIN files f ON f.id = h.file_id
+         WHERE f.project_id = $1
+         ORDER BY h.created_at DESC`,
+        [projectId]
+      );
+      return res.json(r.rows.map(map));
+    }
+    // Default: return all
     const r = await pool.query('SELECT * FROM highlights ORDER BY created_at DESC');
     res.json(r.rows.map(map));
   }));

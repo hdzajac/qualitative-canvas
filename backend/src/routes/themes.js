@@ -13,7 +13,21 @@ export default function themesRoutes(pool) {
     createdAt: r.created_at.toISOString(),
   });
 
-  router.get('/', asyncHandler(async (_req, res) => {
+  router.get('/', asyncHandler(async (req, res) => {
+    const { projectId } = req.query;
+    if (projectId) {
+      // Filter themes that reference highlights from files in the given project
+      const r = await pool.query(
+        `SELECT DISTINCT t.* FROM themes t
+         JOIN LATERAL unnest(t.highlight_ids) AS hid ON true
+         JOIN highlights h ON h.id = hid
+         JOIN files f ON f.id = h.file_id
+         WHERE f.project_id = $1
+         ORDER BY t.created_at DESC`,
+        [projectId]
+      );
+      return res.json(r.rows.map(map));
+    }
     const r = await pool.query('SELECT * FROM themes ORDER BY created_at DESC');
     res.json(r.rows.map(map));
   }));

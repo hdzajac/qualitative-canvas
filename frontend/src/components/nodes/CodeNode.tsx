@@ -7,14 +7,15 @@ interface CodeNodeProps {
   data: {
     highlight: Highlight;
     onUpdate: () => void;
+    selected?: boolean;
   };
 }
 
 export const CodeNode = ({ data }: CodeNodeProps) => {
-  const { highlight } = data;
+  const { highlight, selected } = data;
 
   return (
-    <div className="min-w-[200px] max-w-[250px]">
+    <div className={`min-w-[200px] max-w-[250px] ${selected ? 'ring-4 ring-indigo-400' : ''}`}>
       <Card className="p-3 bg-card shadow-md border-l-4 border-l-primary">
         <Badge className="mb-2 text-xs">Code</Badge>
         <p className="text-xs font-semibold mb-2 text-foreground">{highlight.codeName}</p>

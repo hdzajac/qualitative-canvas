@@ -76,7 +76,14 @@ export const deleteFile = (id: string): Promise<void> =>
 export const createHighlight = (highlight: Omit<Highlight, 'id' | 'createdAt'>): Promise<Highlight> =>
   http<Highlight>('/highlights', { method: 'POST', body: JSON.stringify(highlight) });
 
-export const getHighlights = (): Promise<Highlight[]> => http<Highlight[]>('/highlights');
+export const getHighlights = (params?: { fileId?: string; projectId?: string }): Promise<Highlight[]> => {
+  const qs = params?.fileId
+    ? `?fileId=${encodeURIComponent(params.fileId)}`
+    : params?.projectId
+    ? `?projectId=${encodeURIComponent(params.projectId)}`
+    : '';
+  return http<Highlight[]>(`/highlights${qs}`);
+};
 
 export const updateHighlight = (id: string, updates: Partial<Highlight>): Promise<Highlight> =>
   http<Highlight>(`/highlights/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
@@ -88,7 +95,8 @@ export const deleteHighlight = (id: string): Promise<void> =>
 export const createTheme = (theme: Omit<Theme, 'id' | 'createdAt'>): Promise<Theme> =>
   http<Theme>('/themes', { method: 'POST', body: JSON.stringify(theme) });
 
-export const getThemes = (): Promise<Theme[]> => http<Theme[]>('/themes');
+export const getThemes = (projectId?: string): Promise<Theme[]> =>
+  http<Theme[]>(projectId ? `/themes?projectId=${encodeURIComponent(projectId)}` : '/themes');
 
 export const updateTheme = (id: string, updates: Partial<Theme>): Promise<Theme> =>
   http<Theme>(`/themes/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
@@ -100,7 +108,8 @@ export const deleteTheme = (id: string): Promise<void> =>
 export const createInsight = (insight: Omit<Insight, 'id' | 'createdAt'>): Promise<Insight> =>
   http<Insight>('/insights', { method: 'POST', body: JSON.stringify(insight) });
 
-export const getInsights = (): Promise<Insight[]> => http<Insight[]>('/insights');
+export const getInsights = (projectId?: string): Promise<Insight[]> =>
+  http<Insight[]>(projectId ? `/insights?projectId=${encodeURIComponent(projectId)}` : '/insights');
 
 export const updateInsight = (id: string, updates: Partial<Insight>): Promise<Insight> =>
   http<Insight>(`/insights/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
@@ -112,7 +121,8 @@ export const deleteInsight = (id: string): Promise<void> =>
 export const createAnnotation = (annotation: Omit<Annotation, 'id' | 'createdAt'>): Promise<Annotation> =>
   http<Annotation>('/annotations', { method: 'POST', body: JSON.stringify(annotation) });
 
-export const getAnnotations = (): Promise<Annotation[]> => http<Annotation[]>('/annotations');
+export const getAnnotations = (projectId?: string): Promise<Annotation[]> =>
+  http<Annotation[]>(projectId ? `/annotations?projectId=${encodeURIComponent(projectId)}` : '/annotations');
 
 export const updateAnnotation = (id: string, updates: Partial<Annotation>): Promise<Annotation> =>
   http<Annotation>(`/annotations/${id}`, { method: 'PUT', body: JSON.stringify(updates) });

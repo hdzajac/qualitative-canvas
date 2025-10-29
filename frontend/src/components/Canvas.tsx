@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -10,6 +10,7 @@ import ReactFlow, {
   useEdgesState,
   addEdge,
   NodeTypes,
+  ReactFlowInstance,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { CodeNode } from './nodes/CodeNode';
@@ -18,9 +19,10 @@ import { InsightNode } from './nodes/InsightNode';
 import { AnnotationNode } from './nodes/AnnotationNode';
 import { Highlight, Theme, Insight, Annotation } from '@/types';
 import { Button } from './ui/button';
-import { StickyNote } from 'lucide-react';
-import { createAnnotation, createTheme, createInsight } from '@/services/api';
+import { StickyNote, MousePointer2, Hand, Type as TypeIcon } from 'lucide-react';
+import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation } from '@/services/api';
 import { toast } from 'sonner';
+import { useSelectedProject } from '@/hooks/useSelectedProject';
 
 interface CanvasProps {
   highlights: Highlight[];
@@ -28,8 +30,9 @@ interface CanvasProps {
   insights: Insight[];
   annotations: Annotation[];
   onUpdate: () => void;
-  onSelectionChange?: (sel: { codeIds: string[]; themeIds: string[] }) => void;
 }
+
+type Tool = 'select' | 'hand' | 'text';
 
 const nodeTypes: NodeTypes = {
   code: CodeNode,
@@ -38,24 +41,31 @@ const nodeTypes: NodeTypes = {
   annotation: AnnotationNode,
 };
 
-export const Canvas = ({ highlights, themes, insights, annotations, onUpdate, onSelectionChange }: CanvasProps) => {
+export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: CanvasProps) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedCodeIds, setSelectedCodeIds] = useState<string[]>([]);
   const [selectedThemeIds, setSelectedThemeIds] = useState<string[]>([]);
+  const [tool, setTool] = useState<Tool>('select');
+  const flowRef = useRef<HTMLDivElement>(null);
+  const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const [isSpacePanning, setIsSpacePanning] = useState(false);
+  const [projectId] = useSelectedProject();
 
   // Build nodes from data
   const buildNodes = useCallback(() => {
     const newNodes: Node[] = [];
 
-    // Code nodes
+    // Code nodes - change color when selected
     highlights.forEach((highlight, idx) => {
+      const selected = selectedCodeIds.includes(highlight.id);
       newNodes.push({
         id: `code-${highlight.id}`,
         type: 'code',
         position: highlight.position || { x: 100 + (idx % 5) * 250, y: 100 + Math.floor(idx / 5) * 200 },
-        data: { highlight, onUpdate },
+        data: { highlight, onUpdate, selected },
         selectable: true,
+        className: selected ? 'ring-4 ring-indigo-400' : undefined,
       });
     });
 
@@ -82,18 +92,18 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate, on
     });
 
     // Annotation nodes
-    annotations.forEach((annotation) => {
+    annotations.forEach((annotation, idx) => {
       newNodes.push({
         id: `annotation-${annotation.id}`,
         type: 'annotation',
-        position: annotation.position,
+        position: annotation.position || { x: 60 + (idx % 6) * 180, y: 60 },
         data: { annotation, onUpdate },
         selectable: false,
       });
     });
 
     setNodes(newNodes);
-  }, [highlights, themes, insights, annotations, onUpdate, setNodes]);
+  }, [highlights, themes, insights, annotations, onUpdate, setNodes, selectedCodeIds]);
 
   // Build edges from relationships
   const buildEdges = useCallback(() => {
@@ -127,10 +137,10 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate, on
   }, [themes, insights, setEdges]);
 
   // Rebuild when data changes
-  useState(() => {
+  useEffect(() => {
     buildNodes();
     buildEdges();
-  });
+  }, [buildNodes, buildEdges]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -139,65 +149,85 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate, on
     [setEdges]
   );
 
-  const handleAddAnnotation = async () => {
-    try {
-      await createAnnotation({
-        content: 'New annotation',
-        position: { x: 400, y: 400 },
-      });
-      toast.success('Annotation added');
-      onUpdate();
-    } catch (error) {
-      toast.error('Failed to add annotation');
+  // Toolbar and interactions
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.code === 'Space') setIsSpacePanning(true);
+      if (e.code === 'KeyV') setTool('select');
+      if (e.code === 'KeyH') setTool('hand');
+      if (e.code === 'KeyT') setTool('text');
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === 'Space') setIsSpacePanning(false);
+    };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+    };
+  }, []);
+
+  const isPanning = tool === 'hand' || isSpacePanning;
+
+  // Contextual popup for creating theme or insight from selection
+  const [popup, setPopup] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (selectedCodeIds.length >= 2 || selectedThemeIds.length >= 1) {
+      setPopup({ x: 16, y: 16 });
+    } else {
+      setPopup(null);
     }
-  };
+  }, [selectedCodeIds, selectedThemeIds]);
 
   return (
-    <div className="relative w-full h-full">
-      <div className="absolute top-4 right-4 z-10 flex gap-2 bg-white/80 p-2 border-2 border-black">
-        <Button size="sm" onClick={handleAddAnnotation}>
-          <StickyNote className="w-4 h-4 mr-2" />
-          Add Note
+    <div ref={flowRef} className="relative w-full h-full">
+      {/* Left toolbar */}
+      <div className="absolute left-3 top-20 z-20 flex flex-col gap-2">
+        <Button size="icon" variant={tool === 'select' ? 'default' : 'outline'} className="rounded-none" onClick={() => setTool('select')} title="Select (V)">
+          <MousePointer2 className="w-4 h-4" />
         </Button>
-        <input
-          placeholder="Theme name"
-          className="h-8 border-2 border-black px-2"
-          id="canvas-theme-name"
-        />
-        <Button
-          size="sm"
-          className="brutal-button"
-          disabled={selectedCodeIds.length === 0}
-          onClick={async () => {
-            const name = (document.getElementById('canvas-theme-name') as HTMLInputElement)?.value?.trim();
-            if (!name) return;
-            await createTheme({ name, highlightIds: selectedCodeIds });
-            toast.success('Theme created');
-            onUpdate();
-          }}
-        >
-          Create Theme ({selectedCodeIds.length})
+        <Button size="icon" variant={tool === 'hand' ? 'default' : 'outline'} className="rounded-none" onClick={() => setTool('hand')} title="Pan (Space)">
+          <Hand className="w-4 h-4" />
         </Button>
-        <input
-          placeholder="Insight name"
-          className="h-8 border-2 border-black px-2"
-          id="canvas-insight-name"
-        />
-        <Button
-          size="sm"
-          className="brutal-button"
-          disabled={selectedThemeIds.length === 0}
-          onClick={async () => {
-            const name = (document.getElementById('canvas-insight-name') as HTMLInputElement)?.value?.trim();
-            if (!name) return;
-            await createInsight({ name, themeIds: selectedThemeIds });
-            toast.success('Insight created');
-            onUpdate();
-          }}
-        >
-          Create Insight ({selectedThemeIds.length})
+        <Button size="icon" variant={tool === 'text' ? 'default' : 'outline'} className="rounded-none" onClick={() => setTool('text')} title="Text (T)">
+          <TypeIcon className="w-4 h-4" />
         </Button>
       </div>
+
+      {/* Contextual popup */}
+      {popup && (
+        <div className="absolute z-20 bg-white border-2 border-black p-2 left-3 top-3 space-y-2">
+          {selectedCodeIds.length >= 2 && (
+            <div>
+              <div className="text-xs mb-2">{selectedCodeIds.length} codes selected</div>
+              <Button size="sm" className="brutal-button" onClick={async () => {
+                const name = prompt('Theme name');
+                if (!name) return;
+                await createTheme({ name, highlightIds: selectedCodeIds });
+                toast.success('Theme created');
+                setPopup(null);
+                setSelectedCodeIds([]);
+                onUpdate();
+              }}>Create Theme</Button>
+            </div>
+          )}
+          {selectedThemeIds.length >= 1 && (
+            <div>
+              <div className="text-xs mb-2">{selectedThemeIds.length} themes selected</div>
+              <Button size="sm" className="brutal-button" onClick={async () => {
+                const name = prompt('Insight name');
+                if (!name) return;
+                await createInsight({ name, themeIds: selectedThemeIds });
+                toast.success('Insight created');
+                setPopup(null);
+                setSelectedThemeIds([]);
+                onUpdate();
+              }}>Create Insight</Button>
+            </div>
+          )}
+        </div>
+      )}
 
       <ReactFlow
         nodes={nodes}
@@ -207,12 +237,46 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate, on
         onConnect={onConnect}
         nodeTypes={nodeTypes}
         fitView
+        panOnDrag={isPanning}
+        selectionOnDrag={tool === 'select'}
+        onInit={(inst) => { rfInstanceRef.current = inst; }}
         onSelectionChange={(sel) => {
           const selectedNodes = sel.nodes ?? [];
           const codeIds = selectedNodes.filter(n => n.id.startsWith('code-')).map(n => n.id.replace('code-', ''));
           const themeIds = selectedNodes.filter(n => n.id.startsWith('theme-')).map(n => n.id.replace('theme-', ''));
           setSelectedCodeIds(codeIds);
           setSelectedThemeIds(themeIds);
+        }}
+        onNodeDragStop={async (_e, node) => {
+          try {
+            const { id, position, type } = node;
+            if (!position) return;
+            if (type === 'code') {
+              const hid = id.replace('code-', '');
+              await updateHighlight(hid, { position });
+            } else if (type === 'theme') {
+              const tid = id.replace('theme-', '');
+              await updateTheme(tid, { position });
+            } else if (type === 'insight') {
+              const iid = id.replace('insight-', '');
+              await updateInsight(iid, { position });
+            } else if (type === 'annotation') {
+              const aid = id.replace('annotation-', '');
+              await updateAnnotation(aid, { position });
+            }
+            onUpdate();
+          } catch (err) {
+            console.error(err);
+            toast.error('Failed to save position');
+          }
+        }}
+        onPaneClick={async (e) => {
+          if (tool === 'text' && rfInstanceRef.current) {
+            const proj = rfInstanceRef.current.project({ x: e.clientX, y: e.clientY });
+            await createAnnotation({ content: 'New text', position: { x: proj.x, y: proj.y }, projectId });
+            toast.success('Text added');
+            onUpdate();
+          }
         }}
       >
         <Background />

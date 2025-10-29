@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 
 export type TextViewerHandle = {
   scrollToOffset: (offset: number) => void;
+  flashAtOffset: (offset: number) => void;
 };
 
 interface TextViewerProps {
@@ -27,6 +28,8 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     const [codeName, setCodeName] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
     const textRef = useRef<HTMLDivElement>(null);
+    const [flashOffset, setFlashOffset] = useState<number | null>(null);
+    const flashTimer = useRef<number | null>(null);
 
     const handleSelection = useCallback(() => {
       const selection = window.getSelection();
@@ -98,7 +101,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       let current: Node | null = walker.nextNode();
       let traversed = 0;
       while (current) {
-        const textContent = (current.nodeValue || '');
+        const textContent = current.nodeValue || '';
         const nextTraversed = traversed + textContent.length;
         if (charOffset <= nextTraversed) {
           return { node: current, offset: Math.max(0, charOffset - traversed) };
@@ -115,10 +118,25 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         const pos = getDomPositionForOffset(textRef.current, offset);
         if (!pos) return;
         const r = document.createRange();
-        r.setStart(pos.node, pos.offset);
-        r.setEnd(pos.node, pos.offset + 1);
+        const nodeTextLen = (pos.node.nodeValue || '').length;
+        // Clamp range to valid bounds to avoid IndexSizeError
+        if (nodeTextLen === 0) {
+          r.selectNode(textRef.current);
+        } else if (pos.offset >= nodeTextLen) {
+          r.setStart(pos.node, Math.max(0, nodeTextLen - 1));
+          r.setEnd(pos.node, nodeTextLen);
+        } else {
+          r.setStart(pos.node, pos.offset);
+          r.setEnd(pos.node, Math.min(nodeTextLen, pos.offset + 1));
+        }
         const rect = r.getBoundingClientRect();
-        window.scrollTo({ top: window.scrollY + rect.top - 120, behavior: 'smooth' });
+        const top = rect.top || textRef.current.getBoundingClientRect().top + 10;
+        window.scrollTo({ top: window.scrollY + top - 120, behavior: 'smooth' });
+      },
+      flashAtOffset: (offset: number) => {
+        setFlashOffset(offset);
+        if (flashTimer.current) window.clearTimeout(flashTimer.current);
+        flashTimer.current = window.setTimeout(() => setFlashOffset(null), 1200);
       },
     }), []);
 
@@ -142,7 +160,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           <mark
             key={`highlight-${highlight.id}`}
             id={`hl-${highlight.id}`}
-            className="bg-primary/20 rounded px-0.5 cursor-pointer hover:bg-primary/30 transition-colors"
+            className={`rounded px-0.5 cursor-pointer transition-colors ${flashOffset === highlight.startOffset ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30'}`}
           >
             {content.substring(highlight.startOffset, highlight.endOffset)}
           </mark>

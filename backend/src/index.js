@@ -62,8 +62,12 @@ async function initDb() {
       id UUID PRIMARY KEY,
       content TEXT NOT NULL,
       position JSONB NOT NULL,
+      project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- Ensure new columns exist on older DBs
+    ALTER TABLE annotations ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
 
     CREATE INDEX IF NOT EXISTS idx_files_created_at ON files(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_highlights_file_id ON highlights(file_id);
@@ -71,6 +75,7 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_themes_created_at ON themes(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_insights_created_at ON insights(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_annotations_created_at ON annotations(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_annotations_project_id ON annotations(project_id);
   `);
 }
 

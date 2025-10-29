@@ -14,7 +14,22 @@ export default function insightsRoutes(pool) {
     expanded: r.expanded ?? undefined,
   });
 
-  router.get('/', asyncHandler(async (_req, res) => {
+  router.get('/', asyncHandler(async (req, res) => {
+    const { projectId } = req.query;
+    if (projectId) {
+      const r = await pool.query(
+        `SELECT DISTINCT i.* FROM insights i
+         JOIN LATERAL unnest(i.theme_ids) AS tid ON true
+         JOIN themes t ON t.id = tid
+         JOIN LATERAL unnest(t.highlight_ids) AS hid ON true
+         JOIN highlights h ON h.id = hid
+         JOIN files f ON f.id = h.file_id
+         WHERE f.project_id = $1
+         ORDER BY i.created_at DESC`,
+        [projectId]
+      );
+      return res.json(r.rows.map(map));
+    }
     const r = await pool.query('SELECT * FROM insights ORDER BY created_at DESC');
     res.json(r.rows.map(map));
   }));
