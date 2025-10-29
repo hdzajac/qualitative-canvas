@@ -1,8 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getFiles, getThemes, getInsights, getHighlights } from '@/services/api';
 import type { Theme, Insight, Highlight } from '@/types';
-import { Card } from '@/components/ui/card';
+import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
@@ -16,48 +16,81 @@ export default function Insights() {
   const { data: insights = [] } = useQuery<Insight[]>({ queryKey: ['insights', projectId], queryFn: getInsights, enabled: !!projectId });
 
   const fileIds = useMemo(() => new Set(files.map(f => f.id)), [files]);
-  const projectHighlightIds = useMemo(() => new Set(highlights.filter(h => fileIds.has(h.fileId)).map(h => h.id)), [highlights, fileIds]);
-  const highlightToFile = useMemo(() => {
-    const m = new Map<string, string>();
-    highlights.forEach(h => m.set(h.id, h.fileId));
-    return m;
-  }, [highlights]);
+  const projectHighlights = useMemo(() => highlights.filter(h => fileIds.has(h.fileId)), [highlights, fileIds]);
+  const highlightById = useMemo(() => new Map(projectHighlights.map(h => [h.id, h] as const)), [projectHighlights]);
+  const themeById = useMemo(() => new Map(themes.map(t => [t.id, t] as const)), [themes]);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const projectThemeIds = useMemo(
-    () => new Set(themes.filter(t => t.highlightIds.some(hid => projectHighlightIds.has(hid))).map(t => t.id)),
-    [themes, projectHighlightIds]
-  );
-
-  const filteredInsights = useMemo(
-    () => insights.filter(i => i.themeIds.some(tid => projectThemeIds.has(tid))),
-    [insights, projectThemeIds]
-  );
+  const toggle = (id: string) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
   return (
     <div className="container mx-auto p-6 space-y-4">
       <h1 className="text-xl font-extrabold uppercase tracking-wide">Insights</h1>
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {filteredInsights.map(i => {
-          // Find first source document via first theme -> first highlight
-          const theme = themes.find(t => i.themeIds.includes(t.id));
-          const firstH = theme?.highlightIds.find(hid => projectHighlightIds.has(hid));
-          const fileId = firstH ? highlightToFile.get(firstH) : undefined;
-          return (
-            <Card key={i.id} className="brutal-card p-3">
-              <div className="font-bold uppercase tracking-wide">{i.name}</div>
-              <div className="text-xs text-neutral-600 mt-1">Themes: {i.themeIds.length}</div>
-              {fileId && (
-                <div className="mt-2">
-                  <Button size="sm" variant="outline" className="rounded-none h-7 px-2" onClick={() => navigate(`/documents/${fileId}`)}>
-                    Open source document
-                  </Button>
-                </div>
-              )}
-            </Card>
-          );
-        })}
-        {filteredInsights.length === 0 && <div className="text-sm text-neutral-600">No insights yet.</div>}
-      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-8"> </TableHead>
+            <TableHead>Name</TableHead>
+            <TableHead>Themes</TableHead>
+            <TableHead>Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {insights.map(i => (
+            <>
+              <TableRow key={i.id} className="cursor-pointer" onClick={() => toggle(i.id)}>
+                <TableCell>{expanded[i.id] ? '-' : '+'}</TableCell>
+                <TableCell className="font-semibold">{i.name}</TableCell>
+                <TableCell>{i.themeIds.length}</TableCell>
+                <TableCell>
+                  {/* Open first source document via first theme -> first highlight */}
+                  {(() => {
+                    const firstTheme = themeById.get(i.themeIds[0]);
+                    const firstHighlightId = firstTheme?.highlightIds[0];
+                    const firstHighlight = firstHighlightId ? highlightById.get(firstHighlightId) : undefined;
+                    if (!firstHighlight) return null;
+                    return (
+                      <Button size="sm" variant="outline" className="rounded-none h-7 px-2" onClick={(e) => { e.stopPropagation(); navigate(`/documents/${firstHighlight.fileId}`); }}>
+                        Open source
+                      </Button>
+                    );
+                  })()}
+                </TableCell>
+              </TableRow>
+              {expanded[i.id] && i.themeIds.map(tid => {
+                const t = themeById.get(tid);
+                if (!t) return null;
+                return (
+                  <TableRow key={`${i.id}-${tid}`} className="bg-neutral-50">
+                    <TableCell />
+                    <TableCell colSpan={3}>
+                      <div className="font-semibold uppercase tracking-wide">{t.name}</div>
+                      <div className="mt-2 space-y-1">
+                        {t.highlightIds.map(hid => {
+                          const h = highlightById.get(hid);
+                          if (!h) return null;
+                          return (
+                            <div key={`${tid}-${hid}`} className="text-sm">
+                              <span className="text-xs text-neutral-500">{h.codeName}: </span>
+                              {h.text}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </>
+          ))}
+          {insights.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={4} className="text-sm text-neutral-600">No insights yet.</TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
     </div>
   );
 }
