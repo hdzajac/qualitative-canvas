@@ -33,7 +33,10 @@ import type { UploadedFile, Highlight, Theme, Insight, Annotation } from '@/type
  * DELETE /api/annotations/:id    - Delete an annotation
  */
 
-const BASE_URL = 'http://localhost:3000/api';
+// Update: use Vite env for API base URL in Docker or local dev
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL)
+  || (typeof window !== 'undefined' ? `${window.location.origin}` : 'http://localhost:5000');
+const BASE_URL = `${API_BASE.replace(/\/$/, '')}/api`;
 
 // Mock storage for development (remove when backend is ready)
 const mockStorage = {
