@@ -19,7 +19,7 @@ import { AnnotationNode } from './nodes/AnnotationNode';
 import { Highlight, Theme, Insight, Annotation } from '@/types';
 import { Button } from './ui/button';
 import { StickyNote } from 'lucide-react';
-import { createAnnotation } from '@/services/api';
+import { createAnnotation, createTheme, createInsight } from '@/services/api';
 import { toast } from 'sonner';
 
 interface CanvasProps {
@@ -41,6 +41,8 @@ const nodeTypes: NodeTypes = {
 export const Canvas = ({ highlights, themes, insights, annotations, onUpdate, onSelectionChange }: CanvasProps) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [selectedCodeIds, setSelectedCodeIds] = useState<string[]>([]);
+  const [selectedThemeIds, setSelectedThemeIds] = useState<string[]>([]);
 
   // Build nodes from data
   const buildNodes = useCallback(() => {
@@ -152,10 +154,48 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate, on
 
   return (
     <div className="relative w-full h-full">
-      <div className="absolute top-4 right-4 z-10 flex gap-2">
-        <Button onClick={handleAddAnnotation} size="sm">
+      <div className="absolute top-4 right-4 z-10 flex gap-2 bg-white/80 p-2 border-2 border-black">
+        <Button size="sm" onClick={handleAddAnnotation}>
           <StickyNote className="w-4 h-4 mr-2" />
           Add Note
+        </Button>
+        <input
+          placeholder="Theme name"
+          className="h-8 border-2 border-black px-2"
+          id="canvas-theme-name"
+        />
+        <Button
+          size="sm"
+          className="brutal-button"
+          disabled={selectedCodeIds.length === 0}
+          onClick={async () => {
+            const name = (document.getElementById('canvas-theme-name') as HTMLInputElement)?.value?.trim();
+            if (!name) return;
+            await createTheme({ name, highlightIds: selectedCodeIds });
+            toast.success('Theme created');
+            onUpdate();
+          }}
+        >
+          Create Theme ({selectedCodeIds.length})
+        </Button>
+        <input
+          placeholder="Insight name"
+          className="h-8 border-2 border-black px-2"
+          id="canvas-insight-name"
+        />
+        <Button
+          size="sm"
+          className="brutal-button"
+          disabled={selectedThemeIds.length === 0}
+          onClick={async () => {
+            const name = (document.getElementById('canvas-insight-name') as HTMLInputElement)?.value?.trim();
+            if (!name) return;
+            await createInsight({ name, themeIds: selectedThemeIds });
+            toast.success('Insight created');
+            onUpdate();
+          }}
+        >
+          Create Insight ({selectedThemeIds.length})
         </Button>
       </div>
 
@@ -168,15 +208,11 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate, on
         nodeTypes={nodeTypes}
         fitView
         onSelectionChange={(sel) => {
-          if (!onSelectionChange) return;
           const selectedNodes = sel.nodes ?? [];
-          const codeIds = selectedNodes
-            .filter((n) => n.id.startsWith('code-'))
-            .map((n) => n.id.replace('code-', ''));
-          const themeIds = selectedNodes
-            .filter((n) => n.id.startsWith('theme-'))
-            .map((n) => n.id.replace('theme-', ''));
-          onSelectionChange({ codeIds, themeIds });
+          const codeIds = selectedNodes.filter(n => n.id.startsWith('code-')).map(n => n.id.replace('code-', ''));
+          const themeIds = selectedNodes.filter(n => n.id.startsWith('theme-')).map(n => n.id.replace('theme-', ''));
+          setSelectedCodeIds(codeIds);
+          setSelectedThemeIds(themeIds);
         }}
       >
         <Background />

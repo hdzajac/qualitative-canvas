@@ -6,7 +6,6 @@ import { Label } from '@/components/ui/label';
 import { Highlight } from '@/types';
 import { createHighlight } from '@/services/api';
 import { toast } from 'sonner';
-import { Highlighter } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 interface TextViewerProps {
@@ -107,8 +106,8 @@ export const TextViewer = ({ fileId, content, highlights, onHighlightCreated }: 
       parts.push(
         <mark
           key={`highlight-${highlight.id}`}
+          id={`hl-${highlight.id}`}
           className="bg-primary/20 rounded px-0.5 cursor-pointer hover:bg-primary/30 transition-colors"
-          title={highlight.codeName}
         >
           {content.substring(highlight.startOffset, highlight.endOffset)}
         </mark>
@@ -133,6 +132,7 @@ export const TextViewer = ({ fileId, content, highlights, onHighlightCreated }: 
           ref={textRef}
           className="prose prose-sm max-w-none whitespace-pre-wrap leading-relaxed select-text"
           onMouseUp={handleSelection}
+          onContextMenu={(e) => e.preventDefault()}
         >
           {renderHighlightedText()}
         </div>
@@ -150,7 +150,7 @@ export const TextViewer = ({ fileId, content, highlights, onHighlightCreated }: 
 
       {/* Side sheet for adding code name */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="rounded-none border-l-4 border-black">
+        <SheetContent side="right" className="rounded-none border-l-4 border-black sm:max-w-sm">
           <SheetHeader>
             <SheetTitle className="uppercase tracking-wide">Add Code</SheetTitle>
           </SheetHeader>
