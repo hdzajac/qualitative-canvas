@@ -41,23 +41,23 @@ export default function Insights() {
     return (
         <div className="container mx-auto p-6 space-y-4">
             <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem>
-                  <BreadcrumbLink href="/">Home</BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator />
-                <BreadcrumbItem>
-                  <BreadcrumbLink href="/projects">Projects</BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>{projectName}</BreadcrumbPage>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Insights</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
+                <BreadcrumbList>
+                    <BreadcrumbItem>
+                        <BreadcrumbLink href="/">Home</BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                        <BreadcrumbLink href="/projects">Projects</BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                        <BreadcrumbPage>{projectName}</BreadcrumbPage>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                        <BreadcrumbPage>Insights</BreadcrumbPage>
+                    </BreadcrumbItem>
+                </BreadcrumbList>
             </Breadcrumb>
 
             <h1 className="text-xl font-extrabold uppercase tracking-wide">Insights</h1>
@@ -75,60 +75,61 @@ export default function Insights() {
                     {insights.map(ins => {
                         const resolvedHighlightIds = resolveHighlightIds(ins);
                         return (
-                        <Fragment key={ins.id}>
-                            <TableRow className="cursor-pointer" onClick={() => toggle(ins.id)}>
-                                <TableCell>{expanded[ins.id] ? '-' : '+'}</TableCell>
-                                <TableCell className="font-semibold">{ins.name}</TableCell>
-                                <TableCell>{resolvedHighlightIds.length}</TableCell>
-                                <TableCell>
-                                    <div className="flex items-center gap-2 justify-end">
-                                        {resolvedHighlightIds.length > 0 && (() => {
-                                            const first = highlightMap.get(resolvedHighlightIds[0]);
-                                            if (!first) return null;
-                                            return (
-                                                <Button size="sm" variant="outline" className="rounded-none h-7 px-2" onClick={(e) => { e.stopPropagation(); navigate(`/documents/${first.fileId}`); }}>
-                                                    Open source
-                                                </Button>
-                                            );
-                                        })()}
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button size="icon" variant="ghost" className="h-7 w-7 p-0" onClick={(e) => e.stopPropagation()}>
-                                                    <MoreHorizontal className="w-4 h-4" />
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                <DropdownMenuItem
-                                                    className="text-red-600"
-                                                    onClick={async (e) => {
-                                                        e.stopPropagation();
-                                                        if (!confirm('Delete this insight?')) return;
-                                                        await deleteInsight(ins.id);
-                                                        qc.invalidateQueries({ queryKey: ['insights', projectId] });
-                                                    }}
-                                                >
-                                                    Delete
-                                                </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    </div>
-                                </TableCell>
-                            </TableRow>
-                            {expanded[ins.id] && resolvedHighlightIds.map((hid, idx) => {
-                                const h = highlightMap.get(hid);
-                                if (!h) return null;
-                                return (
-                                    <TableRow key={`${ins.id}-${hid}-${idx}`} className="bg-neutral-50">
-                                        <TableCell />
-                                        <TableCell colSpan={3}>
-                                            <div className="text-xs text-neutral-500">{h.codeName}</div>
-                                            <div className="text-sm">{h.text}</div>
-                                        </TableCell>
-                                    </TableRow>
-                                );
-                            })}
-                        </Fragment>
-                    );})}
+                            <Fragment key={ins.id}>
+                                <TableRow className="cursor-pointer" onClick={() => toggle(ins.id)}>
+                                    <TableCell>{expanded[ins.id] ? '-' : '+'}</TableCell>
+                                    <TableCell className="font-semibold">{ins.name}</TableCell>
+                                    <TableCell>{resolvedHighlightIds.length}</TableCell>
+                                    <TableCell>
+                                        <div className="flex items-center gap-2 justify-end">
+                                            {resolvedHighlightIds.length > 0 && (() => {
+                                                const first = highlightMap.get(resolvedHighlightIds[0]);
+                                                if (!first) return null;
+                                                return (
+                                                    <Button size="sm" variant="outline" className="rounded-none h-7 px-2" onClick={(e) => { e.stopPropagation(); navigate(`/documents/${first.fileId}`); }}>
+                                                        Open source
+                                                    </Button>
+                                                );
+                                            })()}
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button size="icon" variant="ghost" className="h-7 w-7 p-0" onClick={(e) => e.stopPropagation()}>
+                                                        <MoreHorizontal className="w-4 h-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem
+                                                        className="text-red-600"
+                                                        onClick={async (e) => {
+                                                            e.stopPropagation();
+                                                            if (!confirm('Delete this insight?')) return;
+                                                            await deleteInsight(ins.id);
+                                                            qc.invalidateQueries({ queryKey: ['insights', projectId] });
+                                                        }}
+                                                    >
+                                                        Delete
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </div>
+                                    </TableCell>
+                                </TableRow>
+                                {expanded[ins.id] && resolvedHighlightIds.map((hid, idx) => {
+                                    const h = highlightMap.get(hid);
+                                    if (!h) return null;
+                                    return (
+                                        <TableRow key={`${ins.id}-${hid}-${idx}`} className="bg-neutral-50">
+                                            <TableCell />
+                                            <TableCell colSpan={3}>
+                                                <div className="text-xs text-neutral-500">{h.codeName}</div>
+                                                <div className="text-sm">{h.text}</div>
+                                            </TableCell>
+                                        </TableRow>
+                                    );
+                                })}
+                            </Fragment>
+                        );
+                    })}
                     {insights.length === 0 && (
                         <TableRow>
                             <TableCell colSpan={4} className="text-sm text-neutral-600">No insights yet.</TableCell>

@@ -5,6 +5,9 @@ import { MousePointer2, Hand, Type as TypeIcon, X as CloseIcon, Text as TextSize
 import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation, deleteHighlight, deleteTheme, deleteInsight, deleteAnnotation } from '@/services/api';
 import { toast } from 'sonner';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
+import { NodeKind, Tool, NodeView, DEFAULTS, ResizeCorner } from './canvas/CanvasTypes';
+import { clamp, toggleInArray, union, hitTestNode, intersects } from './canvas/CanvasUtils';
+import { drawGrid, drawOrthogonal, roundRect, drawNode } from './canvas/CanvasDrawing';
 
 interface CanvasProps {
   highlights: Highlight[];
@@ -13,31 +16,6 @@ interface CanvasProps {
   annotations: Annotation[];
   onUpdate: () => void;
 }
-
-type Tool = 'select' | 'hand' | 'text';
-type NodeKind = 'code' | 'theme' | 'insight' | 'annotation';
-type ResizeCorner = 'nw' | 'ne' | 'se' | 'sw';
-
-type NodeView = {
-  id: string; // underlying id (e.g. highlight.id)
-  kind: NodeKind;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  // attach original entity for context
-  highlight?: Highlight;
-  theme?: Theme;
-  insight?: Insight;
-  annotation?: Annotation;
-};
-
-const DEFAULTS = {
-  code: { w: 280, h: 140 },
-  theme: { w: 320, h: 160 },
-  insight: { w: 360, h: 180 },
-  annotation: { w: 220, h: 110 },
-};
 
 export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: CanvasProps) => {
   // Canvas and size
@@ -49,6 +27,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
   // Viewport transform
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 }); // screen-space offset
+  const firstFitDone = useRef(false);
 
   // Tools and interaction
   const [tool, setTool] = useState<Tool>('select');
@@ -62,30 +41,30 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
   // Dragging
   const dragState = useRef<
     | {
-        mode: 'node';
-        nodeIdx: number;
-        startWorld: { x: number; y: number };
-        startNode: { x: number; y: number };
-        moved: boolean;
-      }
+      mode: 'node';
+      nodeIdx: number;
+      startWorld: { x: number; y: number };
+      startNode: { x: number; y: number };
+      moved: boolean;
+    }
     | {
-        mode: 'pan';
-        startOffset: { x: number; y: number };
-        startClient: { x: number; y: number };
-      }
+      mode: 'pan';
+      startOffset: { x: number; y: number };
+      startClient: { x: number; y: number };
+    }
     | {
-        mode: 'select';
-        startClient: { x: number; y: number };
-        rect: { x: number; y: number; w: number; h: number };
-      }
+      mode: 'select';
+      startClient: { x: number; y: number };
+      rect: { x: number; y: number; w: number; h: number };
+    }
     | {
-        mode: 'resize';
-        nodeIdx: number;
-        corner: ResizeCorner;
-        startWorld: { x: number; y: number };
-        startRect: { x: number; y: number; w: number; h: number };
-        moved: boolean;
-      }
+      mode: 'resize';
+      nodeIdx: number;
+      corner: ResizeCorner;
+      startWorld: { x: number; y: number };
+      startRect: { x: number; y: number; w: number; h: number };
+      moved: boolean;
+    }
     | null
   >(null);
 
@@ -101,6 +80,30 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     nodes.forEach((n, i) => m.set(`${n.kind}:${n.id}`, i));
     return m;
   }, [nodes]);
+
+  // Fit to content helper
+  const fitToContent = useCallback(() => {
+    if (!nodes.length || !size.w || !size.h) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      minX = Math.min(minX, n.x);
+      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + n.w);
+      maxY = Math.max(maxY, n.y + n.h);
+    }
+    if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) return;
+    const pad = 40;
+    const worldW = Math.max(1, maxX - minX);
+    const worldH = Math.max(1, maxY - minY);
+    const scaleX = (size.w - pad * 2) / worldW;
+    const scaleY = (size.h - pad * 2) / worldH;
+    const newZoom = clamp(Math.min(scaleX, scaleY), 0.2, 2.5);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const newOffset = { x: size.w / 2 - cx * newZoom, y: size.h / 2 - cy * newZoom };
+    setZoom(newZoom);
+    setOffset(newOffset);
+  }, [nodes, size.w, size.h]);
 
   useEffect(() => {
     const newNodes: NodeView[] = [];
@@ -169,6 +172,15 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     });
   }, [highlights, themes, insights, annotations]);
 
+  // Auto-fit lifecycle: reset on project change, then fit once when ready
+  useEffect(() => { firstFitDone.current = false; }, [projectId]);
+  useEffect(() => {
+    if (!firstFitDone.current && nodes.length > 0 && size.w > 0 && size.h > 0) {
+      fitToContent();
+      firstFitDone.current = true;
+    }
+  }, [nodes.length, size.w, size.h, fitToContent]);
+
   // Resize handling with DPR scaling
   useEffect(() => {
     const el = wrapperRef.current;
@@ -235,13 +247,42 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     ctx.scale(zoom, zoom);
 
     // Edges under nodes
-    drawEdges(ctx, nodes);
+    // Re-implement drawEdges using extracted helpers
+    const byKey = new Map(nodes.map((n) => [`${n.kind}:${n.id}`, n] as const));
+    ctx.save();
+    ctx.strokeStyle = '#b1b1b7';
+    ctx.lineWidth = 1;
+    themes.forEach((t) => {
+      t.highlightIds.forEach((hid) => {
+        const a = byKey.get(`code:${hid}`);
+        const b = byKey.get(`theme:${t.id}`);
+        if (!a || !b) return;
+        const ax = a.x + a.w / 2;
+        const ay = a.y + a.h;
+        const bx = b.x + b.w / 2;
+        const by = b.y;
+        drawOrthogonal(ctx, ax, ay, bx, by);
+      });
+    });
+    insights.forEach((i) => {
+      i.themeIds.forEach((tid) => {
+        const a = byKey.get(`theme:${tid}`);
+        const b = byKey.get(`insight:${i.id}`);
+        if (!a || !b) return;
+        const ax = a.x + a.w / 2;
+        const ay = a.y + a.h;
+        const bx = b.x + b.w / 2;
+        const by = b.y;
+        drawOrthogonal(ctx, ax, ay, bx, by);
+      });
+    });
+    ctx.restore();
 
     // Nodes
-    nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds));
+    nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize));
 
     ctx.restore();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.w, size.h, offset.x, offset.y, zoom, nodes, selectedCodeIds, selectedThemeIds]);
 
   // Redraw when state changes
@@ -259,6 +300,27 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     (sx: number, sy: number) => ({ x: (sx - offset.x) / zoom, y: (sy - offset.y) / zoom }),
     [zoom, offset.x, offset.y]
   );
+
+  // Helpers to position new nodes
+  const viewportCenterWorld = useCallback(() => screenToWorld(size.w / 2, size.h / 2), [screenToWorld, size.w, size.h]);
+  const selectionBBox = useCallback((kinds: NodeKind[]) => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      const ok = (kinds.includes('code') && selectedCodeIds.includes(n.id) && n.kind === 'code') || (kinds.includes('theme') && selectedThemeIds.includes(n.id) && n.kind === 'theme');
+      if (!ok) continue;
+      minX = Math.min(minX, n.x);
+      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + n.w);
+      maxY = Math.max(maxY, n.y + n.h);
+    }
+    if (!isFinite(minX)) return null;
+    return { minX, minY, maxX, maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+  }, [nodes, selectedCodeIds, selectedThemeIds]);
+
+  const placeRightOf = useCallback((bbox: { maxX: number; cy: number }, w: number, h: number) => {
+    const margin = 40;
+    return { x: bbox.maxX + margin, y: bbox.cy - h / 2 };
+  }, []);
 
   // onWheel handler bound to current state
   const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -314,147 +376,6 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
   //   ctx.restore();
   // }
 
-  function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number, step: number, color: string) {
-    ctx.save();
-    ctx.fillStyle = color;
-    for (let x = 0; x < w; x += step) {
-      for (let y = 0; y < h; y += step) {
-        ctx.fillRect(x, y, 1, 1);
-      }
-    }
-    ctx.restore();
-  }
-
-  function drawEdges(ctx: CanvasRenderingContext2D, ns: NodeView[]) {
-    const byKey = new Map(ns.map((n) => [`${n.kind}:${n.id}`, n] as const));
-    ctx.save();
-    ctx.strokeStyle = '#b1b1b7';
-    ctx.lineWidth = 1; // scale with zoom
-
-    // code -> theme
-    themes.forEach((t) => {
-      t.highlightIds.forEach((hid) => {
-        const a = byKey.get(`code:${hid}`);
-        const b = byKey.get(`theme:${t.id}`);
-        if (!a || !b) return;
-        const ax = a.x + a.w / 2;
-        const ay = a.y + a.h;
-        const bx = b.x + b.w / 2;
-        const by = b.y;
-        drawOrthogonal(ctx, ax, ay, bx, by);
-      });
-    });
-
-    // theme -> insight
-    insights.forEach((i) => {
-      i.themeIds.forEach((tid) => {
-        const a = byKey.get(`theme:${tid}`);
-        const b = byKey.get(`insight:${i.id}`);
-        if (!a || !b) return;
-        const ax = a.x + a.w / 2;
-        const ay = a.y + a.h;
-        const bx = b.x + b.w / 2;
-        const by = b.y;
-        drawOrthogonal(ctx, ax, ay, bx, by);
-      });
-    });
-
-    ctx.restore();
-  }
-
-  function drawOrthogonal(ctx: CanvasRenderingContext2D, ax: number, ay: number, bx: number, by: number) {
-    const midY = (ay + by) / 2;
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(ax, midY);
-    ctx.lineTo(bx, midY);
-    ctx.lineTo(bx, by);
-    ctx.stroke();
-  }
-
-  function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-    const radius = Math.min(r, w / 2, h / 2);
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.arcTo(x + w, y, x + w, y + h, radius);
-    ctx.arcTo(x + w, y + h, x, y + h, radius);
-    ctx.arcTo(x, y + h, x, y, radius);
-    ctx.arcTo(x, y, x + w, y, radius);
-    ctx.closePath();
-  }
-
-  function drawNode(
-    ctx: CanvasRenderingContext2D,
-    n: NodeView,
-    selectedCodeIds: string[],
-    selectedThemeIds: string[]
-  ) {
-    ctx.save();
-    const radius = 10;
-    const isSelected = (n.kind === 'code' && selectedCodeIds.includes(n.id)) || (n.kind === 'theme' && selectedThemeIds.includes(n.id));
-
-    // Energetic accents
-    const accent =
-      n.kind === 'code' ? '#2563eb' : // blue
-      n.kind === 'theme' ? '#10b981' : // emerald
-      n.kind === 'insight' ? '#f59e0b' : // amber
-      '#ef4444'; // red for notes
-
-    // Elevated selected shadow and border
-    if (isSelected) {
-      ctx.shadowColor = 'rgba(0,0,0,0.25)';
-      ctx.shadowBlur = 14;
-      ctx.shadowOffsetY = 6;
-    } else {
-      ctx.shadowColor = 'rgba(0,0,0,0.06)';
-      ctx.shadowBlur = 6;
-      ctx.shadowOffsetY = 3;
-    }
-
-    // Body
-    ctx.fillStyle = '#fff';
-    ctx.strokeStyle = isSelected ? accent : '#111827';
-    ctx.lineWidth = isSelected ? 3 : 1.5;
-    roundRect(ctx, n.x, n.y, n.w, n.h, radius);
-    ctx.fill();
-    ctx.stroke();
-
-    // Accent bar
-    ctx.fillStyle = accent;
-    ctx.fillRect(n.x, n.y, 6, n.h);
-
-    // Header actions (top-right icons area)
-    const iconY = n.y + 8;
-    const iconX = n.x + n.w - 24;
-    // Draw an external/open icon placeholder
-    ctx.fillStyle = '#6b7280';
-    ctx.font = '12px ui-sans-serif, system-ui, -apple-system';
-    ctx.fillText('↗', iconX, iconY + 10);
-
-    // Title and meta
-    const fontSize = getFontSize(n);
-    ctx.fillStyle = '#111827';
-    ctx.font = `${fontSize}px ui-sans-serif, system-ui, -apple-system`;
-    if (n.kind === 'code' && n.highlight) {
-      ctx.fillText(n.highlight.codeName || 'Untitled', n.x + 12, n.y + 22);
-    } else if (n.kind === 'theme' && n.theme) {
-      ctx.fillText(n.theme.name, n.x + 12, n.y + 22);
-    } else if (n.kind === 'insight' && n.insight) {
-      ctx.fillText(n.insight.name, n.x + 12, n.y + 22);
-    } else if (n.kind === 'annotation' && n.annotation) {
-      wrapText(ctx, n.annotation.content || 'New text', n.x + 12, n.y + 22, n.w - 24, 14, 6);
-    }
-
-    // Bottom-right type label
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#9ca3af';
-    const typeLabel = n.kind === 'code' ? 'Code' : n.kind === 'theme' ? 'Theme' : n.kind === 'insight' ? 'Insight' : 'Note';
-    ctx.fillText(typeLabel, n.x + n.w - 8, n.y + n.h - 8);
-    ctx.textAlign = 'left';
-
-    ctx.restore();
-  }
-
   // hitTest for top-right open icon
   function isInOpenIcon(n: NodeView, wx: number, wy: number) {
     return wx >= n.x + n.w - 28 && wx <= n.x + n.w - 8 && wy >= n.y + 6 && wy <= n.y + 20;
@@ -492,7 +413,13 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
       const world = screenToWorld(sx, sy);
       if (isPanning) { setHoverCursor('grab'); return; }
       const idx = hitTestNode(world.x, world.y, nodes);
-      setHoverCursor(idx !== -1 ? 'move' : 'default');
+      if (idx !== -1) {
+        const n = nodes[idx];
+        if (isInOpenIcon(n, world.x, world.y)) { setHoverCursor('pointer'); return; }
+        setHoverCursor('move');
+      } else {
+        setHoverCursor('default');
+      }
       return;
     }
 
@@ -525,7 +452,36 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
       const r = dragState.current.rect;
       r.w = sx - dragState.current.startClient.x;
       r.h = sy - dragState.current.startClient.y;
-      draw();
+      // draw selection rectangle overlay
+      const canvas = canvasRef.current; if (!canvas) return;
+      const ctx = canvas.getContext('2d'); if (!ctx) return;
+      const dpr = dprRef.current;
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      // redraw scene
+      ctx.clearRect(0, 0, size.w, size.h);
+      drawGrid(ctx, size.w, size.h, 16, '#e5e7eb');
+      ctx.translate(offset.x, offset.y); ctx.scale(zoom, zoom);
+      const byKey = new Map(nodes.map((n) => [`${n.kind}:${n.id}`, n] as const));
+      ctx.save(); ctx.strokeStyle = '#b1b1b7'; ctx.lineWidth = 1;
+      themes.forEach((t) => { t.highlightIds.forEach((hid) => { const a = byKey.get(`code:${hid}`); const b = byKey.get(`theme:${t.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
+      insights.forEach((i) => { i.themeIds.forEach((tid) => { const a = byKey.get(`theme:${tid}`); const b = byKey.get(`insight:${i.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
+      ctx.restore();
+      nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize));
+      ctx.restore();
+      // draw marquee in screen space
+      const x = Math.min(dragState.current.startClient.x, sx);
+      const y = Math.min(dragState.current.startClient.y, sy);
+      const w = Math.abs(dragState.current.startClient.x - sx);
+      const h = Math.abs(dragState.current.startClient.y - sy);
+      const ctx2 = canvas.getContext('2d'); if (!ctx2) return;
+      ctx2.save();
+      ctx2.scale(dpr, dpr);
+      ctx2.strokeStyle = '#111827';
+      ctx2.setLineDash([5, 5]);
+      ctx2.lineWidth = 1.5;
+      ctx2.strokeRect(x, y, w, h);
+      ctx2.restore();
     }
   };
 
@@ -608,6 +564,17 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
 
   return (
     <div ref={wrapperRef} className="relative w-full h-full select-none">
+      {/* Canvas layer */}
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0"
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onWheel={onWheel}
+        style={{ cursor: hoverCursor }}
+      />
+
       <div className="absolute left-3 top-20 z-20 flex flex-col gap-2">
         <Button size="icon" variant={tool === 'select' ? 'default' : 'outline'} className="rounded-none" onClick={() => setTool('select')} title="Select (V)">
           <MousePointer2 className="w-4 h-4" />
@@ -618,16 +585,20 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
         <Button size="icon" variant={tool === 'text' ? 'default' : 'outline'} className="rounded-none" onClick={() => setTool('text')} title="Text (T)">
           <TypeIcon className="w-4 h-4" />
         </Button>
+        {/* Fit to content */}
+        <Button size="sm" variant="outline" className="rounded-none" onClick={fitToContent} title="Fit to content">
+          Fit
+        </Button>
       </div>
 
       <div className="absolute z-20 top-3 left-1/2 -translate-x-1/2 bg-white border-2 border-black px-2 py-1 flex items-center gap-2">
         <TextSizeIcon className="w-4 h-4" />
         <select className="text-sm outline-none" value={fontSize} onChange={(e) => setFontSize(parseInt(e.target.value) || 12)}>
-          {[10,12,14,16,18,20,24].map(sz => <option key={sz} value={sz}>{sz}px</option>)}
+          {[10, 12, 14, 16, 18, 20, 24].map(sz => <option key={sz} value={sz}>{sz}px</option>)}
         </select>
         {(() => {
-          const idx = selectedCodeIds.length === 1 ? nodes.findIndex(n => n.kind==='code' && n.id===selectedCodeIds[0]) : selectedThemeIds.length===1 ? nodes.findIndex(n=>n.kind==='theme' && n.id===selectedThemeIds[0]) : -1;
-          const n = idx>=0 ? nodes[idx] : null;
+          const idx = selectedCodeIds.length === 1 ? nodes.findIndex(n => n.kind === 'code' && n.id === selectedCodeIds[0]) : selectedThemeIds.length === 1 ? nodes.findIndex(n => n.kind === 'theme' && n.id === selectedThemeIds[0]) : -1;
+          const n = idx >= 0 ? nodes[idx] : null;
           return n ? <Button size="sm" className="brutal-button" onClick={() => persistFontSize(n, fontSize)}>Apply</Button> : null;
         })()}
       </div>
@@ -644,7 +615,11 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
                 onClick={async () => {
                   const name = prompt('Theme name');
                   if (!name) return;
-                  await createTheme({ name, highlightIds: selectedCodeIds, size: DEFAULTS.theme });
+                  // compute desired position: to the right of selected codes, else viewport center
+                  const bbox = selectionBBox(['code']);
+                  const defaultW = DEFAULTS.theme.w; const defaultH = DEFAULTS.theme.h;
+                  const pos = bbox ? placeRightOf(bbox, defaultW, defaultH) : viewportCenterWorld();
+                  await createTheme({ name, highlightIds: selectedCodeIds, size: DEFAULTS.theme, position: pos });
                   toast.success('Theme created');
                   setSelectedCodeIds([]);
                   onUpdate();
@@ -663,7 +638,10 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
                 onClick={async () => {
                   const name = prompt('Insight name');
                   if (!name) return;
-                  await createInsight({ name, themeIds: selectedThemeIds, size: DEFAULTS.insight });
+                  const bbox = selectionBBox(['theme']);
+                  const defaultW = DEFAULTS.insight.w; const defaultH = DEFAULTS.insight.h;
+                  const pos = bbox ? placeRightOf(bbox, defaultW, defaultH) : viewportCenterWorld();
+                  await createInsight({ name, themeIds: selectedThemeIds, size: DEFAULTS.insight, position: pos });
                   toast.success('Insight created');
                   setSelectedThemeIds([]);
                   onUpdate();
@@ -676,154 +654,83 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
         </div>
       )}
 
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 w-full h-full"
-        onWheel={onWheel}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        style={{ cursor: (dragState.current?.mode === 'pan' ? 'grabbing' : (isPanning ? 'grab' : hoverCursor)) as React.CSSProperties['cursor'] }}
-      />
+      {/* Size controls for single selection (width presets + font size per-card) */}
+      {(() => {
+        const singleCode = selectedCodeIds.length === 1 ? nodes.find(n => n.kind === 'code' && n.id === selectedCodeIds[0]) : undefined;
+        const singleTheme = (!singleCode && selectedThemeIds.length === 1) ? nodes.find(n => n.kind === 'theme' && n.id === selectedThemeIds[0]) : undefined;
+        const n = singleCode || singleTheme;
+        if (!n) return null;
+        const fs = getFontSize(n);
+        return (
+          <div className="absolute right-3 top-3 z-20 bg-white border-2 border-black p-2 flex items-center gap-2">
+            <span className="text-xs">Width</span>
+            <Button size="sm" variant={n.w <= 210 ? 'default' : 'outline'} className="rounded-none h-6 px-2" onClick={() => { setNodes(prev => prev.map(nn => nn === n ? { ...nn, w: 200 } : nn)); draw(); }}>200</Button>
+            <Button size="sm" variant={n.w >= 290 ? 'default' : 'outline'} className="rounded-none h-6 px-2" onClick={() => { setNodes(prev => prev.map(nn => nn === n ? { ...nn, w: 300 } : nn)); draw(); }}>300</Button>
+            <span className="text-xs ml-2">Text</span>
+            <select className="text-xs border border-black px-1 py-0.5" value={fs} onChange={(e) => {
+              const val = parseInt(e.target.value) || 12;
+              setNodes(prev => prev.map(nn => nn === n ? (n.kind === 'code' ? { ...nn, highlight: { ...nn.highlight!, style: { ...(nn.highlight?.style || {}), fontSize: val } } } : n.kind === 'theme' ? { ...nn, theme: { ...nn.theme!, style: { ...(nn.theme?.style || {}), fontSize: val } } } : n.kind === 'insight' ? { ...nn, insight: { ...nn.insight!, style: { ...(nn.insight?.style || {}), fontSize: val } } } : { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), fontSize: val } } }) : nn));
+              draw();
+            }}>
+              {[10, 12, 14, 16, 18, 20, 24].map(s => <option key={s} value={s}>{s}px</option>)}
+            </select>
+            <Button size="sm" className="brutal-button" onClick={async () => {
+              try {
+                if (n.kind === 'code') await updateHighlight(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.highlight?.style || {}), fontSize: getFontSize(n) } });
+                if (n.kind === 'theme') await updateTheme(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.theme?.style || {}), fontSize: getFontSize(n) } });
+                if (n.kind === 'insight') await updateInsight(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.insight?.style || {}), fontSize: getFontSize(n) } });
+                if (n.kind === 'annotation') await updateAnnotation(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.annotation?.style || {}), fontSize: getFontSize(n) } });
+                toast.success('Saved');
+                onUpdate();
+              } catch { toast.error('Save failed'); }
+            }}>Save</Button>
+          </div>
+        );
+      })()}
 
+      {/* Side Panel for open entity */}
       {openEntity && (
-        <div className="absolute inset-0 z-30 bg-black/40 backdrop-blur flex items-center justify-center p-6" onClick={() => setOpenEntity(null)}>
-          <div className="bg-white border-2 border-black max-w-2xl w-full max-h-[75vh] overflow-auto p-4 relative" onClick={(e) => e.stopPropagation()}>
-            <button className="absolute right-3 top-3 border border-black w-8 h-8 grid place-items-center bg-white hover:bg-muted" onClick={() => setOpenEntity(null)} aria-label="Close">
-              <CloseIcon className="w-4 h-4" />
-            </button>
+        <div className="absolute inset-y-0 right-0 z-30 w-[420px] bg-white border-l-4 border-black p-4 flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-2 mb-3">
+            <Button size="icon" variant="outline" className="rounded-none" onClick={() => setOpenEntity(null)} aria-label="Close"><CloseIcon className="w-4 h-4" /></Button>
+            <input className="border-2 border-black px-2 py-1 flex-1" defaultValue={(() => {
+              const n = nodes.find(nn => nn.kind === openEntity.kind && nn.id === openEntity.id);
+              if (!n) return '';
+              return n.kind === 'code' ? (n.highlight?.codeName || 'Untitled') : n.kind === 'theme' ? (n.theme?.name || '') : n.kind === 'insight' ? (n.insight?.name || '') : (n.annotation?.content || '');
+            })()} onBlur={async (e) => {
+              const val = e.target.value.trim();
+              const n = nodes.find(nn => nn.kind === openEntity.kind && nn.id === openEntity.id);
+              if (!n) return;
+              try {
+                if (n.kind === 'code') await updateHighlight(n.id, { codeName: val });
+                if (n.kind === 'theme') await updateTheme(n.id, { name: val });
+                if (n.kind === 'insight') await updateInsight(n.id, { name: val });
+                if (n.kind === 'annotation') await updateAnnotation(n.id, { content: val });
+                onUpdate();
+              } catch { toast.error('Save failed'); }
+            }} />
+            <Button size="sm" variant="destructive" className="rounded-none" onClick={async () => {
+              if (!confirm('Delete this item?')) return;
+              try {
+                if (openEntity.kind === 'code') await deleteHighlight(openEntity.id);
+                if (openEntity.kind === 'theme') await deleteTheme(openEntity.id);
+                if (openEntity.kind === 'insight') await deleteInsight(openEntity.id);
+                if (openEntity.kind === 'annotation') await deleteAnnotation(openEntity.id);
+                setOpenEntity(null);
+                onUpdate();
+              } catch { toast.error('Delete failed'); }
+            }}>Delete</Button>
+          </div>
+          <div className="overflow-auto pr-2">
             {(() => {
-              const n = nodes.find(nn => nn.kind===openEntity.kind && nn.id===openEntity.id);
+              const n = nodes.find(nn => nn.kind === openEntity.kind && nn.id === openEntity.id);
               if (!n) return null;
-              const title = n.kind==='code' ? (n.highlight?.codeName||'Untitled') : n.kind==='theme' ? n.theme?.name : n.kind==='insight' ? n.insight?.name : 'Note';
-              const body = n.kind==='code' ? (n.highlight?.text||'') : n.kind==='annotation' ? (n.annotation?.content||'') : '';
-              return (
-                <div>
-                  <div className="mb-3 flex items-center gap-2">
-                    <input className="border-2 border-black px-2 py-1 w-full" defaultValue={title as string} onBlur={async (e) => {
-                      const val = e.target.value.trim();
-                      try {
-                        if (n.kind==='code') await updateHighlight(n.id, { codeName: val });
-                        if (n.kind==='theme') await updateTheme(n.id, { name: val });
-                        if (n.kind==='insight') await updateInsight(n.id, { name: val });
-                        if (n.kind==='annotation') await updateAnnotation(n.id, { content: val });
-                        onUpdate();
-                      } catch { toast.error('Save failed'); }
-                    }} />
-                    <Button size="icon" variant="outline" className="rounded-none" onClick={async () => {
-                      if (!confirm('Delete?')) return;
-                      try {
-                        if (n.kind==='code') await deleteHighlight(n.id);
-                        if (n.kind==='theme') await deleteTheme(n.id);
-                        if (n.kind==='insight') await deleteInsight(n.id);
-                        if (n.kind==='annotation') await deleteAnnotation(n.id);
-                        setOpenEntity(null);
-                        onUpdate();
-                      } catch { toast.error('Delete failed'); }
-                    }}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  {body && <pre className="whitespace-pre-wrap text-sm leading-relaxed">{body}</pre>}
-                </div>
-              );
+              const body = n.kind === 'code' ? (n.highlight?.text || '') : n.kind === 'annotation' ? (n.annotation?.content || '') : '';
+              return body ? <pre className="whitespace-pre-wrap text-sm leading-relaxed">{body}</pre> : <div className="text-sm text-neutral-500">No content.</div>;
             })()}
           </div>
         </div>
       )}
     </div>
   );
-};
-
-// Helpers restored
-function wrapText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  lineHeight: number,
-  maxLines: number
-) {
-  const words = text.split(/\s+/);
-  let line = '';
-  let lineCount = 0;
-  for (let n = 0; n < words.length; n++) {
-    const testLine = line ? line + ' ' + words[n] : words[n];
-    const metrics = ctx.measureText(testLine);
-    if (metrics.width > maxWidth && n > 0) {
-      ctx.fillText(line, x, y);
-      line = words[n];
-      y += lineHeight;
-      lineCount++;
-      if (lineCount >= maxLines - 1) {
-        const remaining = words.slice(n).join(' ');
-        const ell = ellipsize(ctx, remaining, maxWidth);
-        ctx.fillText(ell, x, y);
-        return;
-      }
-    } else {
-      line = testLine;
-    }
-  }
-  ctx.fillText(line, x, y);
-}
-
-function ellipsize(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
-  let t = text;
-  while (ctx.measureText(t + '…').width > maxWidth && t.length > 0) {
-    t = t.slice(0, -1);
-  }
-  return t + '…';
-}
-
-function hitTestNode(wx: number, wy: number, list: NodeView[]) {
-  for (let i = list.length - 1; i >= 0; i--) {
-    const n = list[i];
-    if (wx >= n.x && wx <= n.x + n.w && wy >= n.y && wy <= n.y + n.h) return i;
-  }
-  return -1;
-}
-
-function intersects(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
-
-function toggleInArray(arr: string[], id: string, clearOthers: boolean) {
-  if (clearOthers) return arr.includes(id) ? [] : [id];
-  return arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id];
-}
-
-function union(a: string[], b: string[]) {
-  const s = new Set([...a, ...b]);
-  return Array.from(s);
-}
-
-function clamp(v: number, min: number, max: number) { return Math.max(min, Math.min(max, v)); }
-
-// onWheel restored
-// Event handlers
-const onWheelFactory = (
-  screenToWorld: (sx: number, sy: number) => { x: number; y: number },
-  zoom: number,
-  setZoom: (z: number) => void,
-  offset: { x: number; y: number },
-  setOffset: (o: { x: number; y: number }) => void,
-  canvasRef: React.RefObject<HTMLCanvasElement>
-) => (e: React.WheelEvent<HTMLCanvasElement>) => {
-  e.preventDefault();
-  const rect = canvasRef.current?.getBoundingClientRect();
-  if (!rect) return;
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-  const worldBefore = screenToWorld(mx, my);
-
-  const delta = -e.deltaY;
-  const factor = Math.exp(delta * 0.001);
-  const newZoom = clamp(zoom * factor, 0.2, 2.5);
-  setZoom(newZoom);
-
-  const newOffsetX = mx - worldBefore.x * newZoom;
-  const newOffsetY = my - worldBefore.y * newZoom;
-  setOffset({ x: newOffsetX, y: newOffsetY });
 };
