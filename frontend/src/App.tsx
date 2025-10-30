@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Link, useNavigate, Navigate, Outlet } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Link, useNavigate, Navigate, Outlet, useLocation } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import Projects from "./pages/Projects";
@@ -11,10 +11,11 @@ import DocumentDetail from "./pages/DocumentDetail";
 import CanvasPage from "./pages/CanvasPage";
 import Themes from "./pages/Themes";
 import Insights from "./pages/Insights";
+import HighlightsPage from "./pages/Highlights";
 import { getProjects } from "@/services/api";
 import { useSelectedProject } from "./hooks/useSelectedProject";
 import { Button } from "@/components/ui/button";
-import { useEffect, useMemo, PropsWithChildren } from "react";
+import { useEffect, useMemo } from "react";
 
 function GuardHome() {
   const navigate = useNavigate();
@@ -60,31 +61,41 @@ function ProjectBadge() {
 
 const queryClient = new QueryClient();
 
+function TopBar() {
+  const location = useLocation();
+  const active = (path: string) => location.pathname.startsWith(path) ? 'underline decoration-[3px] underline-offset-4' : 'hover:underline decoration-[3px] underline-offset-4';
+  return (
+    <div className="px-4 py-3 border-b-4 border-black bg-white text-black flex items-center gap-6 uppercase tracking-wide">
+      <Link className="font-extrabold text-xl" to="/">Qualitative Canvas</Link>
+      <nav className="flex gap-6">
+        <Link className={active('/projects')} to="/projects">Projects</Link>
+        <Link className={active('/documents')} to="/documents">Documents</Link>
+        <Link className={active('/highlights')} to="/highlights">Highlights</Link>
+        <Link className={active('/themes')} to="/themes">Themes</Link>
+        <Link className={active('/insights')} to="/insights">Insights</Link>
+        <Link className={active('/canvas')} to="/canvas">Canvas</Link>
+      </nav>
+      <div className="ml-auto">
+        <ProjectBadge />
+      </div>
+    </div>
+  );
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <div className="px-4 py-3 border-b-4 border-black bg-white text-black flex items-center gap-6 uppercase tracking-wide">
-          <Link className="font-extrabold text-xl" to="/">Qualitative Canvas</Link>
-          <nav className="flex gap-6">
-            <Link className="hover:underline decoration-[3px] underline-offset-4" to="/projects">Projects</Link>
-            <Link className="hover:underline decoration-[3px] underline-offset-4" to="/documents">Documents</Link>
-            <Link className="hover:underline decoration-[3px] underline-offset-4" to="/themes">Themes</Link>
-            <Link className="hover:underline decoration-[3px] underline-offset-4" to="/insights">Insights</Link>
-            <Link className="hover:underline decoration-[3px] underline-offset-4" to="/canvas">Canvas</Link>
-          </nav>
-          <div className="ml-auto">
-            <ProjectBadge />
-          </div>
-        </div>
+        <TopBar />
         <Routes>
           <Route path="/" element={<GuardHome />} />
           <Route path="/projects" element={<Projects />} />
           <Route element={<RequireProject />}>
             <Route path="/documents" element={<Documents />} />
             <Route path="/documents/:id" element={<DocumentDetail />} />
+            <Route path="/highlights" element={<HighlightsPage />} />
             <Route path="/themes" element={<Themes />} />
             <Route path="/insights" element={<Insights />} />
             <Route path="/canvas" element={<CanvasPage />} />

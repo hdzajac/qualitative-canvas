@@ -10,6 +10,8 @@ export default function themesRoutes(pool) {
     name: r.name,
     highlightIds: r.highlight_ids || [],
     position: r.position || undefined,
+    size: r.size || undefined,
+    style: r.style || undefined,
     createdAt: r.created_at.toISOString(),
   });
 
@@ -33,23 +35,23 @@ export default function themesRoutes(pool) {
   }));
 
   router.post('/', asyncHandler(async (req, res) => {
-    const { name, highlightIds, position } = req.body || {};
+    const { name, highlightIds, position, size, style } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Invalid body' });
     const id = uuidv4();
     const r = await pool.query(
-      `INSERT INTO themes (id, name, highlight_ids, position) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [id, name, Array.isArray(highlightIds) ? highlightIds : [], position ?? null]
+      `INSERT INTO themes (id, name, highlight_ids, position, size, style) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [id, name, Array.isArray(highlightIds) ? highlightIds : [], position ?? null, size ?? null, style ?? null]
     );
     res.status(201).json(map(r.rows[0]));
   }));
 
   router.put('/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { name, highlightIds, position } = req.body || {};
+    const { name, highlightIds, position, size, style } = req.body || {};
     const r = await pool.query(
-      `UPDATE themes SET name=COALESCE($2,name), highlight_ids=COALESCE($3,highlight_ids), position=COALESCE($4,position)
+      `UPDATE themes SET name=COALESCE($2,name), highlight_ids=COALESCE($3,highlight_ids), position=COALESCE($4,position), size=COALESCE($5,size), style=COALESCE($6,style)
        WHERE id=$1 RETURNING *`,
-      [id, name ?? null, Array.isArray(highlightIds) ? highlightIds : null, position ?? null]
+      [id, name ?? null, Array.isArray(highlightIds) ? highlightIds : null, position ?? null, size ?? null, style ?? null]
     );
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
     res.json(map(r.rows[0]));

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getFiles, deleteFile } from '@/services/api';
+import { getFiles, deleteFile, getProjects } from '@/services/api';
 import type { UploadedFile } from '@/types';
 import { FileUpload } from '@/components/FileUpload';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
@@ -12,6 +12,8 @@ export default function Documents() {
   const navigate = useNavigate();
   const [projectId] = useSelectedProject();
   const { data: files } = useQuery({ queryKey: ['files', projectId], queryFn: () => getFiles(projectId), enabled: !!projectId });
+  const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
+  const projectName = projects.find(p => p.id === projectId)?.name || 'Project';
 
   const remove = useMutation({
     mutationFn: (id: string) => deleteFile(id),
@@ -28,6 +30,10 @@ export default function Documents() {
           <BreadcrumbSeparator />
           <BreadcrumbItem>
             <BreadcrumbLink href="/projects">Projects</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>{projectName}</BreadcrumbPage>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>

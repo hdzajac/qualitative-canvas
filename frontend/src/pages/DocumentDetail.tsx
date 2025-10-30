@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getFile, getHighlights } from '@/services/api';
+import { getFile, getHighlights, getProjects } from '@/services/api';
 import type { Highlight } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TextViewer, TextViewerHandle } from '@/components/TextViewer';
@@ -12,11 +12,14 @@ export default function DocumentDetail() {
 
     const { data: file } = useQuery({ queryKey: ['file', id], queryFn: () => getFile(id!), enabled: !!id });
     const { data: highlights = [], refetch: refetchHighlights } = useQuery<Highlight[]>({ queryKey: ['highlights', id], queryFn: () => getHighlights({ fileId: id! }), enabled: !!id });
+    const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
 
     const viewerRef = useRef<TextViewerHandle>(null);
     const docHighlights = highlights; // already filtered by server
 
     if (!id || !file) return null;
+
+    const projectName = projects.find(p => p.id === file.projectId)?.name || 'Project';
 
     return (
         <div className="container mx-auto p-6 space-y-4">
@@ -28,6 +31,10 @@ export default function DocumentDetail() {
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
                         <BreadcrumbLink href="/projects">Projects</BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                        <BreadcrumbPage>{projectName}</BreadcrumbPage>
                     </BreadcrumbItem>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
@@ -50,7 +57,7 @@ export default function DocumentDetail() {
                     </Card>
                 </div>
 
-                <div className="basis-1/4">
+                <div className="basis-1/4 min-w-0">
                     <Card className="brutal-card">
                         <CardHeader><CardTitle>Highlights & Codes</CardTitle></CardHeader>
                         <CardContent>

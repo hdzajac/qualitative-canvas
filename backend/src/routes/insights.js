@@ -12,6 +12,8 @@ export default function insightsRoutes(pool) {
     position: r.position || undefined,
     createdAt: r.created_at.toISOString(),
     expanded: r.expanded ?? undefined,
+    size: r.size || undefined,
+    style: r.style || undefined,
   });
 
   router.get('/', asyncHandler(async (req, res) => {
@@ -35,23 +37,23 @@ export default function insightsRoutes(pool) {
   }));
 
   router.post('/', asyncHandler(async (req, res) => {
-    const { name, themeIds, position, expanded } = req.body || {};
+    const { name, themeIds, position, expanded, size, style } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Invalid body' });
     const id = uuidv4();
     const r = await pool.query(
-      `INSERT INTO insights (id, name, theme_ids, position, expanded) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [id, name, Array.isArray(themeIds) ? themeIds : [], position ?? null, expanded ?? null]
+      `INSERT INTO insights (id, name, theme_ids, position, expanded, size, style) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [id, name, Array.isArray(themeIds) ? themeIds : [], position ?? null, expanded ?? null, size ?? null, style ?? null]
     );
     res.status(201).json(map(r.rows[0]));
   }));
 
   router.put('/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { name, themeIds, position, expanded } = req.body || {};
+    const { name, themeIds, position, expanded, size, style } = req.body || {};
     const r = await pool.query(
-      `UPDATE insights SET name=COALESCE($2,name), theme_ids=COALESCE($3,theme_ids), position=COALESCE($4,position), expanded=COALESCE($5,expanded)
+      `UPDATE insights SET name=COALESCE($2,name), theme_ids=COALESCE($3,theme_ids), position=COALESCE($4,position), expanded=COALESCE($5,expanded), size=COALESCE($6,size), style=COALESCE($7,style)
        WHERE id=$1 RETURNING *`,
-      [id, name ?? null, Array.isArray(themeIds) ? themeIds : null, position ?? null, expanded ?? null]
+      [id, name ?? null, Array.isArray(themeIds) ? themeIds : null, position ?? null, expanded ?? null, size ?? null, style ?? null]
     );
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
     res.json(map(r.rows[0]));

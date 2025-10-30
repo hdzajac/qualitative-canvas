@@ -13,6 +13,9 @@ export interface UploadedFile {
   projectId?: string;
 }
 
+export interface Size { w: number; h: number }
+export interface CardStyle { fontSize?: number }
+
 export interface Highlight {
   id: string;
   fileId: string;
@@ -22,6 +25,8 @@ export interface Highlight {
   codeName: string;
   createdAt: string;
   position?: { x: number; y: number };
+  size?: Size;
+  style?: CardStyle;
 }
 
 export interface Theme {
@@ -30,6 +35,8 @@ export interface Theme {
   highlightIds: string[];
   createdAt: string;
   position?: { x: number; y: number };
+  size?: Size;
+  style?: CardStyle;
 }
 
 export interface Insight {
@@ -39,6 +46,8 @@ export interface Insight {
   createdAt: string;
   position?: { x: number; y: number };
   expanded?: boolean;
+  size?: Size;
+  style?: CardStyle;
 }
 
 export interface Annotation {
@@ -47,4 +56,6 @@ export interface Annotation {
   position: { x: number; y: number };
   createdAt: string;
   projectId?: string;
+  size?: Size;
+  style?: CardStyle;
 }

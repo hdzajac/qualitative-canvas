@@ -1,6 +1,6 @@
 import { useMemo, useState, Fragment } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getFiles, getThemes, getHighlights, deleteTheme } from '@/services/api';
+import { getFiles, getThemes, getHighlights, deleteTheme, getProjects } from '@/services/api';
 import type { Theme, Highlight } from '@/types';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { useNavigate } from 'react-router-dom';
@@ -8,6 +8,7 @@ import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@
 import { Button } from '@/components/ui/button';
 import { MoreHorizontal } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 
 export default function Themes() {
     const navigate = useNavigate();
@@ -16,6 +17,9 @@ export default function Themes() {
     const { data: files = [] } = useQuery({ queryKey: ['files', projectId], queryFn: () => getFiles(projectId), enabled: !!projectId });
     const { data: themes = [] } = useQuery<Theme[]>({ queryKey: ['themes', projectId], queryFn: () => getThemes(projectId), enabled: !!projectId });
     const { data: highlights = [] } = useQuery<Highlight[]>({ queryKey: ['highlights', projectId], queryFn: () => getHighlights({ projectId }), enabled: !!projectId });
+    const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
+
+    const projectName = projects.find(p => p.id === projectId)?.name || 'Project';
 
     const fileIds = useMemo(() => new Set(files.map(f => f.id)), [files]);
     const projectHighlights = useMemo(() => highlights.filter(h => fileIds.has(h.fileId)), [highlights, fileIds]);
@@ -26,6 +30,26 @@ export default function Themes() {
 
     return (
         <div className="container mx-auto p-6 space-y-4">
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink href="/">Home</BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbLink href="/projects">Projects</BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>{projectName}</BreadcrumbPage>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Themes</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+
             <h1 className="text-xl font-extrabold uppercase tracking-wide">Themes</h1>
 
             <Table>
