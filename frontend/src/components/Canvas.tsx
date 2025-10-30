@@ -52,11 +52,11 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
   const [isSpacePanning, setIsSpacePanning] = useState(false);
   const [projectId] = useSelectedProject();
 
-  // Build nodes from data
-  const buildNodes = useCallback(() => {
+  // Build nodes from data - memoize to prevent unnecessary rebuilds
+  useEffect(() => {
     const newNodes: Node[] = [];
 
-    // Code nodes - change color when selected
+    // Code nodes
     highlights.forEach((highlight, idx) => {
       const selected = selectedCodeIds.includes(highlight.id);
       newNodes.push({
@@ -103,10 +103,10 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     });
 
     setNodes(newNodes);
-  }, [highlights, themes, insights, annotations, onUpdate, selectedCodeIds]);
+  }, [highlights, themes, insights, annotations, selectedCodeIds]);
 
   // Build edges from relationships
-  const buildEdges = useCallback(() => {
+  useEffect(() => {
     const newEdges: Edge[] = [];
 
     // Connect codes to themes
@@ -135,12 +135,6 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
 
     setEdges(newEdges);
   }, [themes, insights]);
-
-  // Rebuild when data changes
-  useEffect(() => {
-    buildNodes();
-    buildEdges();
-  }, [buildNodes, buildEdges]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
