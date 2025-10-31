@@ -299,6 +299,18 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     return m;
   }, [highlights, fileNameById]);
 
+  // Fast lookup maps
+  const highlightById = useMemo(() => {
+    const m = new Map<string, Highlight>();
+    highlights.forEach(h => m.set(h.id, h));
+    return m;
+  }, [highlights]);
+  const themeById = useMemo(() => {
+    const m = new Map<string, Theme>();
+    themes.forEach(t => m.set(t.id, t));
+    return m;
+  }, [themes]);
+
   const themeLabelById = useMemo(() => {
     const m = new Map<string, string>();
     themes.forEach(t => {
@@ -1000,6 +1012,47 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
                     </ul>
                   </div>
                 )}
+
+                {/* Underlying items: codes for themes; themes and codes for insights */}
+                {n.kind === 'theme' && (
+                  <div className="mb-3 text-sm text-neutral-800">
+                    <div className="font-semibold mb-1">Codes</div>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      {n.theme!.highlightIds.map(hid => {
+                        const h = highlightById.get(hid);
+                        if (!h) return null;
+                        const doc = h.fileId ? (fileNameById.get(h.fileId) || '') : '';
+                        const label = h.codeName || '(untitled)';
+                        return <li key={hid}><span className="font-medium">{label}</span>{doc ? <span className="text-neutral-500"> — {doc}</span> : null}</li>;
+                      })}
+                    </ul>
+                  </div>
+                )}
+
+                {n.kind === 'insight' && (
+                  <div className="mb-3 text-sm text-neutral-800 space-y-2">
+                    <div className="font-semibold mb-1">Themes</div>
+                    {n.insight!.themeIds.map(tid => {
+                      const t = themeById.get(tid);
+                      if (!t) return null;
+                      return (
+                        <div key={tid} className="ml-1">
+                          <div className="font-medium">• {t.name || '(untitled theme)'}</div>
+                          <ul className="list-disc list-inside space-y-0.5 ml-4 mt-1">
+                            {t.highlightIds.map(hid => {
+                              const h = highlightById.get(hid);
+                              if (!h) return null;
+                              const doc = h.fileId ? (fileNameById.get(h.fileId) || '') : '';
+                              const label = h.codeName || '(untitled)';
+                              return <li key={hid}><span className="font-normal">{label}</span>{doc ? <span className="text-neutral-500"> — {doc}</span> : null}</li>;
+                            })}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <div className="overflow-auto pr-2">
                   {(() => {
                     const body = n.kind === 'annotation' ? (n.annotation?.content || '') : '';
