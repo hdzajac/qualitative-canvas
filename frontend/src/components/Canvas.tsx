@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Highlight, Theme, Insight, Annotation, CardStyle } from '@/types';
 import { Button } from './ui/button';
 import { MousePointer2, Hand, Type as TypeIcon, X as CloseIcon, Text as TextSizeIcon, Trash2 } from 'lucide-react';
-import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation, deleteHighlight, deleteTheme, deleteInsight, deleteAnnotation } from '@/services/api';
+import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation, deleteHighlight, deleteTheme, deleteInsight, deleteAnnotation, getFile } from '@/services/api';
 import { toast } from 'sonner';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { NodeKind, Tool, NodeView, DEFAULTS, ResizeCorner } from './canvas/CanvasTypes';
@@ -572,6 +572,35 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     }
   };
 
+  // File name cache for side panel document references
+  const [fileNames, setFileNames] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!openEntity || openEntity.kind !== 'code') return;
+    const n = nodes.find(nn => nn.kind === 'code' && nn.id === openEntity.id);
+    const fid = n?.highlight?.fileId;
+    if (!fid || fileNames[fid]) return;
+    getFile(fid).then(f => setFileNames(prev => ({ ...prev, [fid]: f.filename }))).catch(() => {});
+  }, [openEntity, nodes, fileNames]);
+
+  // Inline title editing for code in side panel
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+
+  const saveCodeTitle = async (id: string, name: string) => {
+    const val = name.trim();
+    const node = nodes.find(nn => nn.kind === 'code' && nn.id === id);
+    if (!node) return;
+    try {
+      await updateHighlight(id, { codeName: val });
+      setNodes(prev => prev.map(nn => (nn.kind === 'code' && nn.id === id) ? { ...nn, highlight: { ...nn.highlight!, codeName: val } } : nn));
+      onUpdate();
+      toast.success('Saved');
+    } catch {
+      toast.error('Save failed');
+    }
+  };
+
   // Auto-grow height based on wrapped text
   useEffect(() => {
     setNodes((prev) => {
@@ -693,7 +722,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
         </div>
       )}
 
-      {/* Click-away overlay for side panel */}
+      {/* Click-away overlay for side panel document references */}
       {openEntity && (
         <div className="absolute inset-0 z-20" onClick={() => setOpenEntity(null)} />
       )}
@@ -735,24 +764,9 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
       {/* Side Panel for open entity */}
       {openEntity && (
         <div className="absolute inset-y-0 right-0 z-30 w-[420px] bg-white border-l-4 border-black p-4 flex flex-col" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center gap-2 mb-3">
+          {/* Header with close and delete only */}
+          <div className="flex items-center justify-between mb-3">
             <Button size="icon" variant="outline" className="rounded-none" onClick={() => setOpenEntity(null)} aria-label="Close"><CloseIcon className="w-4 h-4" /></Button>
-            <input className="border-2 border-black px-2 py-1 flex-1" defaultValue={(() => {
-              const n = nodes.find(nn => nn.kind === openEntity.kind && nn.id === openEntity.id);
-              if (!n) return '';
-              return n.kind === 'code' ? (n.highlight?.codeName || 'Untitled') : n.kind === 'theme' ? (n.theme?.name || '') : n.kind === 'insight' ? (n.insight?.name || '') : (n.annotation?.content || '');
-            })()} onBlur={async (e) => {
-              const val = e.target.value.trim();
-              const n = nodes.find(nn => nn.kind === openEntity.kind && nn.id === openEntity.id);
-              if (!n) return;
-              try {
-                if (n.kind === 'code') await updateHighlight(n.id, { codeName: val });
-                if (n.kind === 'theme') await updateTheme(n.id, { name: val });
-                if (n.kind === 'insight') await updateInsight(n.id, { name: val });
-                if (n.kind === 'annotation') await updateAnnotation(n.id, { content: val });
-                onUpdate();
-              } catch { toast.error('Save failed'); }
-            }} />
             <Button size="sm" variant="destructive" className="rounded-none" onClick={async () => {
               if (!confirm('Delete this item?')) return;
               try {
@@ -765,14 +779,76 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
               } catch { toast.error('Delete failed'); }
             }}>Delete</Button>
           </div>
-          <div className="overflow-auto pr-2">
-            {(() => {
-              const n = nodes.find(nn => nn.kind === openEntity.kind && nn.id === openEntity.id);
-              if (!n) return null;
-              const body = n.kind === 'code' ? (n.highlight?.text || '') : n.kind === 'annotation' ? (n.annotation?.content || '') : '';
-              return body ? <pre className="whitespace-pre-wrap text-sm leading-relaxed">{body}</pre> : <div className="text-sm text-neutral-500">No content.</div>;
-            })()}
-          </div>
+
+          {(() => {
+            const n = nodes.find(nn => nn.kind === openEntity.kind && nn.id === openEntity.id);
+            if (!n) return null;
+
+            if (n.kind === 'code') {
+              return (
+                <>
+                  {/* Title editable on click */}
+                  <div className="mb-1">
+                    {!editingTitle ? (
+                      <div className="text-xl font-bold break-words cursor-text" onClick={() => { setTitleDraft(n.highlight?.codeName || 'Untitled'); setEditingTitle(true); }}>
+                        {n.highlight?.codeName || 'Untitled'}
+                      </div>
+                    ) : (
+                      <input
+                        className="w-full border-2 border-black px-2 py-1 text-xl font-bold"
+                        autoFocus
+                        value={titleDraft}
+                        onChange={(e) => setTitleDraft(e.target.value)}
+                        onBlur={async () => { await saveCodeTitle(n.id, titleDraft); setEditingTitle(false); }}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); }
+                          if (e.key === 'Escape') { setEditingTitle(false); }
+                        }}
+                      />
+                    )}
+                  </div>
+                  {/* Document reference */}
+                  {n.highlight?.fileId ? (
+                    <div className="text-sm text-neutral-600 mb-3">
+                      Document: {fileNames[n.highlight.fileId] ?? '...'}
+                    </div>
+                  ) : null}
+                  {/* Body */}
+                  <div className="overflow-auto pr-2">
+                    {(() => {
+                      const body = n.highlight?.text || '';
+                      return body ? <pre className="whitespace-pre-wrap text-sm leading-relaxed">{body}</pre> : <div className="text-sm text-neutral-500">No content.</div>;
+                    })()}
+                  </div>
+                </>
+              );
+            }
+
+            // Other kinds keep simple input editing
+            return (
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <input className="border-2 border-black px-2 py-1 flex-1" defaultValue={(() => {
+                    return n.kind === 'theme' ? (n.theme?.name || '') : n.kind === 'insight' ? (n.insight?.name || '') : (n.annotation?.content || '');
+                  })()} onBlur={async (e) => {
+                    const val = e.target.value.trim();
+                    try {
+                      if (n.kind === 'theme') await updateTheme(n.id, { name: val });
+                      if (n.kind === 'insight') await updateInsight(n.id, { name: val });
+                      if (n.kind === 'annotation') await updateAnnotation(n.id, { content: val });
+                      onUpdate();
+                    } catch { toast.error('Save failed'); }
+                  }} />
+                </div>
+                <div className="overflow-auto pr-2">
+                  {(() => {
+                    const body = n.kind === 'annotation' ? (n.annotation?.content || '') : '';
+                    return body ? <pre className="whitespace-pre-wrap text-sm leading-relaxed">{body}</pre> : <div className="text-sm text-neutral-500">No content.</div>;
+                  })()}
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
     </div>
