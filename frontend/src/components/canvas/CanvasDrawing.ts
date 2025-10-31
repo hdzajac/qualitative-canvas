@@ -29,12 +29,28 @@ export function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w
   ctx.closePath();
 }
 
+function truncateWithEllipsis(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  const ell = '…';
+  const ellW = ctx.measureText(ell).width;
+  let lo = 0, hi = text.length;
+  // binary search for max chars that fit
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    const candidate = text.slice(0, mid);
+    if (ctx.measureText(candidate).width + ellW <= maxWidth) lo = mid; else hi = mid - 1;
+  }
+  return text.slice(0, lo) + ell;
+}
+
 export function drawNode(
   ctx: CanvasRenderingContext2D,
   n: NodeView,
   selectedCodeIds: string[],
   selectedThemeIds: string[],
-  getFontSize: (n: NodeView) => number
+  getFontSize: (n: NodeView) => number,
+  getBottomRightLabel?: (n: NodeView) => string,
+  getLabelScroll?: (n: NodeView) => number
 ) {
   ctx.save();
   const radius = 0; // no rounding
@@ -100,13 +116,32 @@ export function drawNode(
     wrapText(ctx, n.annotation.content || 'New text', n.x + 12, titleY, n.w - 24, lineHeight, Math.max(1, Math.floor(availableH / lineHeight)));
   }
 
-  // Keep label font fixed irrespective of text size
-  ctx.textAlign = 'right';
-  ctx.fillStyle = '#9ca3af';
-  ctx.font = '11px ui-sans-serif, system-ui, -apple-system';
-  const typeLabel = n.kind === 'code' ? 'Code' : n.kind === 'theme' ? 'Theme' : n.kind === 'insight' ? 'Insight' : 'Note';
-  ctx.fillText(typeLabel, n.x + n.w - 8, n.y + n.h - 8);
-  ctx.textAlign = 'left';
+  // Bottom-right label: document filename(s) with ellipsis or scroll on hover
+  if (getBottomRightLabel) {
+    const raw = getBottomRightLabel(n) || '';
+    if (raw) {
+      const labelRectX = n.x + 12;
+      const labelRectY = n.y + n.h - 8; // baseline
+      const labelMaxW = Math.max(0, n.w - 24);
+      ctx.fillStyle = '#9ca3af';
+      ctx.font = '11px ui-sans-serif, system-ui, -apple-system';
+      ctx.textAlign = 'left';
+      // Clip to label line area to avoid overflow
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(n.x + 8, n.y + n.h - 18, Math.max(0, n.w - 16), 14);
+      ctx.clip();
+
+      const scroll = getLabelScroll ? (getLabelScroll(n) || 0) : 0;
+      if (scroll > 0) {
+        ctx.fillText(raw, labelRectX - scroll, labelRectY);
+      } else {
+        const display = truncateWithEllipsis(ctx, raw, labelMaxW);
+        ctx.fillText(display, labelRectX, labelRectY);
+      }
+      ctx.restore();
+    }
+  }
 
   ctx.restore(); // end clip
 

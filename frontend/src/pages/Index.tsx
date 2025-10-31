@@ -91,7 +91,7 @@ const Index = () => {
                       Change File
                     </Button>
                   </div>
-                  
+
                   {loading ? (
                     <div className="flex items-center justify-center p-12">
                       <Loader2 className="w-6 h-6 animate-spin" />
@@ -102,6 +102,7 @@ const Index = () => {
                       content={currentFile.content}
                       highlights={fileHighlights}
                       onHighlightCreated={loadData}
+                      isVtt={/\.vtt$/i.test(currentFile.filename)}
                     />
                   )}
                 </div>

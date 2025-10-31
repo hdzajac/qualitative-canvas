@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Highlight, Theme, Insight, Annotation, CardStyle } from '@/types';
+import type { Highlight, Theme, Insight, Annotation, CardStyle, UploadedFile } from '@/types';
 import { Button } from './ui/button';
 import { MousePointer2, Hand, Type as TypeIcon, X as CloseIcon, Text as TextSizeIcon, Trash2 } from 'lucide-react';
 import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation, deleteHighlight, deleteTheme, deleteInsight, deleteAnnotation, getFile } from '@/services/api';
 import { toast } from 'sonner';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
-import { NodeKind, Tool, NodeView, DEFAULTS, ResizeCorner } from './canvas/CanvasTypes';
+import { NodeKind, Tool, NodeView, DEFAULTS, ResizeCorner, /* add subtype imports */ } from './canvas/CanvasTypes';
+// Add explicit subtype imports for type narrowing
+import type { CodeNodeView, ThemeNodeView, InsightNodeView, AnnotationNodeView } from './canvas/CanvasTypes';
 import { clamp, toggleInArray, union, hitTestNode, intersects, measureWrappedLines } from './canvas/CanvasUtils';
 import { drawGrid, drawOrthogonal, roundRect, drawNode } from './canvas/CanvasDrawing';
 
@@ -14,15 +16,22 @@ interface CanvasProps {
   themes: Theme[];
   insights: Insight[];
   annotations: Annotation[];
+  files: UploadedFile[];
   onUpdate: () => void;
 }
 
-export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: CanvasProps) => {
+export const Canvas = ({ highlights, themes, insights, annotations, files, onUpdate }: CanvasProps) => {
   // Canvas and size
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const dprRef = useRef<number>(1);
+  // Reusable offscreen context for label measurement (avoid per-frame canvas creation)
+  const measureCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  useEffect(() => {
+    const c = document.createElement('canvas');
+    measureCtxRef.current = c.getContext('2d');
+  }, []);
 
   // Viewport transform
   const [zoom, setZoom] = useState(1);
@@ -272,6 +281,72 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Build quick lookup maps for filenames and labels
+  const fileNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    files?.forEach(f => m.set(f.id, f.filename));
+    return m;
+  }, [files]);
+
+  const codeFileNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    highlights.forEach(h => {
+      const name = h.fileId ? (fileNameById.get(h.fileId) || '') : '';
+      if (name) m.set(h.id, name);
+    });
+    return m;
+  }, [highlights, fileNameById]);
+
+  const themeLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    themes.forEach(t => {
+      const set = new Set<string>();
+      t.highlightIds.forEach(hid => {
+        const n = codeFileNameById.get(hid);
+        if (n) set.add(n);
+      });
+      const label = Array.from(set).join(', ');
+      if (label) m.set(t.id, label);
+    });
+    return m;
+  }, [themes, codeFileNameById]);
+
+  const insightLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    insights.forEach(i => {
+      const set = new Set<string>();
+      i.themeIds.forEach(tid => {
+        const t = themes.find(tt => tt.id === tid);
+        if (!t) return;
+        t.highlightIds.forEach(hid => {
+          const n = codeFileNameById.get(hid);
+          if (n) set.add(n);
+        });
+      });
+      const label = Array.from(set).join(', ');
+      if (label) m.set(i.id, label);
+    });
+    return m;
+  }, [insights, themes, codeFileNameById]);
+
+  const getBottomRightLabel = useCallback((n: NodeView) => {
+    if (n.kind === 'code' && n.highlight) {
+      const fid = n.highlight.fileId;
+      return (fid && fileNameById.get(fid)) || '';
+    }
+    if (n.kind === 'theme') {
+      return themeLabelById.get(n.id) || '';
+    }
+    if (n.kind === 'insight') {
+      return insightLabelById.get(n.id) || '';
+    }
+    // annotations: no document label
+    return '';
+  }, [fileNameById, themeLabelById, insightLabelById]);
+
+  // No hover animation: always return 0 scroll
+  const getLabelScroll = useCallback((_n: NodeView) => 0, []);
+
   // Draw function stable
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -325,13 +400,13 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     ctx.restore();
 
     // Nodes
-    nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize));
+    nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll));
 
     ctx.restore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size.w, size.h, offset.x, offset.y, zoom, nodes, selectedCodeIds, selectedThemeIds]);
+  }, [size.w, size.h, offset.x, offset.y, zoom, nodes, selectedCodeIds, selectedThemeIds, getBottomRightLabel]);
 
-  // Redraw when state changes
+  // Redraw whenever draw dependencies change (covers zoom/offset updates)
   useEffect(() => { draw(); }, [draw]);
 
   // Compute contextual popup visibility
@@ -378,49 +453,8 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     const newZoom = clamp(zoom * factor, 0.2, 2.5); setZoom(newZoom);
     const newOffsetX = mx - worldBefore.x * newZoom; const newOffsetY = my - worldBefore.y * newZoom;
     setOffset({ x: newOffsetX, y: newOffsetY });
+    // draw will be triggered by the [draw] effect
   }, [screenToWorld, zoom]);
-
-  // Draw wrapped so it's stable
-  // const draw = useCallback(() => {
-  //   const canvas = canvasRef.current; if (!canvas) return; const ctx = canvas.getContext('2d'); if (!ctx) return; const dpr = dprRef.current;
-  //   ctx.save(); ctx.scale(dpr, dpr);
-  //   ctx.clearRect(0, 0, size.w, size.h);
-  //   drawGrid(ctx, size.w, size.h, 16, '#e5e7eb');
-  //   ctx.translate(offset.x, offset.y); ctx.scale(zoom, zoom);
-  //   drawEdges(ctx, nodes);
-  //   nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds));
-  //   ctx.restore();
-  // }, [size.w, size.h, offset.x, offset.y, zoom, nodes, selectedCodeIds, selectedThemeIds]);
-
-  // useEffect(() => { draw(); }, [draw]);
-
-  // function draw() {
-  //   const canvas = canvasRef.current;
-  //   if (!canvas) return;
-  //   const ctx = canvas.getContext('2d');
-  //   if (!ctx) return;
-  //   const dpr = dprRef.current;
-  //   ctx.save();
-  //   ctx.scale(dpr, dpr);
-  //
-  //   // Clear
-  //   ctx.clearRect(0, 0, size.w, size.h);
-  //
-  //   // Background grid (dots)
-  //   drawGrid(ctx, size.w, size.h, 16, '#e5e7eb');
-  //
-  //   // Apply transform
-  //   ctx.translate(offset.x, offset.y);
-  //   ctx.scale(zoom, zoom);
-  //
-  //   // Edges under nodes
-  //   drawEdges(ctx, nodes);
-  //
-  //   // Nodes
-  //   nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds));
-  //
-  //   ctx.restore();
-  // }
 
   // hitTest for top-right open icon
   function isInOpenIcon(n: NodeView, wx: number, wy: number) {
@@ -513,7 +547,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
       themes.forEach((t) => { t.highlightIds.forEach((hid) => { const a = byKey.get(`code:${hid}`); const b = byKey.get(`theme:${t.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
       insights.forEach((i) => { i.themeIds.forEach((tid) => { const a = byKey.get(`theme:${tid}`); const b = byKey.get(`insight:${i.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
       ctx.restore();
-      nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize));
+      nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll));
       ctx.restore();
       // draw marquee in screen space
       const x = Math.min(dragState.current.startClient.x, sx);
@@ -529,6 +563,10 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
       ctx2.strokeRect(x, y, w, h);
       ctx2.restore();
     }
+  };
+
+  const onMouseLeave: React.MouseEventHandler<HTMLCanvasElement> = () => {
+    setHoverCursor('default');
   };
 
   const onMouseUp: React.MouseEventHandler<HTMLCanvasElement> = async (e) => {
@@ -625,7 +663,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
 
   useEffect(() => {
     if (!openEntity || openEntity.kind !== 'code') return;
-    const n = nodes.find(nn => nn.kind === 'code' && nn.id === openEntity.id);
+    const n = nodes.find((nn): nn is CodeNodeView => nn.kind === 'code' && nn.id === openEntity.id);
     const fid = n?.highlight?.fileId;
     if (!fid || fileNames[fid]) return;
     getFile(fid).then(f => setFileNames(prev => ({ ...prev, [fid]: f.filename }))).catch(() => { });
@@ -687,6 +725,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
+        onMouseLeave={onMouseLeave}
         onWheel={onWheel}
         style={{ cursor: hoverCursor }}
       />
@@ -785,12 +824,24 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
         return (
           <div className="absolute right-3 top-3 z-20 bg-white border-2 border-black p-2 flex items-center gap-2">
             <span className="text-xs">Width</span>
-            <Button size="sm" variant={n.w <= 210 ? 'default' : 'outline'} className="rounded-none h-6 px-2" onClick={() => { setNodes(prev => prev.map(nn => nn === n ? { ...nn, w: 200 } : nn)); draw(); }}>200</Button>
-            <Button size="sm" variant={n.w >= 290 ? 'default' : 'outline'} className="rounded-none h-6 px-2" onClick={() => { setNodes(prev => prev.map(nn => nn === n ? { ...nn, w: 300 } : nn)); draw(); }}>300</Button>
+            <Button size="sm" variant={n.w <= 210 ? 'default' : 'outline'} className="rounded-none h-6 px-2" onClick={() => { setNodes(prev => prev.map(nn => (nn.kind === n.kind && nn.id === n.id) ? { ...nn, w: 200 } : nn)); draw(); }}>200</Button>
+            <Button size="sm" variant={n.w >= 290 ? 'default' : 'outline'} className="rounded-none h-6 px-2" onClick={() => { setNodes(prev => prev.map(nn => (nn.kind === n.kind && nn.id === n.id) ? { ...nn, w: 300 } : nn)); draw(); }}>300</Button>
             <span className="text-xs ml-2">Text</span>
             <select className="text-xs border border-black px-1 py-0.5" value={fs} onChange={(e) => {
               const val = parseInt(e.target.value) || 12;
-              setNodes(prev => prev.map(nn => nn === n ? (n.kind === 'code' ? { ...nn, highlight: { ...nn.highlight!, style: { ...(nn.highlight?.style || {}), fontSize: val } } } : n.kind === 'theme' ? { ...nn, theme: { ...nn.theme!, style: { ...(nn.theme?.style || {}), fontSize: val } } } : n.kind === 'insight' ? { ...nn, insight: { ...nn.insight!, style: { ...(nn.insight?.style || {}), fontSize: val } } } : { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), fontSize: val } } }) : nn));
+              setNodes(prev => prev.map(nn => {
+                if (!(nn.kind === n.kind && nn.id === n.id)) return nn;
+                switch (n.kind) {
+                  case 'code':
+                    return { ...(nn as CodeNodeView), highlight: { ...(nn as CodeNodeView).highlight!, style: { ...((nn as CodeNodeView).highlight?.style || {}), fontSize: val } } } as CodeNodeView;
+                  case 'theme':
+                    return { ...(nn as ThemeNodeView), theme: { ...(nn as ThemeNodeView).theme!, style: { ...((nn as ThemeNodeView).theme?.style || {}), fontSize: val } } } as ThemeNodeView;
+                  case 'insight':
+                    return { ...(nn as InsightNodeView), insight: { ...(nn as InsightNodeView).insight!, style: { ...((nn as InsightNodeView).insight?.style || {}), fontSize: val } } } as InsightNodeView;
+                  case 'annotation':
+                    return { ...(nn as AnnotationNodeView), annotation: { ...(nn as AnnotationNodeView).annotation!, style: { ...((nn as AnnotationNodeView).annotation?.style || {}), fontSize: val } } } as AnnotationNodeView;
+                }
+              }));
               draw();
             }}>
               {[10, 12, 14, 16, 18, 20, 24].map(s => <option key={s} value={s}>{s}px</option>)}
@@ -888,6 +939,23 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
                     } catch { toast.error('Save failed'); }
                   }} />
                 </div>
+                {/* List document filenames for themes and insights */}
+                {(n.kind === 'theme' || n.kind === 'insight') && (
+                  <div className="mb-3 text-sm text-neutral-600">
+                    <div className="font-semibold mb-1">Documents</div>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      {(() => {
+                        const names = n.kind === 'theme'
+                          ? Array.from(new Set(n.theme!.highlightIds.map(hid => codeFileNameById.get(hid)).filter(Boolean)))
+                          : Array.from(new Set(n.insight!.themeIds.flatMap(tid => {
+                            const t = themes.find(tt => tt.id === tid);
+                            return t ? t.highlightIds.map(hid => codeFileNameById.get(hid)).filter(Boolean) : [];
+                          })));
+                        return names.map((name, i) => <li key={i}>{name}</li>);
+                      })()}
+                    </ul>
+                  </div>
+                )}
                 <div className="overflow-auto pr-2">
                   {(() => {
                     const body = n.kind === 'annotation' ? (n.annotation?.content || '') : '';

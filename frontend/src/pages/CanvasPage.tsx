@@ -15,6 +15,7 @@ export default function CanvasPage() {
         queryFn: () => getFiles(projectId),
         enabled: !!projectId,
         refetchOnWindowFocus: false,
+        refetchOnMount: 'always',
         staleTime: 60_000,
     });
     const highlightsQ = useQuery<Highlight[]>({
@@ -22,6 +23,7 @@ export default function CanvasPage() {
         queryFn: () => getHighlights({ projectId }),
         enabled: !!projectId,
         refetchOnWindowFocus: false,
+        refetchOnMount: 'always',
         staleTime: 60_000,
     });
     const themesQ = useQuery<Theme[]>({
@@ -29,6 +31,7 @@ export default function CanvasPage() {
         queryFn: () => getThemes(projectId),
         enabled: !!projectId,
         refetchOnWindowFocus: false,
+        refetchOnMount: 'always',
         staleTime: 60_000,
     });
     const insightsQ = useQuery<Insight[]>({
@@ -36,6 +39,7 @@ export default function CanvasPage() {
         queryFn: () => getInsights(projectId),
         enabled: !!projectId,
         refetchOnWindowFocus: false,
+        refetchOnMount: 'always',
         staleTime: 60_000,
     });
     const annotationsQ = useQuery<Annotation[]>({
@@ -43,6 +47,7 @@ export default function CanvasPage() {
         queryFn: () => getAnnotations(projectId),
         enabled: !!projectId,
         refetchOnWindowFocus: false,
+        refetchOnMount: 'always',
         staleTime: 60_000,
     });
 
@@ -82,6 +87,7 @@ export default function CanvasPage() {
     const themes = themesQ.data ?? lastThemes.current ?? [];
     const insights = insightsQ.data ?? lastInsights.current ?? [];
     const annotations = annotationsQ.data ?? lastAnnotations.current ?? [];
+    const files = filesQ.data ?? [];
 
     const handleUpdate = useCallback(() => {
         qc.invalidateQueries({ queryKey: ['highlights', projectId] });
@@ -97,6 +103,7 @@ export default function CanvasPage() {
                 themes={themes}
                 insights={insights}
                 annotations={annotations}
+                files={files}
                 onUpdate={handleUpdate}
             />
         </div>

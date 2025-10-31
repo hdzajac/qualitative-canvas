@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getFile, getHighlights, getProjects } from '@/services/api';
@@ -16,6 +16,7 @@ export default function DocumentDetail() {
 
     const viewerRef = useRef<TextViewerHandle>(null);
     const docHighlights = highlights; // already filtered by server
+    const sortedByOffset = useMemo(() => [...docHighlights].sort((a, b) => a.startOffset - b.startOffset), [docHighlights]);
 
     if (!id || !file) return null;
 
@@ -50,9 +51,16 @@ export default function DocumentDetail() {
             <div className="flex gap-4">
                 <div className="basis-3/4 min-w-0" id="transcript-container">
                     <Card className="brutal-card">
-                        <CardHeader><CardTitle>Transcript</CardTitle></CardHeader>
+                        <CardHeader><CardTitle>Document</CardTitle></CardHeader>
                         <CardContent>
-                            <TextViewer ref={viewerRef} fileId={file.id} content={file.content} highlights={docHighlights} onHighlightCreated={() => refetchHighlights()} />
+                            <TextViewer
+                                ref={viewerRef}
+                                fileId={file.id}
+                                content={file.content}
+                                highlights={docHighlights}
+                                onHighlightCreated={() => refetchHighlights()}
+                                isVtt={/\.vtt$/i.test(file.filename)}
+                            />
                         </CardContent>
                     </Card>
                 </div>
@@ -61,11 +69,11 @@ export default function DocumentDetail() {
                     <Card className="brutal-card">
                         <CardHeader><CardTitle>Codes</CardTitle></CardHeader>
                         <CardContent>
-                            {docHighlights.length === 0 ? (
+                            {sortedByOffset.length === 0 ? (
                                 <div className="text-sm text-neutral-600">No codes yet.</div>
                             ) : (
                                 <div className="space-y-2 max-h-[75vh] overflow-auto">
-                                    {docHighlights.map(h => (
+                                    {sortedByOffset.map(h => (
                                         <button
                                             key={h.id}
                                             className="w-full text-left p-2 border-2 border-black hover:bg-indigo-50"
