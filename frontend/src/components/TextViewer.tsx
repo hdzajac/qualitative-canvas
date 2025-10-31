@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -74,7 +74,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       if (!selection || selection.rangeCount === 0) return;
 
       const range = selection.getRangeAt(0);
-      const selText = selection.toString().trim();
+      const selText = selection.toString();
 
       if (!textRootRef.current || selText.length === 0) {
         setSelectedText(null);
@@ -112,11 +112,12 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         return;
       }
       try {
+        const snippet = text.slice(selectedText.start, selectedText.end);
         await createHighlight({
           fileId,
           startOffset: selectedText.start,
           endOffset: selectedText.end,
-          text: selectedText.text,
+          text: snippet,
           codeName: codeName.trim(),
           size: DEFAULTS.code,
         });
@@ -173,18 +174,56 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       },
     }), []);
 
+    // Correct highlight range if stored offsets don't match stored text (legacy trimmed selections)
+    const getCorrectedRange = (h: Highlight) => {
+      const proposedStart = h.startOffset;
+      const proposedEnd = h.endOffset;
+      const target = h.text || '';
+      if (!target) return { start: proposedStart, end: proposedEnd };
+
+      const slice = text.slice(proposedStart, proposedEnd);
+      if (slice === target) return { start: proposedStart, end: proposedEnd };
+
+      // If trimmed slice matches, shift inwards by leading/trailing whitespace
+      if (slice.trim() === target) {
+        const lead = slice.length - slice.replace(/^\s+/, '').length;
+        const trail = slice.length - slice.replace(/\s+$/, '').length;
+        return { start: proposedStart + lead, end: proposedEnd - trail };
+      }
+
+      // Global fuzzy search: find occurrence closest to proposedStart
+      if (target.length >= 3) {
+        let from = 0;
+        let bestIdx = -1;
+        let bestDist = Number.POSITIVE_INFINITY;
+        while (from <= text.length - target.length) {
+          const idx = text.indexOf(target, from);
+          if (idx === -1) break;
+          const dist = Math.abs(idx - proposedStart);
+          if (dist < bestDist) { bestDist = dist; bestIdx = idx; }
+          from = idx + 1;
+        }
+        if (bestIdx !== -1) return { start: bestIdx, end: bestIdx + target.length };
+      }
+
+      // Fallback
+      return { start: proposedStart, end: proposedEnd };
+    };
+
     // Highlight-aware renderer for a generic block range
     const renderBlockWithHighlights = (
       bStart: number,
       bEnd: number,
-      wrapText: (chunkText: string, absStart: number, absEnd: number) => JSX.Element | JSX.Element[]
+      wrapText: (chunkText: string, absStart: number, absEnd: number) => JSX.Element | JSX.Element[],
+      wrapHighlighted: (chunkText: string, absStart: number, absEnd: number) => JSX.Element | JSX.Element[]
     ) => {
       const sorted = [...highlights].sort((a, b) => a.startOffset - b.startOffset);
       const parts: JSX.Element[] = [];
       let cursor = bStart;
       sorted.forEach((h) => {
-        const hs = Math.max(h.startOffset, bStart);
-        const he = Math.min(h.endOffset, bEnd);
+        const { start: hsAbs, end: heAbs } = getCorrectedRange(h);
+        const hs = Math.max(hsAbs, bStart);
+        const he = Math.min(heAbs, bEnd);
         if (hs < he) {
           if (hs > cursor) {
             const chunk = wrapText(text.substring(cursor, hs), cursor, hs);
@@ -194,16 +233,14 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
               parts.push(chunk);
             }
           }
-          const highlightedChunk = wrapText(text.substring(hs, he), hs, he);
-          const node = Array.isArray(highlightedChunk) ? <span key={`hlwrap-${hs}-${he}`}>{highlightedChunk}</span> : highlightedChunk;
-          parts.push(
-            <mark
-              key={`h-${hs}-${he}`}
-              className={`rounded px-0.5 cursor-pointer transition-colors ${flashOffset === hs ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30'}`}
-            >
-              {node}
-            </mark>
-          );
+          const highlightedChunk = wrapHighlighted(text.substring(hs, he), hs, he);
+          if (Array.isArray(highlightedChunk)) {
+            highlightedChunk.forEach((el, idx) => {
+              parts.push(<React.Fragment key={`h-${hs}-${he}-${idx}`}>{el}</React.Fragment>);
+            });
+          } else {
+            parts.push(<React.Fragment key={`h-${hs}-${he}`}>{highlightedChunk}</React.Fragment>);
+          }
           cursor = he;
         }
       });
@@ -262,17 +299,49 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           if (speechStart > relStart && speechStart < relEnd) boundaries.push(speechStart);
           boundaries.push(relEnd);
           boundaries.sort((a, b) => a - b);
+          let insertedBreak = false;
           for (let i = 0; i < boundaries.length - 1; i++) {
             const s = boundaries[i];
             const e = boundaries[i + 1];
+            if (!insertedBreak && s === speechStart) { out.push(<br key={`br-fb-${bStart}-${s}`} />); insertedBreak = true; }
             let cls = 'text-sm text-neutral-800';
             if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-2 align-top';
-            else if (s >= speechStart) cls = 'block text-sm leading-relaxed text-neutral-800';
+            // speech segments are inline to prevent line breaks in the middle of highlights
+            else if (s >= speechStart) cls = 'text-sm leading-relaxed text-neutral-800';
             pushSeg(s, e, cls, `seg-fb-${bStart}-${s}-${e}`);
           }
           return out;
         };
-        return renderBlockWithHighlights(bStart, bEnd, wrapFallback);
+        const wrapFallbackHighlighted = (_chunkText: string, absStart: number, absEnd: number): JSX.Element[] => {
+          const relStart = absStart - bStart;
+          const relEnd = absEnd - bStart;
+          const bg = (flashOffset === absStart) ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30';
+          const out: JSX.Element[] = [];
+          const pushSeg = (from: number, to: number, cls: string, key: string) => {
+            if (to <= from) return;
+            out.push(<span key={key} className={`${cls} ${bg}`}>{full.substring(from, to)}</span>);
+          };
+          const boundaries = [relStart];
+          if (speakerStart >= 0) {
+            if (speakerStart > relStart && speakerStart < relEnd) boundaries.push(speakerStart);
+            if (speakerEnd > relStart && speakerEnd < relEnd) boundaries.push(speakerEnd);
+          }
+          if (speechStart > relStart && speechStart < relEnd) boundaries.push(speechStart);
+          boundaries.push(relEnd);
+          boundaries.sort((a, b) => a - b);
+          let insertedBreak = false;
+          for (let i = 0; i < boundaries.length - 1; i++) {
+            const s = boundaries[i];
+            const e = boundaries[i + 1];
+            if (!insertedBreak && s === speechStart) { out.push(<br key={`br-fbh-${bStart}-${s}`} />); insertedBreak = true; }
+            let cls = 'text-sm text-neutral-800';
+            if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-2 align-top';
+            else if (s >= speechStart) cls = 'text-sm leading-relaxed text-neutral-800';
+            pushSeg(s, e, cls, `seg-fbh-${bStart}-${s}-${e}`);
+          }
+          return out;
+        };
+        return renderBlockWithHighlights(bStart, bEnd, wrapFallback, wrapFallbackHighlighted);
       }
 
       const ts = m?.[1] ?? '';
@@ -299,25 +368,62 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         if (speechStart > relStart && speechStart < relEnd) boundaries.push(speechStart);
         boundaries.push(relEnd);
         boundaries.sort((a, b) => a - b);
+        let insertedBreak = false;
         for (let i = 0; i < boundaries.length - 1; i++) {
           const s = boundaries[i];
           const e = boundaries[i + 1];
+          if (!insertedBreak && s === speechStart) { out.push(<br key={`br-${bStart}-${s}`} />); insertedBreak = true; }
           let cls = 'text-sm text-neutral-800';
           if (s < tsEnd) cls = 'text-[11px] text-neutral-400 mr-2 align-top';
           else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-2 align-top';
-          else if (s >= speechStart) cls = 'block text-sm leading-relaxed text-neutral-800';
+          else if (s >= speechStart) cls = 'text-sm leading-relaxed text-neutral-800'; // inline speech
           pushSeg(s, e, cls, `seg-${bStart}-${s}-${e}`);
         }
         return out;
       };
 
-      return renderBlockWithHighlights(bStart, bEnd, wrap);
+      const wrapHighlighted = (_chunkText: string, absStart: number, absEnd: number): JSX.Element[] => {
+        const relStart = absStart - bStart;
+        const relEnd = absEnd - bStart;
+        const bg = (flashOffset === absStart) ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30';
+        const out: JSX.Element[] = [];
+        const pushSeg = (from: number, to: number, cls: string, key: string) => {
+          if (to <= from) return;
+          out.push(<span key={key} className={`${cls} ${bg}`}>{full.substring(from, to)}</span>);
+        };
+        const boundaries = [relStart];
+        if (tsEnd > relStart && tsEnd < relEnd) boundaries.push(tsEnd);
+        if (speakerStart >= 0) {
+          if (speakerStart > relStart && speakerStart < relEnd) boundaries.push(speakerStart);
+          if (speakerEnd > relStart && speakerEnd < relEnd) boundaries.push(speakerEnd);
+        }
+        if (speechStart > relStart && speechStart < relEnd) boundaries.push(speechStart);
+        boundaries.push(relEnd);
+        boundaries.sort((a, b) => a - b);
+        let insertedBreak = false;
+        for (let i = 0; i < boundaries.length - 1; i++) {
+          const s = boundaries[i];
+          const e = boundaries[i + 1];
+          if (!insertedBreak && s === speechStart) { out.push(<br key={`br-h-${bStart}-${s}`} />); insertedBreak = true; }
+          let cls = 'text-sm text-neutral-800';
+          if (s < tsEnd) cls = 'text-[11px] text-neutral-400 mr-2 align-top';
+          else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-2 align-top';
+          else if (s >= speechStart) cls = 'text-sm leading-relaxed text-neutral-800';
+          pushSeg(s, e, cls, `seg-h-${bStart}-${s}-${e}`);
+        }
+        return out;
+      };
+
+      return renderBlockWithHighlights(bStart, bEnd, wrap, wrapHighlighted);
     };
 
     // Generic block renderer (non-VTT)
     const renderGenericBlock = (block: { start: number; end: number }) => {
       const wrap = (chunkText: string, _absStart: number, _absEnd: number) => <>{chunkText}</>;
-      return renderBlockWithHighlights(block.start, block.end, wrap);
+      const wrapHighlighted = (chunkText: string, absStart: number, _absEnd: number) => (
+        <span className={`${flashOffset === absStart ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30'}`}>{chunkText}</span>
+      );
+      return renderBlockWithHighlights(block.start, block.end, wrap, wrapHighlighted);
     };
 
     // Debounced save
@@ -483,14 +589,12 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       const hadTrailingNewline = text.charCodeAt(Math.max(0, block.end - 1)) === 10; // '\n'
       const rawText = (el.innerText || '').replace(/\r\n/g, '\n');
 
-      let isDeleted = false;
       let newBlockText = rawText;
       if (isVtt) {
         const base = rawText.replace(/\n+$/g, '');
         const semEmpty = isSemanticallyEmptyVttLine(base);
         if (semEmpty) {
           newBlockText = '';
-          isDeleted = true;
         } else if (hadTrailingNewline && !newBlockText.endsWith('\n')) {
           newBlockText += '\n';
         }
