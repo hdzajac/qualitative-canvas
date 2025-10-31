@@ -37,6 +37,11 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
   // Selection
   const [selectedCodeIds, setSelectedCodeIds] = useState<string[]>([]);
   const [selectedThemeIds, setSelectedThemeIds] = useState<string[]>([]);
+  // Refs to access latest selection in global key handlers
+  const selectedCodeIdsRef = useRef<string[]>([]);
+  const selectedThemeIdsRef = useRef<string[]>([]);
+  useEffect(() => { selectedCodeIdsRef.current = selectedCodeIds; }, [selectedCodeIds]);
+  useEffect(() => { selectedThemeIdsRef.current = selectedThemeIds; }, [selectedThemeIds]);
 
   // Dragging
   const dragState = useRef<
@@ -207,13 +212,53 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.w, size.h]);
 
-  // Keyboard for tools and space-panning
+  // Deletion helper for selected items
+  async function deleteSelection() {
+    const codes = selectedCodeIdsRef.current.slice();
+    const themes = selectedThemeIdsRef.current.slice();
+    if (codes.length === 0 && themes.length === 0) return;
+    const total = codes.length + themes.length;
+    if (!confirm(`Delete ${total} selected item${total > 1 ? 's' : ''}?`)) return;
+    try {
+      await Promise.all([
+        ...codes.map((id) => deleteHighlight(id)),
+        ...themes.map((id) => deleteTheme(id)),
+      ]);
+      setNodes((prev) => prev.filter((n) => !((n.kind === 'code' && codes.includes(n.id)) || (n.kind === 'theme' && themes.includes(n.id)))));
+      setSelectedCodeIds([]);
+      setSelectedThemeIds([]);
+      const oe = openEntityRef.current;
+      if (oe && ((oe.kind === 'code' && codes.includes(oe.id)) || (oe.kind === 'theme' && themes.includes(oe.id)))) {
+        setOpenEntity(null);
+      }
+      toast.success('Deleted');
+      onUpdate();
+    } catch {
+      toast.error('Delete failed');
+    }
+  }
+
+  // Keyboard for tools, space-panning, and delete selection
   useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return true;
+      if ((el as HTMLElement).isContentEditable) return true;
+      const closestEditable = (el.closest && el.closest('input, textarea, [contenteditable="true"]')) as HTMLElement | null;
+      return !!closestEditable;
+    };
+
     const down = (e: KeyboardEvent) => {
       if (e.code === 'Space') setIsSpacePanning(true);
       if (e.code === 'KeyV') setTool('select');
       if (e.code === 'KeyH') setTool('hand');
       if (e.code === 'KeyT') setTool('text');
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditableTarget(e.target)) {
+        e.preventDefault();
+        deleteSelection();
+      }
     };
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') setIsSpacePanning(false);
@@ -224,6 +269,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Draw function stable
@@ -541,6 +587,8 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
   // Popup editing for all kinds
   const [openEntity, setOpenEntity] = useState<{ kind: NodeKind; id: string } | null>(null);
   function openPopupFor(n: NodeView) { setOpenEntity({ kind: n.kind, id: n.id }); }
+  const openEntityRef = useRef<typeof openEntity>(null);
+  useEffect(() => { openEntityRef.current = openEntity; }, [openEntity]);
 
   const [fontSize, setFontSize] = useState(12);
   useEffect(() => { /* no-op; value applied when drawing via getFontSize */ }, [fontSize]);
@@ -580,7 +628,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     const n = nodes.find(nn => nn.kind === 'code' && nn.id === openEntity.id);
     const fid = n?.highlight?.fileId;
     if (!fid || fileNames[fid]) return;
-    getFile(fid).then(f => setFileNames(prev => ({ ...prev, [fid]: f.filename }))).catch(() => {});
+    getFile(fid).then(f => setFileNames(prev => ({ ...prev, [fid]: f.filename }))).catch(() => { });
   }, [openEntity, nodes, fileNames]);
 
   // Inline title editing for code in side panel
