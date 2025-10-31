@@ -1,27 +1,23 @@
-import type { Highlight, Theme, Insight, Annotation, CardStyle } from '@/types';
+import type { Highlight as Code, Theme, Insight, Annotation, CardStyle } from '@/types';
+
+export type NodeKind = 'code' | 'theme' | 'insight' | 'annotation';
+
+export interface NodeViewBase {
+  id: string;
+  x: number; y: number; w: number; h: number;
+}
+export interface CodeNodeView extends NodeViewBase { kind: 'code'; highlight?: Code }
+export interface ThemeNodeView extends NodeViewBase { kind: 'theme'; theme?: Theme }
+export interface InsightNodeView extends NodeViewBase { kind: 'insight'; insight?: Insight }
+export interface AnnotationNodeView extends NodeViewBase { kind: 'annotation'; annotation?: Annotation }
+export type NodeView = CodeNodeView | ThemeNodeView | InsightNodeView | AnnotationNodeView;
 
 export type Tool = 'select' | 'hand' | 'text';
-export type NodeKind = 'code' | 'theme' | 'insight' | 'annotation';
-export type ResizeCorner = 'nw' | 'ne' | 'se' | 'sw';
-
-export type NodeView = {
-  id: string;
-  kind: NodeKind;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  highlight?: Highlight;
-  theme?: Theme;
-  insight?: Insight;
-  annotation?: Annotation;
-};
+export type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
 
 export const DEFAULTS = {
-  code: { w: 200, h: 60 },
-  theme: { w: 200, h: 60 },
-  insight: { w: 200, h: 60 },
-  annotation: { w: 200, h: 60 },
+  code: { w: 220, h: 110 },
+  theme: { w: 260, h: 120 },
+  insight: { w: 320, h: 140 },
+  annotation: { w: 160, h: 60 },
 };
-
-export type { Highlight, Theme, Insight, Annotation, CardStyle };

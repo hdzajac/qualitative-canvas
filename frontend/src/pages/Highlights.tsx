@@ -1,3 +1,6 @@
+// Deprecated: replaced by Codes.tsx
+// Kept temporarily to avoid breaking imports; remove after verifying all references updated.
+
 import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getFiles, getHighlights, getProjects, deleteHighlight } from '@/services/api';

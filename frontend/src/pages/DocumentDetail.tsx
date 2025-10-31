@@ -59,10 +59,10 @@ export default function DocumentDetail() {
 
                 <div className="basis-1/4 min-w-0">
                     <Card className="brutal-card">
-                        <CardHeader><CardTitle>Highlights & Codes</CardTitle></CardHeader>
+                        <CardHeader><CardTitle>Codes</CardTitle></CardHeader>
                         <CardContent>
                             {docHighlights.length === 0 ? (
-                                <div className="text-sm text-neutral-600">No highlights yet.</div>
+                                <div className="text-sm text-neutral-600">No codes yet.</div>
                             ) : (
                                 <div className="space-y-2 max-h-[75vh] overflow-auto">
                                     {docHighlights.map(h => (

@@ -16,7 +16,7 @@ export interface UploadedFile {
 export interface Size { w: number; h: number }
 export interface CardStyle { fontSize?: number }
 
-export interface Highlight {
+export interface Code { // was Highlight
   id: string;
   fileId: string;
   startOffset: number;
@@ -29,10 +29,12 @@ export interface Highlight {
   style?: CardStyle;
 }
 
+export type Highlight = Code; // backward compat alias
+
 export interface Theme {
   id: string;
   name: string;
-  highlightIds: string[];
+  highlightIds: string[]; // keep name for UI compat; backend maps to code_ids
   createdAt: string;
   position?: { x: number; y: number };
   size?: Size;

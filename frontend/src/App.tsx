@@ -11,7 +11,7 @@ import DocumentDetail from "./pages/DocumentDetail";
 import CanvasPage from "./pages/CanvasPage";
 import Themes from "./pages/Themes";
 import Insights from "./pages/Insights";
-import HighlightsPage from "./pages/Highlights";
+import CodesPage from "./pages/Codes";
 import { getProjects } from "@/services/api";
 import { useSelectedProject } from "./hooks/useSelectedProject";
 import { Button } from "@/components/ui/button";
@@ -70,7 +70,7 @@ function TopBar() {
       <nav className="flex gap-6">
         <Link className={active('/projects')} to="/projects">Projects</Link>
         <Link className={active('/documents')} to="/documents">Documents</Link>
-        <Link className={active('/highlights')} to="/highlights">Highlights</Link>
+        <Link className={active('/codes')} to="/codes">Codes</Link>
         <Link className={active('/themes')} to="/themes">Themes</Link>
         <Link className={active('/insights')} to="/insights">Insights</Link>
         <Link className={active('/canvas')} to="/canvas">Canvas</Link>
@@ -95,7 +95,7 @@ const App = () => (
           <Route element={<RequireProject />}>
             <Route path="/documents" element={<Documents />} />
             <Route path="/documents/:id" element={<DocumentDetail />} />
-            <Route path="/highlights" element={<HighlightsPage />} />
+            <Route path="/codes" element={<CodesPage />} />
             <Route path="/themes" element={<Themes />} />
             <Route path="/insights" element={<Insights />} />
             <Route path="/canvas" element={<CanvasPage />} />

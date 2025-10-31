@@ -4,7 +4,7 @@ import morgan from 'morgan';
 import dotenv from 'dotenv';
 import pool from './db/pool.js';
 import filesRoutes from './routes/files.js';
-import highlightsRoutes from './routes/highlights.js';
+import codesRoutes from './routes/codes.js';
 import themesRoutes from './routes/themes.js';
 import insightsRoutes from './routes/insights.js';
 import annotationsRoutes from './routes/annotations.js';
@@ -30,7 +30,7 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
-    CREATE TABLE IF NOT EXISTS highlights (
+    CREATE TABLE IF NOT EXISTS codes (
       id UUID PRIMARY KEY,
       file_id UUID NOT NULL REFERENCES files(id) ON DELETE CASCADE,
       start_offset INTEGER NOT NULL CHECK (start_offset >= 0),
@@ -44,7 +44,7 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS themes (
       id UUID PRIMARY KEY,
       name TEXT NOT NULL,
-      highlight_ids UUID[] NOT NULL DEFAULT '{}',
+      code_ids UUID[] NOT NULL DEFAULT '{}',
       position JSONB,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -70,8 +70,8 @@ async function initDb() {
     ALTER TABLE annotations ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
 
     CREATE INDEX IF NOT EXISTS idx_files_created_at ON files(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_highlights_file_id ON highlights(file_id);
-    CREATE INDEX IF NOT EXISTS idx_highlights_created_at ON highlights(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_codes_file_id ON codes(file_id);
+    CREATE INDEX IF NOT EXISTS idx_codes_created_at ON codes(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_themes_created_at ON themes(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_insights_created_at ON insights(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_annotations_created_at ON annotations(created_at DESC);
@@ -93,7 +93,9 @@ app.get('/api/health', async (_req, res) => {
 // Routes
 app.use('/api/projects', projectsRoutes(pool));
 app.use('/api/files', filesRoutes(pool));
-app.use('/api/highlights', highlightsRoutes(pool));
+app.use('/api/codes', codesRoutes(pool));
+// Backward compat: /highlights serves codes
+app.use('/api/highlights', codesRoutes(pool));
 app.use('/api/themes', themesRoutes(pool));
 app.use('/api/insights', insightsRoutes(pool));
 app.use('/api/annotations', annotationsRoutes(pool));

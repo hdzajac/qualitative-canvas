@@ -23,9 +23,9 @@ export default function insightsRoutes(pool) {
         `SELECT DISTINCT i.* FROM insights i
          JOIN LATERAL unnest(i.theme_ids) AS tid ON true
          JOIN themes t ON t.id = tid
-         JOIN LATERAL unnest(t.highlight_ids) AS hid ON true
-         JOIN highlights h ON h.id = hid
-         JOIN files f ON f.id = h.file_id
+         JOIN LATERAL unnest(t.code_ids) AS cid ON true
+         JOIN codes c ON c.id = cid
+         JOIN files f ON f.id = c.file_id
          WHERE f.project_id = $1
          ORDER BY i.created_at DESC`,
         [projectId]

@@ -72,9 +72,9 @@ export const updateFile = (id: string, updates: Partial<UploadedFile>): Promise<
 export const deleteFile = (id: string): Promise<void> =>
   http<void>(`/files/${id}`, { method: 'DELETE' });
 
-// Highlights
+// Highlights (Codes)
 export const createHighlight = (highlight: Omit<Highlight, 'id' | 'createdAt'>): Promise<Highlight> =>
-  http<Highlight>('/highlights', { method: 'POST', body: JSON.stringify(highlight) });
+  http<Highlight>('/codes', { method: 'POST', body: JSON.stringify(highlight) });
 
 export const getHighlights = (params?: { fileId?: string; projectId?: string }): Promise<Highlight[]> => {
   const qs = params?.fileId
@@ -82,14 +82,14 @@ export const getHighlights = (params?: { fileId?: string; projectId?: string }):
     : params?.projectId
     ? `?projectId=${encodeURIComponent(params.projectId)}`
     : '';
-  return http<Highlight[]>(`/highlights${qs}`);
+  return http<Highlight[]>(`/codes${qs}`);
 };
 
 export const updateHighlight = (id: string, updates: Partial<Highlight>): Promise<Highlight> =>
-  http<Highlight>(`/highlights/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
+  http<Highlight>(`/codes/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
 export const deleteHighlight = (id: string): Promise<void> =>
-  http<void>(`/highlights/${id}`, { method: 'DELETE' });
+  http<void>(`/codes/${id}`, { method: 'DELETE' });
 
 // Themes
 export const createTheme = (theme: Omit<Theme, 'id' | 'createdAt'>): Promise<Theme> =>
