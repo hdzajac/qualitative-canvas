@@ -65,6 +65,12 @@ export function drawNode(
   ctx.fillStyle = accent;
   ctx.fillRect(n.x, n.y, 6, n.h);
 
+  // Clip contents to card bounds (inside the stroke)
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(n.x + 1, n.y + 1, n.w - 2, n.h - 2);
+  ctx.clip();
+
   const iconY = n.y + 6; // slightly tighter
   const iconX = n.x + n.w - 18;
   ctx.fillStyle = '#374151';
@@ -75,20 +81,23 @@ export function drawNode(
   ctx.fillStyle = '#111827';
   ctx.font = `${fontSize}px ui-sans-serif, system-ui, -apple-system`;
   const titleY = n.y + 18;
+
+  // compute available space values (used for notes), but do not clamp title lines here
+  const bottomPadding = 18;
+  const lineHeight = Math.max(12, Math.round(fontSize * 1.2));
+
   if (n.kind === 'code' && n.highlight) {
-    ctx.fillText(n.highlight.codeName || 'Untitled', n.x + 12, titleY);
-    // snippet
-    const body = n.highlight.text || '';
-    if (body) {
-      ctx.font = `${Math.max(10, Math.round(fontSize * 0.9))}px ui-sans-serif, system-ui, -apple-system`;
-      wrapText(ctx, body, n.x + 12, titleY + 14, n.w - 24, Math.max(12, Math.round(fontSize * 1.05)), 1000);
-    }
+    const title = n.highlight.codeName || 'Untitled';
+    wrapText(ctx, title, n.x + 12, titleY, n.w - 24, lineHeight, 1000);
+    // Do NOT draw snippet body here; it should only be visible in the side panel
   } else if (n.kind === 'theme' && n.theme) {
-    ctx.fillText(n.theme.name, n.x + 12, titleY);
+    wrapText(ctx, n.theme.name, n.x + 12, titleY, n.w - 24, lineHeight, 1000);
   } else if (n.kind === 'insight' && n.insight) {
-    ctx.fillText(n.insight.name, n.x + 12, titleY);
+    wrapText(ctx, n.insight.name, n.x + 12, titleY, n.w - 24, lineHeight, 1000);
   } else if (n.kind === 'annotation' && n.annotation) {
-    wrapText(ctx, n.annotation.content || 'New text', n.x + 12, titleY, n.w - 24, 13, 2000);
+    // Notes show their body directly, clamp to bounds implicitly via clip
+    const availableH = Math.max(0, n.h - (titleY - n.y) - bottomPadding);
+    wrapText(ctx, n.annotation.content || 'New text', n.x + 12, titleY, n.w - 24, lineHeight, Math.max(1, Math.floor(availableH / lineHeight)));
   }
 
   // Keep label font fixed irrespective of text size
@@ -98,6 +107,8 @@ export function drawNode(
   const typeLabel = n.kind === 'code' ? 'Code' : n.kind === 'theme' ? 'Theme' : n.kind === 'insight' ? 'Insight' : 'Note';
   ctx.fillText(typeLabel, n.x + n.w - 8, n.y + n.h - 8);
   ctx.textAlign = 'left';
+
+  ctx.restore(); // end clip
 
   ctx.restore();
 }

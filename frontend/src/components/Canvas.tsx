@@ -6,7 +6,7 @@ import { createAnnotation, createTheme, createInsight, updateHighlight, updateTh
 import { toast } from 'sonner';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { NodeKind, Tool, NodeView, DEFAULTS, ResizeCorner } from './canvas/CanvasTypes';
-import { clamp, toggleInArray, union, hitTestNode, intersects } from './canvas/CanvasUtils';
+import { clamp, toggleInArray, union, hitTestNode, intersects, measureWrappedLines } from './canvas/CanvasUtils';
 import { drawGrid, drawOrthogonal, roundRect, drawNode } from './canvas/CanvasDrawing';
 
 interface CanvasProps {
@@ -549,15 +549,54 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
     return style?.fontSize ?? fontSize;
   };
 
-  async function persistFontSize(n: NodeView, size: number) {
+  // Persist font size for a single node and update local state
+  const persistFontSize = async (n: NodeView, fs: number) => {
     try {
-      if (n.kind === 'code') await updateHighlight(n.id, { style: { ...(n.highlight?.style || {}), fontSize: size } });
-      if (n.kind === 'theme') await updateTheme(n.id, { style: { ...(n.theme?.style || {}), fontSize: size } });
-      if (n.kind === 'insight') await updateInsight(n.id, { style: { ...(n.insight?.style || {}), fontSize: size } });
-      if (n.kind === 'annotation') await updateAnnotation(n.id, { style: { ...(n.annotation?.style || {}), fontSize: size } });
+      if (n.kind === 'code') {
+        await updateHighlight(n.id, { style: { ...(n.highlight?.style || {}), fontSize: fs } });
+        setNodes(prev => prev.map(nn => (nn.kind === 'code' && nn.id === n.id) ? { ...nn, highlight: { ...nn.highlight!, style: { ...(nn.highlight?.style || {}), fontSize: fs } } } : nn));
+      } else if (n.kind === 'theme') {
+        await updateTheme(n.id, { style: { ...(n.theme?.style || {}), fontSize: fs } });
+        setNodes(prev => prev.map(nn => (nn.kind === 'theme' && nn.id === n.id) ? { ...nn, theme: { ...nn.theme!, style: { ...(nn.theme?.style || {}), fontSize: fs } } } : nn));
+      } else if (n.kind === 'insight') {
+        await updateInsight(n.id, { style: { ...(n.insight?.style || {}), fontSize: fs } });
+        setNodes(prev => prev.map(nn => (nn.kind === 'insight' && nn.id === n.id) ? { ...nn, insight: { ...nn.insight!, style: { ...(nn.insight?.style || {}), fontSize: fs } } } : nn));
+      } else if (n.kind === 'annotation') {
+        await updateAnnotation(n.id, { style: { ...(n.annotation?.style || {}), fontSize: fs } });
+        setNodes(prev => prev.map(nn => (nn.kind === 'annotation' && nn.id === n.id) ? { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), fontSize: fs } } } : nn));
+      }
+      toast.success('Saved');
       onUpdate();
-    } catch { toast.error('Failed to save font size'); }
-  }
+    } catch {
+      toast.error('Save failed');
+    }
+  };
+
+  // Auto-grow height based on wrapped text
+  useEffect(() => {
+    setNodes((prev) => {
+      let changed = false;
+      const next = prev.map((n) => {
+        const fs = getFontSize(n);
+        const lineHeight = Math.max(12, Math.round(fs * 1.2));
+        const contentWidth = Math.max(10, n.w - 24);
+        let lines = 1;
+        if (n.kind === 'code' && n.highlight) lines = measureWrappedLines(n.highlight.codeName || 'Untitled', contentWidth, `${fs}px ui-sans-serif, system-ui, -apple-system`);
+        else if (n.kind === 'theme' && n.theme) lines = measureWrappedLines(n.theme.name || '', contentWidth, `${fs}px ui-sans-serif, system-ui, -apple-system`);
+        else if (n.kind === 'insight' && n.insight) lines = measureWrappedLines(n.insight.name || '', contentWidth, `${fs}px ui-sans-serif, system-ui, -apple-system`);
+        else if (n.kind === 'annotation' && n.annotation) lines = measureWrappedLines(n.annotation.content || 'New text', contentWidth, `${fs}px ui-sans-serif, system-ui, -apple-system`);
+        const topPadding = 18; // space before first line baseline
+        const bottomPadding = 18; // reserve for type label
+        const minH = n.kind === 'code' ? DEFAULTS.code.h : n.kind === 'theme' ? DEFAULTS.theme.h : n.kind === 'insight' ? DEFAULTS.insight.h : DEFAULTS.annotation.h;
+        const desired = Math.max(minH, topPadding + lines * lineHeight + bottomPadding);
+        if (desired > n.h + 0.5) { changed = true; return { ...n, h: desired }; }
+        return n;
+      });
+      return changed ? next : prev;
+    });
+    // Redraw after potential size change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontSize, nodes]);
 
   // Toolbar additions: text size selector
   // ...left toolbar remains, append a small control on top center
@@ -652,6 +691,11 @@ export const Canvas = ({ highlights, themes, insights, annotations, onUpdate }: 
             </div>
           )}
         </div>
+      )}
+
+      {/* Click-away overlay for side panel */}
+      {openEntity && (
+        <div className="absolute inset-0 z-20" onClick={() => setOpenEntity(null)} />
       )}
 
       {/* Size controls for single selection (width presets + font size per-card) */}
