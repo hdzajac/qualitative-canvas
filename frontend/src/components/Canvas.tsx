@@ -60,6 +60,8 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       startWorld: { x: number; y: number };
       startNode: { x: number; y: number };
       moved: boolean;
+      // New: group drag support (indices and their starting positions)
+      group: Array<{ idx: number; startX: number; startY: number }>;
     }
     | {
       mode: 'pan';
@@ -474,9 +476,42 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     if (idx !== -1) {
       const n = nodes[idx];
       if (isInOpenIcon(n, world.x, world.y)) { openPopupFor(n); return; }
-      dragState.current = { mode: 'node', nodeIdx: idx, startWorld: world, startNode: { x: n.x, y: n.y }, moved: false };
-      if (n.kind === 'code') setSelectedCodeIds((prev) => toggleInArray(prev, n.id, !e.shiftKey));
-      if (n.kind === 'theme') setSelectedThemeIds((prev) => toggleInArray(prev, n.id, !e.shiftKey));
+
+      // Determine updated selection based on click
+      const alreadySelected = (n.kind === 'code' && selectedCodeIds.includes(n.id)) || (n.kind === 'theme' && selectedThemeIds.includes(n.id));
+      let nextCodes = selectedCodeIds.slice();
+      let nextThemes = selectedThemeIds.slice();
+      if (n.kind === 'code') {
+        if (e.shiftKey) {
+          nextCodes = toggleInArray(nextCodes, n.id, false);
+        } else if (!alreadySelected) {
+          nextCodes = [n.id];
+          nextThemes = [];
+        }
+      } else if (n.kind === 'theme') {
+        if (e.shiftKey) {
+          nextThemes = toggleInArray(nextThemes, n.id, false);
+        } else if (!alreadySelected) {
+          nextThemes = [n.id];
+          nextCodes = [];
+        }
+      }
+      // Apply selection state
+      setSelectedCodeIds(nextCodes);
+      setSelectedThemeIds(nextThemes);
+
+      // Build drag group from the updated selection
+      const groupIdxs: number[] = [];
+      for (let i = 0; i < nodes.length; i++) {
+        const nn = nodes[i];
+        if ((nn.kind === 'code' && nextCodes.includes(nn.id)) || (nn.kind === 'theme' && nextThemes.includes(nn.id))) {
+          groupIdxs.push(i);
+        }
+      }
+      if (!groupIdxs.includes(idx)) groupIdxs.push(idx);
+      const group = groupIdxs.map(i => ({ idx: i, startX: nodes[i].x, startY: nodes[i].y }));
+
+      dragState.current = { mode: 'node', nodeIdx: idx, startWorld: world, startNode: { x: n.x, y: n.y }, moved: false, group };
     } else {
       dragState.current = { mode: 'select', startClient: { x: sx, y: sy }, rect: { x: sx, y: sy, w: 0, h: 0 } };
       if (!e.shiftKey) { setSelectedCodeIds([]); setSelectedThemeIds([]); }
@@ -521,8 +556,12 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       const dsNode = dragState.current; // mode is 'node' here
       setNodes((prev) => {
         const copy = prev.slice();
-        const i = dsNode.nodeIdx;
-        if (i >= 0) { copy[i] = { ...copy[i], x: dsNode.startNode.x + dx, y: dsNode.startNode.y + dy }; }
+        // Move all nodes in the group together
+        dsNode.group.forEach(g => {
+          if (g.idx >= 0 && g.idx < copy.length) {
+            copy[g.idx] = { ...copy[g.idx], x: g.startX + dx, y: g.startY + dy };
+          }
+        });
         return copy;
       });
       dragState.current.moved = true;
@@ -589,12 +628,17 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
     // Persist node move
     if (ds.mode === 'node' && ds.moved) {
-      const n = nodes[ds.nodeIdx];
+      // Persist all nodes that were part of the drag group
+      const uniqueIdxs = Array.from(new Set(ds.group.map(g => g.idx)));
       try {
-        if (n.kind === 'code' && n.highlight) await updateHighlight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
-        if (n.kind === 'theme' && n.theme) await updateTheme(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
-        if (n.kind === 'insight' && n.insight) await updateInsight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
-        if (n.kind === 'annotation' && n.annotation) await updateAnnotation(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
+        await Promise.all(uniqueIdxs.map(async (i) => {
+          const n = nodes[i];
+          if (!n) return;
+          if (n.kind === 'code' && n.highlight) return updateHighlight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
+          if (n.kind === 'theme' && n.theme) return updateTheme(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
+          if (n.kind === 'insight' && n.insight) return updateInsight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
+          if (n.kind === 'annotation' && n.annotation) return updateAnnotation(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
+        }));
         onUpdate();
       } catch (err) { console.error(err); toast.error('Failed to save'); }
     }

@@ -7,6 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Theme } from '@/types';
 import { createInsight } from '@/services/api';
 import { toast } from 'sonner';
+import { DEFAULTS } from '@/components/canvas/CanvasTypes';
 
 interface InsightCreatorProps {
   themes: Theme[];
@@ -35,6 +36,7 @@ export const InsightCreator = ({ themes, onInsightCreated }: InsightCreatorProps
       await createInsight({
         name: insightName.trim(),
         themeIds: selectedThemes,
+        size: DEFAULTS.insight,
       });
       toast.success('Insight created');
       setInsightName('');

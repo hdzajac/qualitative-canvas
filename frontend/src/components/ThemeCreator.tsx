@@ -7,6 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Highlight } from '@/types';
 import { createTheme } from '@/services/api';
 import { toast } from 'sonner';
+import { DEFAULTS } from '@/components/canvas/CanvasTypes';
 
 interface ThemeCreatorProps {
   highlights: Highlight[];
@@ -35,6 +36,7 @@ export const ThemeCreator = ({ highlights, onThemeCreated }: ThemeCreatorProps) 
       await createTheme({
         name: themeName.trim(),
         highlightIds: selectedHighlights,
+        size: DEFAULTS.theme,
       });
       toast.success('Theme created');
       setThemeName('');

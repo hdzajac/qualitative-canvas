@@ -16,9 +16,9 @@ export type Tool = 'select' | 'hand' | 'text';
 export type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
 
 export const DEFAULTS = {
-  code: { w: 200, h: 60 }, // default size for new code cards (height 60)
-  theme: { w: 260, h: 120 },
-  insight: { w: 320, h: 140 },
+  code: { w: 200, h: 60 }, // default size for new cards
+  theme: { w: 200, h: 60 },
+  insight: { w: 200, h: 60 },
   annotation: { w: 160, h: 60 },
 };
 
