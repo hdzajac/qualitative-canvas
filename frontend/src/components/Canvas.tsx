@@ -81,6 +81,14 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       startRect: { x: number; y: number; w: number; h: number };
       moved: boolean;
     }
+    | {
+      mode: 'connect';
+      fromKind: NodeKind; // 'code' | 'theme'
+      fromId: string;
+      start: { x: number; y: number }; // world
+      last: { x: number; y: number }; // world
+      anchor: { x: number; y: number }; // fixed world anchor at handle center
+    }
     | null
   >(null);
 
@@ -413,12 +421,22 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     });
     ctx.restore();
 
-    // Nodes
-    nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll));
+    // Nodes (show subtle handle only for hovered node, or for the source node during connect)
+    nodes.forEach((n) => {
+      const isConnectingFromThis = (dragState.current && dragState.current.mode === 'connect' && dragState.current.fromId === n.id);
+      const showHandle = isConnectingFromThis || ((hoverInfo.current && hoverInfo.current.kind === 'node' && hoverInfo.current.id === n.id) ? (n.kind === 'code' || n.kind === 'theme') : false);
+      const isConnectTarget = Boolean(connectTargetRef.current && connectTargetRef.current.id === n.id);
+      drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll, { showHandle, highlightAsTarget: isConnectTarget });
+    });
 
     ctx.restore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.w, size.h, offset.x, offset.y, zoom, nodes, selectedCodeIds, selectedThemeIds, getBottomRightLabel]);
+
+  // Track hover target to control handle visibility
+  const hoverInfo = useRef<null | { kind: 'node'; id: string }>(null);
+  // Track a connect target under cursor during connect gesture
+  const connectTargetRef = useRef<null | { id: string; kind: 'theme' | 'insight' }>(null);
 
   // Redraw whenever draw dependencies change (covers zoom/offset updates)
   useEffect(() => { draw(); }, [draw]);
@@ -459,6 +477,11 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
   // onWheel handler bound to current state
   const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+    if (dragState.current) {
+      // Ignore wheel when a drag gesture is active (connect, move, marquee, etc.)
+      e.preventDefault();
+      return;
+    }
     e.preventDefault();
     const rect = canvasRef.current?.getBoundingClientRect(); if (!rect) return;
     const mx = e.clientX - rect.left; const my = e.clientY - rect.top;
@@ -470,9 +493,58 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     // draw will be triggered by the [draw] effect
   }, [screenToWorld, zoom]);
 
-  // hitTest for top-right open icon
+  // Helpers to detect hovering edge and connection handle
   function isInOpenIcon(n: NodeView, wx: number, wy: number) {
     return wx >= n.x + n.w - 28 && wx <= n.x + n.w - 8 && wy >= n.y + 6 && wy <= n.y + 20;
+  }
+  function isInConnectHandle(n: NodeView, wx: number, wy: number, z: number) {
+    if (!(n.kind === 'code' || n.kind === 'theme')) return false;
+    const cx = n.x + n.w - 8; const cy = n.y + n.h / 2;
+    // Constant ~10px radius in screen space => world radius scales with zoom
+    const r = Math.max(6, 10 / Math.max(0.0001, z));
+    return (wx - cx) * (wx - cx) + (wy - cy) * (wy - cy) <= r * r;
+  }
+
+  // Edge model for hit-testing: store screen-space polyline of each edge
+  type EdgeHit = { kind: 'code-theme' | 'theme-insight'; fromId: string; toId: string };
+  function hitTestEdge(wx: number, wy: number): EdgeHit | null {
+    // Consider edges from codes->themes and themes->insights
+    // Simple tolerance to an orthogonal polyline: check distance to segments
+    const byKey = new Map(nodes.map((n) => [`${n.kind}:${n.id}`, n] as const));
+    const tol = 8; // world units
+    function distToSeg(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
+      const A = px - x1; const B = py - y1; const C = x2 - x1; const D = y2 - y1;
+      const dot = A * C + B * D; const len_sq = C * C + D * D; let t = len_sq ? dot / len_sq : 0; t = Math.max(0, Math.min(1, t));
+      const xx = x1 + C * t; const yy = y1 + D * t; const dx = px - xx; const dy = py - yy;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    for (const t of themes) {
+      for (const hid of t.highlightIds) {
+        const a = byKey.get(`code:${hid}`); const b = byKey.get(`theme:${t.id}`);
+        if (!a || !b) continue;
+        const ax = a.x + a.w / 2, ay = a.y + a.h; const bx = b.x + b.w / 2, by = b.y; const my = (ay + by) / 2;
+        const d = Math.min(
+          distToSeg(wx, wy, ax, ay, ax, my),
+          distToSeg(wx, wy, ax, my, bx, my),
+          distToSeg(wx, wy, bx, my, bx, by)
+        );
+        if (d <= tol) return { kind: 'code-theme', fromId: hid, toId: t.id };
+      }
+    }
+    for (const i of insights) {
+      for (const tid of i.themeIds) {
+        const a = byKey.get(`theme:${tid}`); const b = byKey.get(`insight:${i.id}`);
+        if (!a || !b) continue;
+        const ax = a.x + a.w / 2, ay = a.y + a.h; const bx = b.x + b.w / 2, by = b.y; const my = (ay + by) / 2;
+        const d = Math.min(
+          distToSeg(wx, wy, ax, ay, ax, my),
+          distToSeg(wx, wy, ax, my, bx, my),
+          distToSeg(wx, wy, bx, my, bx, by)
+        );
+        if (d <= tol) return { kind: 'theme-insight', fromId: tid, toId: i.id };
+      }
+    }
+    return null;
   }
 
   const onMouseDown: React.MouseEventHandler<HTMLCanvasElement> = (e) => {
@@ -488,6 +560,16 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     if (idx !== -1) {
       const n = nodes[idx];
       if (isInOpenIcon(n, world.x, world.y)) { openPopupFor(n); return; }
+      // Start connect gesture if hitting handle (do not change selection or viewport)
+      if (isInConnectHandle(n, world.x, world.y, zoom)) {
+        if (n.kind === 'code' || n.kind === 'theme') {
+          e.preventDefault(); e.stopPropagation();
+          const ax = n.x + n.w - 8; const ay = n.y + n.h / 2;
+          dragState.current = { mode: 'connect', fromKind: n.kind, fromId: n.id, start: world, last: world, anchor: { x: ax, y: ay } };
+          setHoverCursor('crosshair');
+          return;
+        }
+      }
 
       // Determine updated selection based on click
       const alreadySelected = (n.kind === 'code' && selectedCodeIds.includes(n.id)) || (n.kind === 'theme' && selectedThemeIds.includes(n.id));
@@ -525,6 +607,33 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
       dragState.current = { mode: 'node', nodeIdx: idx, startWorld: world, startNode: { x: n.x, y: n.y }, moved: false, group };
     } else {
+      // Edge click? If close to an edge, prompt deletion
+      const edge = hitTestEdge(world.x, world.y);
+      if (edge) {
+        const confirmMsg = edge.kind === 'code-theme' ? 'Remove code from theme?' : 'Remove theme from insight?';
+        if (confirm(confirmMsg)) {
+          (async () => {
+            try {
+              if (edge.kind === 'code-theme') {
+                const t = themes.find(tt => tt.id === edge.toId);
+                if (!t) return;
+                const newIds = t.highlightIds.filter(id => id !== edge.fromId);
+                await updateTheme(t.id, { highlightIds: newIds });
+              } else {
+                const iobj = insights.find(ii => ii.id === edge.toId);
+                if (!iobj) return;
+                const newIds = iobj.themeIds.filter(id => id !== edge.fromId);
+                await updateInsight(iobj.id, { themeIds: newIds });
+              }
+              toast.success('Connection removed');
+              onUpdate();
+            } catch {
+              toast.error('Failed to update');
+            }
+          })();
+        }
+        return;
+      }
       dragState.current = { mode: 'select', startClient: { x: sx, y: sy }, rect: { x: sx, y: sy, w: 0, h: 0 } };
       if (!e.shiftKey) { setSelectedCodeIds([]); setSelectedThemeIds([]); }
     }
@@ -542,10 +651,17 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       const idx = hitTestNode(world.x, world.y, nodes);
       if (idx !== -1) {
         const n = nodes[idx];
-        if (isInOpenIcon(n, world.x, world.y)) { setHoverCursor('pointer'); return; }
+        hoverInfo.current = { kind: 'node', id: n.id };
+        if (isInOpenIcon(n, world.x, world.y)) { setHoverCursor('pointer'); draw(); return; }
+        if (isInConnectHandle(n, world.x, world.y, zoom)) { setHoverCursor('crosshair'); draw(); return; }
         setHoverCursor('move');
+        draw();
       } else {
-        setHoverCursor('default');
+        hoverInfo.current = null;
+        // edge hover?
+        const edge = hitTestEdge(world.x, world.y);
+        if (edge) setHoverCursor('pointer'); else setHoverCursor('default');
+        draw();
       }
       return;
     }
@@ -613,15 +729,83 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       ctx2.lineWidth = 1.5;
       ctx2.strokeRect(x, y, w, h);
       ctx2.restore();
+    } else if (dragState.current.mode === 'connect') {
+      const world = screenToWorld(sx, sy);
+      dragState.current.last = world;
+
+      // Update hovered connect target indicator
+      const fromKind = dragState.current.fromKind; // 'code' | 'theme'
+      const idx = hitTestNode(world.x, world.y, nodes);
+      const prevTarget = connectTargetRef.current?.id;
+      let nextTarget: null | { id: string; kind: 'theme' | 'insight' } = null;
+      if (idx !== -1) {
+        const tgt = nodes[idx];
+        const ok = (fromKind === 'code' && tgt.kind === 'theme') || (fromKind === 'theme' && tgt.kind === 'insight');
+        if (ok) nextTarget = { id: tgt.id, kind: tgt.kind } as { id: string; kind: 'theme' | 'insight' };
+      }
+      connectTargetRef.current = nextTarget;
+
+      const canvas = canvasRef.current; if (!canvas) return;
+      const ctx = canvas.getContext('2d'); if (!ctx) return;
+      const dpr = dprRef.current;
+      // Reset transform and clear entire canvas in device pixels
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.restore();
+      // Draw base scene once (it manages its own DPR scaling)
+      // But we want to highlight a target; easiest is to manually draw similar to draw() with highlight flag
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, size.w, size.h);
+      drawGrid(ctx, size.w, size.h, 16, '#e5e7eb');
+      ctx.translate(offset.x, offset.y);
+      ctx.scale(zoom, zoom);
+      // Edges
+      const byKey = new Map(nodes.map((n) => [`${n.kind}:${n.id}`, n] as const));
+      ctx.save(); ctx.strokeStyle = '#b1b1b7'; ctx.lineWidth = 1;
+      themes.forEach((t) => { t.highlightIds.forEach((hid) => { const a = byKey.get(`code:${hid}`); const b = byKey.get(`theme:${t.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
+      insights.forEach((i) => { i.themeIds.forEach((tid) => { const a = byKey.get(`theme:${tid}`); const b = byKey.get(`insight:${i.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
+      ctx.restore();
+      // Nodes with potential highlight
+      nodes.forEach((n) => {
+        const isConnectingFromThis = (dragState.current && dragState.current.mode === 'connect' && dragState.current.fromId === n.id);
+        const showHandle = isConnectingFromThis || ((hoverInfo.current && hoverInfo.current.kind === 'node' && hoverInfo.current.id === n.id) ? (n.kind === 'code' || n.kind === 'theme') : false);
+        const isConnectTarget = Boolean(connectTargetRef.current && connectTargetRef.current.id === n.id);
+        drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll, { showHandle, highlightAsTarget: isConnectTarget });
+      });
+      ctx.restore();
+
+      // Draw overlay wire using same world transform
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      ctx.translate(offset.x, offset.y);
+      ctx.scale(zoom, zoom);
+      ctx.strokeStyle = '#111827';
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1.5;
+      const dsConn = dragState.current; // narrowed to 'connect'
+      if (dsConn && dsConn.mode === 'connect') {
+        const ax = dsConn.anchor.x; const ay = dsConn.anchor.y;
+        const bx = world.x; const by = world.y;
+        drawOrthogonal(ctx, ax, ay, bx, by);
+      }
+      ctx.restore();
+      setHoverCursor('crosshair');
     }
   };
 
   const onMouseLeave: React.MouseEventHandler<HTMLCanvasElement> = () => {
     setHoverCursor('default');
+    // clear any transient connect target highlight
+    connectTargetRef.current = null;
+    draw();
   };
 
   const onMouseUp: React.MouseEventHandler<HTMLCanvasElement> = async (e) => {
     const ds = dragState.current; dragState.current = null; setHoverCursor('default');
+    // reset potential target highlight
+    connectTargetRef.current = null;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const sx = e.clientX - rect.left;
@@ -637,6 +821,37 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     }
 
     if (!ds) return;
+
+    // Finish connect: if released over a valid target, update model
+    if (ds.mode === 'connect') {
+      const world = screenToWorld(sx, sy);
+      const idx = hitTestNode(world.x, world.y, nodes);
+      if (idx !== -1) {
+        const target = nodes[idx];
+        try {
+          if (ds.fromKind === 'code' && target.kind === 'theme') {
+            const t = themes.find(tt => tt.id === target.id);
+            if (t) {
+              const newIds = Array.from(new Set([...(t.highlightIds || []), ds.fromId]));
+              await updateTheme(t.id, { highlightIds: newIds });
+              toast.success('Code added to theme');
+              onUpdate();
+            }
+          } else if (ds.fromKind === 'theme' && target.kind === 'insight') {
+            const iobj = insights.find(ii => ii.id === target.id);
+            if (iobj) {
+              const newIds = Array.from(new Set([...(iobj.themeIds || []), ds.fromId]));
+              await updateInsight(iobj.id, { themeIds: newIds });
+              toast.success('Theme added to insight');
+              onUpdate();
+            }
+          }
+        } catch {
+          toast.error('Failed to connect');
+        }
+      }
+      return;
+    }
 
     // Persist node move
     if (ds.mode === 'node' && ds.moved) {

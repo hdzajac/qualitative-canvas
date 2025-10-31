@@ -50,7 +50,8 @@ export function drawNode(
   selectedThemeIds: string[],
   getFontSize: (n: NodeView) => number,
   getBottomRightLabel?: (n: NodeView) => string,
-  getLabelScroll?: (n: NodeView) => number
+  getLabelScroll?: (n: NodeView) => number,
+  options?: { showHandle?: boolean; highlightAsTarget?: boolean }
 ) {
   ctx.save();
   const radius = 0; // no rounding
@@ -144,6 +145,34 @@ export function drawNode(
   }
 
   ctx.restore(); // end clip
+
+  // Optional: small connect handle on the right side for code and theme nodes (only when requested)
+  if (options?.showHandle && (n.kind === 'code' || n.kind === 'theme')) {
+    const cx = n.x + n.w - 8;
+    const cy = n.y + n.h / 2;
+    ctx.save();
+    ctx.globalAlpha = 0.7;
+    // subtle: white fill, accent stroke
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = (n.kind === 'code') ? '#2563eb' : '#10b981';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Optional: highlight node as a potential connect target
+  if (options?.highlightAsTarget) {
+    ctx.save();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([6, 3]);
+    roundRect(ctx, n.x, n.y, n.w, n.h, radius);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   ctx.restore();
 }
