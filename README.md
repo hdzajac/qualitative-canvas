@@ -5,6 +5,19 @@ Full-stack monorepo with:
 - Backend: Node.js + Express + PostgreSQL (`backend/`)
 - Docker Compose: orchestrates frontend, backend, and Postgres
 
+## Key features
+- Documents and coding
+  - Create codes by selecting text in a document; name the code in the side sheet.
+  - Accurate highlight placement across normal text and .vtt transcripts (segment-aware rendering, no layout breaks).
+  - VTT editing: edit blocks inline, caret is stable; adjacent lines from the same speaker auto-merge on blur.
+- Canvas workspace
+  - Cards for Codes, Themes, Insights, and Annotations with default sizes and auto height.
+  - Multi-select and group drag; positions persist.
+  - Connect via a subtle handle: Code → Theme, Theme → Insight. Valid targets highlight on hover while connecting. Click an edge to remove a connection.
+  - Side panel lists: Themes show their codes (+ document names); Insights show their themes and underlying codes (+ document names).
+  - Per-card text size control; quick width presets when a single card is selected.
+- API-backed persistence for positions, sizes, styles, titles, and relationships.
+
 ## Quick start (Docker)
 
 ```sh
@@ -41,6 +54,29 @@ npm run dev
 - Runs on http://localhost:3000
 - Vite proxies `/api` to `http://localhost:5002` unless `VITE_API_URL` is set.
 
+## Usage guide
+- Create codes
+  1) Open a document, select text, click “Add code”, name it, and save.
+  2) For .vtt transcripts, use “Edit block(s)” to edit nearby lines; merging of same-speaker lines happens on blur.
+- Build themes and insights on the Canvas
+  - Select 2+ codes and click “Create Theme”; select 1+ themes and click “Create Insight”.
+  - Or connect using the small handle on the right edge of a card:
+    - Drag from a Code to a Theme, or from a Theme to an Insight.
+    - Valid targets highlight as you hover.
+    - Click an edge to remove that connection.
+- Inspect details
+  - Open a card (↗ icon) to see/edit titles; side panel shows related items and document names.
+
+## Shortcuts & gestures
+- V: Select tool
+- H or Space: Hand/pan
+- T: Text tool (add annotation)
+- Shift+Click: Multi-select
+- Drag background: Marquee select
+- Delete/Backspace: Delete selected items
+- Mouse wheel/trackpad: Zoom; disabled while dragging
+- “Fit” button: Fit all cards into view
+
 ## Environment
 Top-level `.env` (optional for Compose):
 ```
@@ -66,3 +102,9 @@ The frontend reads `VITE_API_URL` (set by Compose to `http://localhost:${BACKEND
 - Logs: `docker compose logs -f backend` | `frontend` | `db`.
 
 See `README_DOCKER.md` for full details.
+
+## License
+Apache-2.0. See `LICENSE`. For new files, you may add:
+```ts
+// SPDX-License-Identifier: Apache-2.0
+```
