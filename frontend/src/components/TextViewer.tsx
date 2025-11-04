@@ -42,6 +42,10 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     // Detect Opera for placement tweaks
     const isOpera = useMemo(() => (typeof navigator !== 'undefined' && /\bOPR\//.test(navigator.userAgent)), []);
 
+    // Codes rail measurements and mapping
+    const [railHeight, setRailHeight] = useState<number>(0);
+    const [codeMarks, setCodeMarks] = useState<Array<{ id: string; codeName: string; top: number; startOffset: number }>>([]);
+
     // Local text to allow editing
     const [text, setText] = useState(content);
     useEffect(() => { setText(content); }, [content]);
@@ -211,6 +215,49 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         flashTimer.current = window.setTimeout(() => setFlashOffset(null), 1200);
       },
     }), []);
+
+    // Compute positions for codes rail so that items align with highlight vertical positions
+    const recomputeCodeMarks = useCallback(() => {
+      const container = textRootRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const absTop = rect.top + window.scrollY;
+      const height = Math.max(container.scrollHeight, Math.round(rect.height));
+      setRailHeight(height);
+
+      const marks: Array<{ id: string; codeName: string; top: number; startOffset: number }> = [];
+      for (const h of highlights) {
+        const mid = Math.max(h.startOffset, Math.floor((h.startOffset + h.endOffset) / 2));
+        const pos = getDomPositionForOffset(container, mid) || getDomPositionForOffset(container, h.startOffset);
+        if (!pos) continue;
+        // Create a tiny range to measure
+        const r = document.createRange();
+        const nodeTextLen = (pos.node.nodeValue || '').length;
+        r.setStart(pos.node, Math.max(0, Math.min(pos.offset, nodeTextLen)));
+        r.setEnd(pos.node, Math.max(0, Math.min(nodeTextLen, pos.offset + 1)));
+        const rRect = r.getBoundingClientRect();
+        const topAbs = (rRect.top || rect.top) + window.scrollY;
+        const topRel = Math.max(0, Math.min(height, Math.round(topAbs - absTop)));
+        marks.push({ id: h.id, codeName: h.codeName || 'Code', top: topRel, startOffset: h.startOffset });
+      }
+      marks.sort((a, b) => a.top - b.top);
+      setCodeMarks(marks);
+    }, [highlights]);
+
+    useEffect(() => {
+      recomputeCodeMarks();
+    }, [recomputeCodeMarks, text]);
+
+    useEffect(() => {
+      const onScroll = () => recomputeCodeMarks();
+      const onResize = () => recomputeCodeMarks();
+      window.addEventListener('scroll', onScroll, { passive: true });
+      window.addEventListener('resize', onResize);
+      return () => {
+        window.removeEventListener('scroll', onScroll);
+        window.removeEventListener('resize', onResize);
+      };
+    }, [recomputeCodeMarks]);
 
     // Correct highlight range if stored offsets don't match stored text (legacy trimmed selections)
     const correctedRange = (h: Highlight) => utilGetCorrectedRange(text, h);
@@ -557,32 +604,73 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     return (
       <div className="relative space-y-4">
         <Card className="p-6">
-          <div
-            ref={textRootRef}
-            className="prose prose-sm max-w-none leading-relaxed select-text"
-            onMouseUp={handleSelection}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            {blocks.map((b, i) => (
+          <div className="grid grid-cols-[1fr_220px] gap-6">
+            <div
+              ref={textRootRef}
+              className="prose prose-sm max-w-none leading-relaxed select-text"
+              onMouseUp={handleSelection}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              {blocks.map((b, i) => (
+                <div
+                  key={`block-${i}-${b.start}`}
+                  data-block-idx={i}
+                  data-start={b.start}
+                  data-end={b.end}
+                  className={`whitespace-pre-wrap mb-4 p-2 rounded ${editingRange && i >= editingRange.start && i <= editingRange.end ? 'bg-yellow-50 outline outline-2 outline-indigo-500' : 'bg-transparent'}`}
+                  contentEditable={Boolean(isVtt && editingRange && i >= editingRange.start && i <= editingRange.end)}
+                  suppressContentEditableWarning
+                  onInput={onBlockInput(i)}
+                  onBlur={onBlockBlur(i)}
+                >
+                  {isVtt
+                    ? (editingRange && i >= editingRange.start && i <= editingRange.end
+                      ? text.substring(b.start, b.end)
+                      : renderVttBlock({ start: b.start, end: b.end }))
+                    : renderGenericBlock({ start: b.start, end: b.end })}
+                </div>
+              ))}
+              {isSaving ? <div className="mt-2 text-xs text-neutral-500">Saving…</div> : null}
+            </div>
+            <div className="relative">
               <div
-                key={`block-${i}-${b.start}`}
-                data-block-idx={i}
-                data-start={b.start}
-                data-end={b.end}
-                className={`whitespace-pre-wrap mb-4 p-2 rounded ${editingRange && i >= editingRange.start && i <= editingRange.end ? 'bg-yellow-50 outline outline-2 outline-indigo-500' : 'bg-transparent'}`}
-                contentEditable={Boolean(isVtt && editingRange && i >= editingRange.start && i <= editingRange.end)}
-                suppressContentEditableWarning
-                onInput={onBlockInput(i)}
-                onBlur={onBlockBlur(i)}
+                className="relative border-l pl-3"
+                style={{ height: railHeight ? `${railHeight}px` : undefined }}
+                aria-label="Codes Rail"
               >
-                {isVtt
-                  ? (editingRange && i >= editingRange.start && i <= editingRange.end
-                    ? text.substring(b.start, b.end)
-                    : renderVttBlock({ start: b.start, end: b.end }))
-                  : renderGenericBlock({ start: b.start, end: b.end })}
+                {codeMarks.length === 0 ? (
+                  <div className="text-xs text-neutral-400">No codes yet</div>
+                ) : (
+                  codeMarks.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className="absolute left-0 -translate-y-1/2 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded px-2 py-1 shadow-sm border"
+                      style={{ top: `${m.top}px` }}
+                      onClick={() => {
+                        // Scroll to highlight start and flash
+                        if (!textRootRef.current) return;
+                        const pos = getDomPositionForOffset(textRootRef.current, m.startOffset);
+                        if (pos) {
+                          const r = document.createRange();
+                          const nodeTextLen = (pos.node.nodeValue || '').length;
+                          r.setStart(pos.node, Math.min(pos.offset, nodeTextLen));
+                          r.setEnd(pos.node, Math.min(nodeTextLen, Math.max(0, pos.offset + 1)));
+                          const rRect = r.getBoundingClientRect();
+                          const top = rRect.top || textRootRef.current.getBoundingClientRect().top + 10;
+                          window.scrollTo({ top: window.scrollY + top - 120, behavior: 'smooth' });
+                          setFlashOffset(m.startOffset);
+                          if (flashTimer.current) window.clearTimeout(flashTimer.current);
+                          flashTimer.current = window.setTimeout(() => setFlashOffset(null), 1200);
+                        }
+                      }}
+                    >
+                      {m.codeName}
+                    </button>
+                  ))
+                )}
               </div>
-            ))}
-            {isSaving ? <div className="mt-2 text-xs text-neutral-500">Saving…</div> : null}
+            </div>
           </div>
         </Card>
 

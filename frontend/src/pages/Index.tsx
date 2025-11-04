@@ -6,7 +6,7 @@ import { ThemeCreator } from '@/components/ThemeCreator';
 import { InsightCreator } from '@/components/InsightCreator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { getFile, getHighlights, getThemes, getInsights, getAnnotations } from '@/services/api';
+import { getFile, getFiles, getHighlights, getThemes, getInsights, getAnnotations } from '@/services/api';
 import type { UploadedFile, Highlight, Theme, Insight, Annotation } from '@/types';
 import { FileText, Network, Loader2 } from 'lucide-react';
 
@@ -16,17 +16,20 @@ const Index = () => {
   const [themes, setThemes] = useState<Theme[]>([]);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [files, setFiles] = useState<UploadedFile[]>([]);
   const [loading, setLoading] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [h, t, i, a] = await Promise.all([
+      const [f, h, t, i, a] = await Promise.all([
+        getFiles(),
         getHighlights(),
         getThemes(),
         getInsights(),
         getAnnotations(),
       ]);
+      setFiles(f);
       setHighlights(h);
       setThemes(t);
       setInsights(i);
@@ -46,6 +49,8 @@ const Index = () => {
     const file = await getFile(fileId);
     if (file) {
       setCurrentFile(file);
+      // Keep files list in sync so Canvas has all filenames
+      setFiles((prev) => (prev.some((ff) => ff.id === file.id) ? prev : [file, ...prev]));
     }
   };
 
@@ -83,8 +88,8 @@ const Index = () => {
             </TabsList>
 
             <TabsContent value="text" className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 space-y-4">
+              <div className="grid grid-cols-1 gap-6">
+                <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h2 className="text-xl font-semibold">{currentFile.filename}</h2>
                     <Button variant="outline" onClick={() => setCurrentFile(null)}>
@@ -106,11 +111,6 @@ const Index = () => {
                     />
                   )}
                 </div>
-
-                <div className="space-y-6">
-                  <ThemeCreator highlights={fileHighlights} onThemeCreated={loadData} />
-                  <InsightCreator themes={themes} onInsightCreated={loadData} />
-                </div>
               </div>
             </TabsContent>
 
@@ -120,6 +120,7 @@ const Index = () => {
                 themes={themes}
                 insights={insights}
                 annotations={annotations}
+                files={files}
                 onUpdate={loadData}
               />
             </TabsContent>
