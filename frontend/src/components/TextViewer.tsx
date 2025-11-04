@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
+import { Tag, Pencil } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,12 +27,16 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
   ({ fileId, content, highlights, onHighlightCreated, isVtt = false }, ref) => {
     const [selectedText, setSelectedText] = useState<{ text: string; start: number; end: number } | null>(null);
     const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null);
+    // Snapshot of selection used while the sheet is open, so UI doesn't clear when focus moves
+    const [frozenSelection, setFrozenSelection] = useState<{ text: string; start: number; end: number } | null>(null);
     const [sheetOpen, setSheetOpen] = useState(false);
     const [codeName, setCodeName] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
     const textRootRef = useRef<HTMLDivElement>(null);
     const [flashOffset, setFlashOffset] = useState<number | null>(null);
     const flashTimer = useRef<number | null>(null);
+    // Detect Opera for placement tweaks
+    const isOpera = useMemo(() => (typeof navigator !== 'undefined' && /\bOPR\//.test(navigator.userAgent)), []);
 
     // Local text to allow editing
     const [text, setText] = useState(content);
@@ -94,6 +99,58 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       setSelectionRect(rect);
     }, [editingRange]);
 
+    // Track selection live (so the floating action is resilient and shows reliably)
+    useEffect(() => {
+      const onSelChange = () => {
+        if (editingRange) return;
+        if (sheetOpen) return; // don't clear live selection while sheet is open
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+          setSelectedText(null);
+          setSelectionRect(null);
+          return;
+        }
+        const container = textRootRef.current; if (!container) return;
+        const range = sel.getRangeAt(0);
+        if (!container.contains(range.commonAncestorContainer)) {
+          setSelectedText(null);
+          setSelectionRect(null);
+          return;
+        }
+        const pre = document.createRange();
+        pre.selectNodeContents(container);
+        pre.setEnd(range.startContainer, range.startOffset);
+        const start = pre.toString().length;
+        const end = start + sel.toString().length;
+        const rect = range.getBoundingClientRect();
+        setSelectedText({ text: sel.toString(), start, end });
+        setSelectionRect(rect);
+      };
+      document.addEventListener('selectionchange', onSelChange);
+      return () => document.removeEventListener('selectionchange', onSelChange);
+    }, [editingRange, sheetOpen]);
+
+    // Keyboard shortcuts: when there is a selection, C = add code, E = edit (VTT only)
+    useEffect(() => {
+      const onKey = (e: KeyboardEvent) => {
+        if (!selectedText || editingRange) return;
+        if (sheetOpen) return; // don't hijack while entering code name
+        const target = e.target as HTMLElement | null;
+        if (target && (target.closest('input, textarea, [contenteditable="true"]'))) return;
+        if (e.key === 'c' || e.key === 'C') {
+          e.preventDefault();
+          openAddCode();
+        } else if ((e.key === 'e' || e.key === 'E') && isVtt) {
+          e.preventDefault();
+          startEditSelectedBlock();
+        }
+      };
+      document.addEventListener('keydown', onKey);
+      return () => document.removeEventListener('keydown', onKey);
+      // We intentionally don't include action creators in deps to avoid TDZ and re-subscribing on every render.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedText, editingRange, sheetOpen, isVtt]);
+
     useEffect(() => {
       if (sheetOpen && inputRef.current) {
         inputRef.current.focus();
@@ -103,20 +160,23 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
 
     const openAddCode = () => {
       if (!selectedText) return;
+      // Snapshot selection for use in the sheet
+      setFrozenSelection(selectedText);
       setSheetOpen(true);
     };
 
     const handleCreateCode = async () => {
-      if (!selectedText || !codeName.trim()) {
+      const activeSel = frozenSelection || selectedText;
+      if (!activeSel || !codeName.trim()) {
         toast.error('Please provide a code name');
         return;
       }
       try {
-        const snippet = text.slice(selectedText.start, selectedText.end);
+        const snippet = text.slice(activeSel.start, activeSel.end);
         await createHighlight({
           fileId,
-          startOffset: selectedText.start,
-          endOffset: selectedText.end,
+          startOffset: activeSel.start,
+          endOffset: activeSel.end,
           text: snippet,
           codeName: codeName.trim(),
           size: DEFAULTS.code,
@@ -126,6 +186,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         setSelectionRect(null);
         setCodeName('');
         setSheetOpen(false);
+        setFrozenSelection(null);
         onHighlightCreated();
       } catch (error) {
         toast.error('Failed to create code');
@@ -671,29 +732,56 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           </div>
         </Card>
 
-        {selectedText && selectionRect && (
+        {(selectedText || frozenSelection) && selectionRect && (
           <div
-            className="fixed z-50 bg-black text-white text-xs px-2 py-1 rounded shadow-md flex gap-3"
-            style={{ top: Math.max(8, selectionRect.top - 32), left: Math.max(8, selectionRect.left) }}
+            className="fixed z-50 bg-black text-white text-sm px-3 py-2 rounded-md shadow-lg flex items-center gap-4"
+            style={{
+              top: (() => {
+                const above = selectionRect.top - 44;
+                if (above < 8) return Math.min(window.innerHeight - 48, selectionRect.bottom + 10);
+                return above;
+              })(),
+              left: selectionRect.left + selectionRect.width / 2,
+              transform: 'translateX(-50%)',
+              maxWidth: '90vw',
+            }}
           >
-            <button className="underline" onClick={openAddCode}>Add code</button>
+            <button
+              type="button"
+              className="flex items-center gap-2 px-3 py-1 rounded-md hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={openAddCode}
+              aria-label="Add code from selection"
+            >
+              <Tag className="w-4 h-4" />
+              Add code
+            </button>
             {isVtt && <>
               <span className="opacity-50">|</span>
-              <button className="underline" onClick={startEditSelectedBlock}>Edit block(s)</button>
+              <button
+                type="button"
+                className="flex items-center gap-2 px-3 py-1 rounded-md hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={startEditSelectedBlock}
+                aria-label="Edit selected block(s)"
+              >
+                <Pencil className="w-4 h-4" />
+                Edit block(s)
+              </button>
             </>}
           </div>
         )}
 
-        <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) { setFrozenSelection(null); } }}>
           <SheetContent side="right" className="rounded-none border-l-4 border-black sm:max-w-sm">
             <SheetHeader>
               <SheetTitle className="uppercase tracking-wide">Add Code</SheetTitle>
             </SheetHeader>
-            {selectedText && (
+            {(frozenSelection || selectedText) && (
               <div className="space-y-3 mt-4">
                 <div>
                   <Label className="text-sm font-medium">Selected Text</Label>
-                  <p className="text-sm text-muted-foreground italic mt-1">"{selectedText.text}"</p>
+                  <p className="text-sm text-muted-foreground italic mt-1">"{(frozenSelection || selectedText)!.text}"</p>
                 </div>
                 <div>
                   <Label htmlFor="codeName">Code Name</Label>
@@ -711,7 +799,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={handleCreateCode} className="brutal-button">Create Code</Button>
-                  <Button variant="outline" onClick={() => { setSheetOpen(false); setCodeName(''); }}>Cancel</Button>
+                  <Button variant="outline" onClick={() => { setSheetOpen(false); setCodeName(''); setFrozenSelection(null); }}>Cancel</Button>
                 </div>
               </div>
             )}

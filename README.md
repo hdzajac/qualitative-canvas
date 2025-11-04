@@ -77,6 +77,10 @@ npm run dev
 - Mouse wheel/trackpad: Zoom; disabled while dragging
 - “Fit” button: Fit all cards into view
 
+Text & coding
+- C: Add code for current text selection
+- E: Edit selected block(s) — VTT transcripts only
+
 ## Environment
 Top-level `.env` (optional for Compose):
 ```
