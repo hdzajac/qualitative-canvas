@@ -217,13 +217,17 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       wrapText: (chunkText: string, absStart: number, absEnd: number) => JSX.Element | JSX.Element[],
       wrapHighlighted: (chunkText: string, absStart: number, absEnd: number) => JSX.Element | JSX.Element[]
     ) => {
-      const sorted = [...highlights].sort((a, b) => a.startOffset - b.startOffset);
+      // Sort by start, then by end to ensure stable forward iteration
+      const sorted = [...highlights].sort((a, b) => (a.startOffset - b.startOffset) || (a.endOffset - b.endOffset));
       const parts: JSX.Element[] = [];
       let cursor = bStart;
       sorted.forEach((h) => {
         const { start: hsAbs, end: heAbs } = getCorrectedRange(h);
-        const hs = Math.max(hsAbs, bStart);
+        let hs = Math.max(hsAbs, bStart);
         const he = Math.min(heAbs, bEnd);
+        // Clamp to forward progress to avoid duplicate rendering for overlapping highlights
+        if (he <= cursor) return; // already fully before current cursor
+        if (hs < cursor) hs = cursor;
         if (hs < he) {
           if (hs > cursor) {
             const chunk = wrapText(text.substring(cursor, hs), cursor, hs);
