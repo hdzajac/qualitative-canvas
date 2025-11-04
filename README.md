@@ -107,6 +107,13 @@ The frontend reads `VITE_API_URL` (set by Compose to `http://localhost:${BACKEND
 
 See `README_DOCKER.md` for full details.
 
+## Testing (frontend)
+- Install dev deps in `frontend/` (one-time):
+  - npm install
+- Run tests:
+  - npm run test
+  - npm run test:watch
+
 ## License
 Apache-2.0. See `LICENSE`. For new files, you may add:
 ```ts

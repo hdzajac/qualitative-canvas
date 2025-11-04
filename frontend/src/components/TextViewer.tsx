@@ -1,5 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
-import { Tag, Pencil } from 'lucide-react';
+import SelectionTooltip from '@/components/text/SelectionTooltip';
+import { useTextSelectionHotkeys } from '@/hooks/useTextSelectionHotkeys';
+import { getDomPositionForOffset } from '@/components/text/dom';
+import { parseVttLine, parseSpeakerOnly, parseAnyLine, composeVttLine, isSemanticallyEmptyVttLine, getLineStart, getLineEndNoNl, mergePrevCurr, mergeCurrNext } from '@/components/text/vtt';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +12,7 @@ import { createHighlight, updateFile } from '@/services/api';
 import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { DEFAULTS } from '@/components/canvas/CanvasTypes';
+import { getCorrectedRange as utilGetCorrectedRange } from '@/components/text/highlights';
 
 export type TextViewerHandle = {
   scrollToOffset: (offset: number) => void;
@@ -130,26 +134,14 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       return () => document.removeEventListener('selectionchange', onSelChange);
     }, [editingRange, sheetOpen]);
 
-    // Keyboard shortcuts: when there is a selection, C = add code, E = edit (VTT only)
-    useEffect(() => {
-      const onKey = (e: KeyboardEvent) => {
-        if (!selectedText || editingRange) return;
-        if (sheetOpen) return; // don't hijack while entering code name
-        const target = e.target as HTMLElement | null;
-        if (target && (target.closest('input, textarea, [contenteditable="true"]'))) return;
-        if (e.key === 'c' || e.key === 'C') {
-          e.preventDefault();
-          openAddCode();
-        } else if ((e.key === 'e' || e.key === 'E') && isVtt) {
-          e.preventDefault();
-          startEditSelectedBlock();
-        }
-      };
-      document.addEventListener('keydown', onKey);
-      return () => document.removeEventListener('keydown', onKey);
-      // We intentionally don't include action creators in deps to avoid TDZ and re-subscribing on every render.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedText, editingRange, sheetOpen, isVtt]);
+    // Keyboard shortcuts via hook
+    useTextSelectionHotkeys({
+      enabled: Boolean(selectedText) && !editingRange,
+      sheetOpen,
+      isVtt,
+      onAddCode: () => openAddCode(),
+      onEditBlocks: () => startEditSelectedBlock(),
+    });
 
     useEffect(() => {
       if (sheetOpen && inputRef.current) {
@@ -194,22 +186,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       }
     };
 
-    // Map offset -> DOM position (for scroll/flash)
-    const getDomPositionForOffset = (container: Node, charOffset: number): { node: Node; offset: number } | null => {
-      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
-      let current: Node | null = walker.nextNode();
-      let traversed = 0;
-      while (current) {
-        const textContent = current.nodeValue || '';
-        const nextTraversed = traversed + textContent.length;
-        if (charOffset <= nextTraversed) {
-          return { node: current, offset: Math.max(0, charOffset - traversed) };
-        }
-        traversed = nextTraversed;
-        current = walker.nextNode();
-      }
-      return null;
-    };
+    // Map offset -> DOM position (for scroll/flash) via util
 
     useImperativeHandle(ref, () => ({
       scrollToOffset: (offset: number) => {
@@ -236,40 +213,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     }), []);
 
     // Correct highlight range if stored offsets don't match stored text (legacy trimmed selections)
-    const getCorrectedRange = (h: Highlight) => {
-      const proposedStart = h.startOffset;
-      const proposedEnd = h.endOffset;
-      const target = h.text || '';
-      if (!target) return { start: proposedStart, end: proposedEnd };
-
-      const slice = text.slice(proposedStart, proposedEnd);
-      if (slice === target) return { start: proposedStart, end: proposedEnd };
-
-      // If trimmed slice matches, shift inwards by leading/trailing whitespace
-      if (slice.trim() === target) {
-        const lead = slice.length - slice.replace(/^\s+/, '').length;
-        const trail = slice.length - slice.replace(/\s+$/, '').length;
-        return { start: proposedStart + lead, end: proposedEnd - trail };
-      }
-
-      // Global fuzzy search: find occurrence closest to proposedStart
-      if (target.length >= 3) {
-        let from = 0;
-        let bestIdx = -1;
-        let bestDist = Number.POSITIVE_INFINITY;
-        while (from <= text.length - target.length) {
-          const idx = text.indexOf(target, from);
-          if (idx === -1) break;
-          const dist = Math.abs(idx - proposedStart);
-          if (dist < bestDist) { bestDist = dist; bestIdx = idx; }
-          from = idx + 1;
-        }
-        if (bestIdx !== -1) return { start: bestIdx, end: bestIdx + target.length };
-      }
-
-      // Fallback
-      return { start: proposedStart, end: proposedEnd };
-    };
+    const correctedRange = (h: Highlight) => utilGetCorrectedRange(text, h);
 
     // Highlight-aware renderer for a generic block range
     const renderBlockWithHighlights = (
@@ -283,7 +227,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       const parts: JSX.Element[] = [];
       let cursor = bStart;
       sorted.forEach((h) => {
-        const { start: hsAbs, end: heAbs } = getCorrectedRange(h);
+        const { start: hsAbs, end: heAbs } = correctedRange(h);
         let hs = Math.max(hsAbs, bStart);
         const he = Math.min(heAbs, bEnd);
         // Clamp to forward progress to avoid duplicate rendering for overlapping highlights
@@ -552,97 +496,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       scheduleSave(next, { silent: true });
     };
 
-    // Helpers for VTT parsing and merging
-    const parseVttLine = (line: string) => {
-      const m = line.match(/^(\d{1,2}:\d{2}:\d{2})\s+(?:(.+?):\s*)?(.*)$/);
-      if (!m) return null as null | { ts: string; speaker: string; speakerKey: string; speech: string };
-      const ts = m[1] || '';
-      const speaker = (m[2] || '').trim();
-      const speech = (m[3] || '').trim();
-      return { ts, speaker, speakerKey: speaker.toLowerCase(), speech };
-    };
-    const parseSpeakerOnly = (line: string) => {
-      const m = line.match(/^\s*([^:]{1,64})\s*:\s*(.*)$/);
-      if (!m) return null as null | { speaker: string; speakerKey: string; speech: string };
-      const speaker = (m[1] || '').trim();
-      const speech = (m[2] || '').trim();
-      return { speaker, speakerKey: speaker.toLowerCase(), speech };
-    };
-    // Parse a line that may have a timestamp or be speaker-only. Requires a speaker to return a result.
-    const parseAnyLine = (line: string) => {
-      const p = parseVttLine(line);
-      if (p && p.speaker) return p;
-      const s = parseSpeakerOnly(line);
-      if (!s) return null as null | { ts: string; speaker: string; speakerKey: string; speech: string };
-      return { ts: '', speaker: s.speaker, speakerKey: s.speakerKey, speech: s.speech };
-    };
-    const composeVttLine = (ts: string, speaker: string, speech: string) => {
-      const tsPart = ts ? ts + ' ' : '';
-      const spPart = speaker ? speaker + ': ' : '';
-      return `${tsPart}${spPart}${speech}`.trim();
-    };
-    const isSemanticallyEmptyVttLine = (line: string) => {
-      const l = line.trim();
-      if (!l) return true;
-      const p1 = parseVttLine(l);
-      if (p1) return p1.speech.trim().length === 0;
-      const p2 = parseSpeakerOnly(l);
-      if (p2) return p2.speech.trim().length === 0;
-      return false;
-    };
-    const getLineStart = (s: string, idx: number) => {
-      const n = s.lastIndexOf('\n', Math.max(0, idx - 1));
-      return n === -1 ? 0 : n + 1;
-    };
-    const getLineEndNoNl = (s: string, start: number) => {
-      const n = s.indexOf('\n', start);
-      return n === -1 ? s.length : n;
-    };
-    const mergePrevCurr = (s: string, pivot: number) => {
-      const currStart = getLineStart(s, pivot);
-      const currEndNoNl = getLineEndNoNl(s, currStart);
-      if (currStart === 0) return s;
-      const prevStart = getLineStart(s, currStart - 1);
-      const prevEndNoNl = getLineEndNoNl(s, prevStart);
-      const prevLine = s.slice(prevStart, prevEndNoNl).trimEnd();
-      const currLine = s.slice(currStart, currEndNoNl).trimStart();
-      const p1 = parseAnyLine(prevLine);
-      const p2 = parseAnyLine(currLine);
-      if (!p1 || !p2) return s;
-      const hasS1 = Boolean(p1.speaker && p1.speaker.trim());
-      const hasS2 = Boolean(p2.speaker && p2.speaker.trim());
-      const speakersEqual = (hasS1 && hasS2) ? (p1.speakerKey === p2.speakerKey) : (hasS1 || hasS2);
-      if (!speakersEqual) return s;
-      const mergedSpeech = (p1.speech + (p1.speech ? ' ' : '') + p2.speech).trim();
-      const mergedSpeaker = hasS1 ? p1.speaker : p2.speaker;
-      const mergedTs = p1.ts || p2.ts;
-      const merged = composeVttLine(mergedTs, mergedSpeaker, mergedSpeech);
-      // Preserve a trailing newline if either line had one after merge region
-      const afterCurr = s[currEndNoNl] === '\n' ? '\n' : '';
-      return s.slice(0, prevStart) + merged + afterCurr + s.slice(currEndNoNl + (afterCurr ? 1 : 0));
-    };
-    const mergeCurrNext = (s: string, pivot: number) => {
-      const currStart = getLineStart(s, pivot);
-      const currEndNoNl = getLineEndNoNl(s, currStart);
-      const nextStart = currEndNoNl < s.length ? currEndNoNl + 1 : -1;
-      if (nextStart < 0 || nextStart >= s.length) return s;
-      const nextEndNoNl = getLineEndNoNl(s, nextStart);
-      const currLine = s.slice(currStart, currEndNoNl).trimEnd();
-      const nextLine = s.slice(nextStart, nextEndNoNl).trimStart();
-      const p1 = parseAnyLine(currLine);
-      const p2 = parseAnyLine(nextLine);
-      if (!p1 || !p2) return s;
-      const hasS1 = Boolean(p1.speaker && p1.speaker.trim());
-      const hasS2 = Boolean(p2.speaker && p2.speaker.trim());
-      const speakersEqual = (hasS1 && hasS2) ? (p1.speakerKey === p2.speakerKey) : (hasS1 || hasS2);
-      if (!speakersEqual) return s;
-      const mergedSpeech = (p1.speech + (p1.speech ? ' ' : '') + p2.speech).trim();
-      const mergedSpeaker = hasS1 ? p1.speaker : p2.speaker;
-      const mergedTs = p1.ts || p2.ts;
-      const merged = composeVttLine(mergedTs, mergedSpeaker, mergedSpeech);
-      const afterNext = s[nextEndNoNl] === '\n' ? '\n' : '';
-      return s.slice(0, currStart) + merged + afterNext + s.slice(nextEndNoNl + (afterNext ? 1 : 0));
-    };
+    // VTT helpers imported from utils
 
     const onBlockBlur = (i: number): React.FocusEventHandler<HTMLDivElement> => async (e) => {
       if (!editingRange || i < editingRange.start || i > editingRange.end) return;
@@ -733,43 +587,12 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         </Card>
 
         {(selectedText || frozenSelection) && selectionRect && (
-          <div
-            className="fixed z-50 bg-black text-white text-sm px-3 py-2 rounded-md shadow-lg flex items-center gap-4"
-            style={{
-              top: (() => {
-                const above = selectionRect.top - 44;
-                if (above < 8) return Math.min(window.innerHeight - 48, selectionRect.bottom + 10);
-                return above;
-              })(),
-              left: selectionRect.left + selectionRect.width / 2,
-              transform: 'translateX(-50%)',
-              maxWidth: '90vw',
-            }}
-          >
-            <button
-              type="button"
-              className="flex items-center gap-2 px-3 py-1 rounded-md hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={openAddCode}
-              aria-label="Add code from selection"
-            >
-              <Tag className="w-4 h-4" />
-              Add code
-            </button>
-            {isVtt && <>
-              <span className="opacity-50">|</span>
-              <button
-                type="button"
-                className="flex items-center gap-2 px-3 py-1 rounded-md hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={startEditSelectedBlock}
-                aria-label="Edit selected block(s)"
-              >
-                <Pencil className="w-4 h-4" />
-                Edit block(s)
-              </button>
-            </>}
-          </div>
+          <SelectionTooltip
+            rect={selectionRect}
+            isVtt={isVtt}
+            onAddCode={openAddCode}
+            onEditBlocks={isVtt ? startEditSelectedBlock : undefined}
+          />
         )}
 
         <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) { setFrozenSelection(null); } }}>
