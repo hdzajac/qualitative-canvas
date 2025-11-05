@@ -15,7 +15,7 @@ export default function DocumentDetail() {
 
     const viewerRef = useRef<TextViewerHandle>(null);
     const [panelHeight, setPanelHeight] = useState<number>(0);
-    const [marks, setMarks] = useState<Array<{ id: string; codeName: string; text: string; top: number; startOffset: number }>>([]);
+    const [marks, setMarks] = useState<Array<{ id: string; codeName: string; text: string; top: number; startOffset: number; endOffset: number }>>([]);
     const docHighlights = highlights; // already filtered by server
     const sortedByOffset = useMemo(() => [...docHighlights].sort((a, b) => a.startOffset - b.startOffset), [docHighlights]);
 
@@ -29,12 +29,12 @@ export default function DocumentDetail() {
             const containerTop = window.scrollY + crect.top;
             const height = Math.max(0, Math.round(crect.height));
             setPanelHeight(height);
-            const next: Array<{ id: string; codeName: string; text: string; top: number; startOffset: number }> = [];
+            const next: Array<{ id: string; codeName: string; text: string; top: number; startOffset: number; endOffset: number }> = [];
             docHighlights.forEach(h => {
                 const topAbs = viewer.getTopForOffset(h.startOffset);
                 if (topAbs == null) return;
                 const topRel = Math.max(0, Math.min(height, Math.round(topAbs - containerTop)));
-                next.push({ id: h.id, codeName: h.codeName || 'Code', text: h.text || '', top: topRel, startOffset: h.startOffset });
+                next.push({ id: h.id, codeName: h.codeName || 'Code', text: h.text || '', top: topRel, startOffset: h.startOffset, endOffset: h.endOffset });
             });
             next.sort((a, b) => a.top - b.top);
             setMarks(next);
@@ -113,7 +113,7 @@ export default function DocumentDetail() {
                                             className="absolute left-0 -translate-y-1/2 brutal-card shadow-none border-2 border-neutral-800 bg-white px-2 py-1 text-xs text-neutral-900 hover:bg-indigo-50"
                                             style={{ top: `${m.top}px` }}
                                             title={m.codeName}
-                                            onClick={() => { viewerRef.current?.scrollToOffset(m.startOffset); viewerRef.current?.flashAtOffset(m.startOffset); }}
+                                            onClick={() => { viewerRef.current?.scrollToOffset(m.startOffset); viewerRef.current?.flashAtRange(m.startOffset, m.endOffset); }}
                                         >
                                             {m.codeName}
                                         </button>
@@ -126,7 +126,7 @@ export default function DocumentDetail() {
                                             key={h.id}
                                             className="block text-left brutal-card shadow-none border-2 border-neutral-800 bg-white px-2 py-1 text-xs text-neutral-900 hover:bg-indigo-50"
                                             title={h.codeName}
-                                            onClick={() => { viewerRef.current?.scrollToOffset(h.startOffset); viewerRef.current?.flashAtOffset(h.startOffset); }}
+                                            onClick={() => { viewerRef.current?.scrollToOffset(h.startOffset); viewerRef.current?.flashAtRange(h.startOffset, h.endOffset); }}
                                         >
                                             {h.codeName}
                                         </button>

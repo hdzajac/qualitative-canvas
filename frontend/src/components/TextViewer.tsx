@@ -17,6 +17,7 @@ import { getCorrectedRange as utilGetCorrectedRange } from '@/components/text/hi
 export type TextViewerHandle = {
   scrollToOffset: (offset: number) => void;
   flashAtOffset: (offset: number) => void;
+  flashAtRange: (start: number, end: number) => void;
   // Expose metrics to align external code panels
   getContainerRect: () => DOMRect | null;
   getTopForOffset: (offset: number) => number | null; // absolute page Y in px
@@ -41,7 +42,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     const [codeName, setCodeName] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
     const textRootRef = useRef<HTMLDivElement>(null);
-    const [flashOffset, setFlashOffset] = useState<number | null>(null);
+  const [flashRange, setFlashRange] = useState<{ start: number; end: number } | null>(null);
     const flashTimer = useRef<number | null>(null);
     // Detect Opera for placement tweaks
     const isOpera = useMemo(() => (typeof navigator !== 'undefined' && /\bOPR\//.test(navigator.userAgent)), []);
@@ -212,9 +213,16 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         window.scrollTo({ top: window.scrollY + top - 120, behavior: 'smooth' });
       },
       flashAtOffset: (offset: number) => {
-        setFlashOffset(offset);
         if (flashTimer.current) window.clearTimeout(flashTimer.current);
-        flashTimer.current = window.setTimeout(() => setFlashOffset(null), 1200);
+        setFlashRange({ start: Math.max(0, offset), end: Math.max(0, offset + 1) });
+        flashTimer.current = window.setTimeout(() => setFlashRange(null), 1200);
+      },
+      flashAtRange: (start: number, end: number) => {
+        if (flashTimer.current) window.clearTimeout(flashTimer.current);
+        const s = Math.max(0, Math.min(start, end));
+        const e = Math.max(0, Math.max(start, end));
+        setFlashRange({ start: s, end: e });
+        flashTimer.current = window.setTimeout(() => setFlashRange(null), 1200);
       },
       getContainerRect: () => {
         if (!textRootRef.current) return null;
@@ -347,7 +355,8 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         const wrapFallbackHighlighted = (_chunkText: string, absStart: number, absEnd: number): JSX.Element[] => {
           const relStart = absStart - bStart;
           const relEnd = absEnd - bStart;
-          const bg = (flashOffset === absStart) ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30';
+          const isFlashing = flashRange && !(absEnd <= flashRange.start || absStart >= flashRange.end);
+          const bg = isFlashing ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30';
           const out: JSX.Element[] = [];
           const pushSeg = (from: number, to: number, cls: string, key: string) => {
             if (to <= from) return;
@@ -417,7 +426,8 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       const wrapHighlighted = (_chunkText: string, absStart: number, absEnd: number): JSX.Element[] => {
         const relStart = absStart - bStart;
         const relEnd = absEnd - bStart;
-        const bg = (flashOffset === absStart) ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30';
+  const isFlashing = flashRange && !(absEnd <= flashRange.start || absStart >= flashRange.end);
+  const bg = isFlashing ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30';
         const out: JSX.Element[] = [];
         const pushSeg = (from: number, to: number, cls: string, key: string) => {
           if (to <= from) return;
@@ -452,9 +462,10 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     // Generic block renderer (non-VTT)
     const renderGenericBlock = (block: { start: number; end: number }) => {
       const wrap = (chunkText: string, _absStart: number, _absEnd: number) => <>{chunkText}</>;
-      const wrapHighlighted = (chunkText: string, absStart: number, _absEnd: number) => (
-        <span className={`${flashOffset === absStart ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30'}`}>{chunkText}</span>
-      );
+      const wrapHighlighted = (chunkText: string, absStart: number, absEnd: number) => {
+        const isFlashing = flashRange && !(absEnd <= flashRange.start || absStart >= flashRange.end);
+        return <span className={`${isFlashing ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30'}`}>{chunkText}</span>;
+      };
       return renderBlockWithHighlights(block.start, block.end, wrap, wrapHighlighted);
     };
 
