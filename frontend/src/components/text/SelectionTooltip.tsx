@@ -10,8 +10,9 @@ export type SelectionTooltipProps = {
 
 export const SelectionTooltip: React.FC<SelectionTooltipProps> = ({ rect, isVtt = false, onAddCode, onEditBlocks }) => {
     const top = (() => {
-        const above = rect.top - 44;
-        if (above < 8) return Math.min(window.innerHeight - 48, rect.bottom + 10);
+        // Place the tooltip a bit higher above the selection to avoid overlapping highlights
+        const above = rect.top - 70; // previously 44
+        if (above < 20) return Math.min(window.innerHeight - 48, rect.bottom + 10); // add a touch more spacing when placed below
         return above;
     })();
     const left = rect.left + rect.width / 2;
