@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { DEFAULTS } from '@/components/canvas/CanvasTypes';
 import { getCorrectedRange as utilGetCorrectedRange } from '@/components/text/highlights';
+import { Trash2 } from 'lucide-react';
 
 export type TextViewerHandle = {
   scrollToOffset: (offset: number) => void;
@@ -58,6 +59,40 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     const saveTimer = useRef<number | null>(null);
     const lastSavedContentRef = useRef<string>(content);
     const [isSaving, setIsSaving] = useState(false);
+    const lastUndoRef = useRef<{ prev: string } | null>(null);
+
+    const undoDelete = useCallback(async () => {
+      const undoPrev = lastUndoRef.current?.prev;
+      if (!undoPrev) return;
+      try {
+        setIsSaving(true);
+        await updateFile(fileId, { content: undoPrev });
+        lastSavedContentRef.current = undoPrev;
+        setText(undoPrev);
+      } catch (err) {
+        console.error(err);
+        toast.error('Failed to undo');
+      } finally {
+        setIsSaving(false);
+        lastUndoRef.current = null;
+      }
+    }, [fileId]);
+
+    // Global undo handler for last deletion: Cmd/Ctrl+Z
+    useEffect(() => {
+      const onKeyDown = (e: KeyboardEvent) => {
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+          if (!lastUndoRef.current?.prev) return;
+          const target = e.target as HTMLElement | null;
+          const isEditable = !!target && (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+          if (isEditable) return; // let native undo work in inputs/contentEditable
+          e.preventDefault();
+          undoDelete();
+        }
+      };
+      document.addEventListener('keydown', onKeyDown);
+      return () => document.removeEventListener('keydown', onKeyDown);
+    }, [undoDelete]);
 
     // Choose blocks:
     // - VTT: each statement is a single line (we included one statement per line during import)
@@ -596,22 +631,67 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         onContextMenu={(e) => e.preventDefault()}
       >
         {blocks.map((b, i) => (
-          <div
-            key={`block-${i}-${b.start}`}
-            data-block-idx={i}
-            data-start={b.start}
-            data-end={b.end}
-            className={`whitespace-pre-wrap mb-4 p-2 rounded ${editingRange && i >= editingRange.start && i <= editingRange.end ? 'bg-yellow-50 outline outline-2 outline-indigo-500' : 'bg-transparent'}`}
-            contentEditable={Boolean(isVtt && editingRange && i >= editingRange.start && i <= editingRange.end)}
-            suppressContentEditableWarning
-            onInput={onBlockInput(i)}
-            onBlur={onBlockBlur(i)}
-          >
-            {isVtt
-              ? (editingRange && i >= editingRange.start && i <= editingRange.end
-                ? text.substring(b.start, b.end)
-                : renderVttBlock({ start: b.start, end: b.end }))
-              : renderGenericBlock({ start: b.start, end: b.end })}
+          <div key={`blockwrap-${i}-${b.start}`} className="relative group">
+            {isVtt && (!editingRange || i < editingRange.start || i > editingRange.end) && (
+              <button
+                type="button"
+                className="absolute -left-8 top-2 opacity-0 group-hover:opacity-100 transition-opacity text-neutral-700 hover:text-red-700 bg-white border-2 border-black rounded-md p-1 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                aria-label="Delete block"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  // Prepare delete
+                  const block = blocks[i];
+                  if (!block) return;
+                  const prev = text;
+                  let next = prev.substring(0, block.start) + prev.substring(block.end);
+                  if (isVtt) {
+                    next = next.replace(/\n{2,}/g, '\n');
+                    const pivot = Math.max(0, Math.min(block.start, next.length - 1));
+                    next = mergePrevCurr(next, pivot);
+                    next = mergeCurrNext(next, pivot);
+                    next = next.replace(/\n{2,}/g, '\n');
+                  }
+                  try {
+                    lastUndoRef.current = { prev };
+                    setIsSaving(true);
+                    await updateFile(fileId, { content: next });
+                    lastSavedContentRef.current = next;
+                    setText(next);
+                    toast.success('Block deleted', {
+                      action: {
+                        label: 'Undo',
+                        onClick: () => { void undoDelete(); },
+                      },
+                    });
+                  } catch (err) {
+                    console.error(err);
+                    toast.error('Failed to delete block');
+                  } finally {
+                    setIsSaving(false);
+                  }
+                }}
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+            <div
+              key={`block-${i}-${b.start}`}
+              data-block-idx={i}
+              data-start={b.start}
+              data-end={b.end}
+              className={`whitespace-pre-wrap mb-4 p-2 pl-6 rounded ${editingRange && i >= editingRange.start && i <= editingRange.end ? 'bg-yellow-50 outline outline-2 outline-indigo-500' : 'bg-transparent'}`}
+              contentEditable={Boolean(isVtt && editingRange && i >= editingRange.start && i <= editingRange.end)}
+              suppressContentEditableWarning
+              onInput={onBlockInput(i)}
+              onBlur={onBlockBlur(i)}
+            >
+              {isVtt
+                ? (editingRange && i >= editingRange.start && i <= editingRange.end
+                  ? text.substring(b.start, b.end)
+                  : renderVttBlock({ start: b.start, end: b.end }))
+                : renderGenericBlock({ start: b.start, end: b.end })}
+            </div>
           </div>
         ))}
         {isSaving ? <div className="mt-2 text-xs text-neutral-500">Saving…</div> : null}
