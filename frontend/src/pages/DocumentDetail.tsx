@@ -87,7 +87,7 @@ export default function DocumentDetail() {
             <div className="border-2 border-black p-4">
                 <div className="grid grid-cols-[3fr_1fr] gap-6">
                     <div>
-                        <h2 className="text-sm font-semibold uppercase tracking-wide mb-2">Document</h2>
+                        <h2 className="text-base md:text-lg font-bold uppercase tracking-wide mb-2">Document</h2>
                         <div id="transcript-container">
                             <TextViewer
                                 ref={viewerRef}
@@ -101,7 +101,7 @@ export default function DocumentDetail() {
                         </div>
                     </div>
                     <div>
-                        <h2 className="text-sm font-semibold uppercase tracking-wide mb-2">Codes</h2>
+                        <h2 className="text-base md:text-lg font-bold uppercase tracking-wide mb-2">Codes</h2>
                         <div className="pl-4 border-l-2 border-black">
                             {sortedByOffset.length === 0 ? (
                                 <div className="text-sm text-neutral-600">No codes yet.</div>
@@ -110,7 +110,7 @@ export default function DocumentDetail() {
                                     {marks.map(m => (
                                         <button
                                             key={m.id}
-                                            className="absolute left-0 -translate-y-1/2 brutal-card bg-white px-2 py-1 text-xs text-neutral-900 hover:bg-indigo-50"
+                                            className="absolute left-0 -translate-y-1/2 brutal-card shadow-none border-2 border-neutral-800 bg-white px-2 py-1 text-xs text-neutral-900 hover:bg-indigo-50"
                                             style={{ top: `${m.top}px` }}
                                             title={m.codeName}
                                             onClick={() => { viewerRef.current?.scrollToOffset(m.startOffset); viewerRef.current?.flashAtOffset(m.startOffset); }}
@@ -124,7 +124,7 @@ export default function DocumentDetail() {
                                     {sortedByOffset.map(h => (
                                         <button
                                             key={h.id}
-                                            className="block text-left brutal-card bg-white px-2 py-1 text-xs text-neutral-900 hover:bg-indigo-50"
+                                            className="block text-left brutal-card shadow-none border-2 border-neutral-800 bg-white px-2 py-1 text-xs text-neutral-900 hover:bg-indigo-50"
                                             title={h.codeName}
                                             onClick={() => { viewerRef.current?.scrollToOffset(h.startOffset); viewerRef.current?.flashAtOffset(h.startOffset); }}
                                         >

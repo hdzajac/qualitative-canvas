@@ -46,7 +46,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     // Detect Opera for placement tweaks
     const isOpera = useMemo(() => (typeof navigator !== 'undefined' && /\bOPR\//.test(navigator.userAgent)), []);
 
-  // Codes rail removed: no external panel
+    // Codes rail removed: no external panel
 
     // Local text to allow editing
     const [text, setText] = useState(content);
@@ -577,7 +577,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       }
     }, [content, editingRange]);
 
-  const contentEl = (
+    const contentEl = (
       <div
         ref={textRootRef}
         className="prose prose-sm max-w-none leading-relaxed select-text"
@@ -609,7 +609,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
 
     return (
       <div className="relative space-y-4">
-  {framed ? <Card className="p-6">{contentEl}</Card> : contentEl}
+        {framed ? <Card className="p-6">{contentEl}</Card> : contentEl}
 
         {(selectedText || frozenSelection) && selectionRect && (
           <SelectionTooltip
