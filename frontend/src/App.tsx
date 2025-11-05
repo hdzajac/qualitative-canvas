@@ -65,7 +65,7 @@ function TopBar() {
   const location = useLocation();
   const active = (path: string) => location.pathname.startsWith(path) ? 'underline decoration-[3px] underline-offset-4' : 'hover:underline decoration-[3px] underline-offset-4';
   return (
-    <div className="px-4 py-3 border-b-4 border-black bg-white text-black flex items-center gap-6 uppercase tracking-wide">
+    <div className="sticky top-0 z-50 px-4 py-3 border-b-4 border-black bg-white text-black flex items-center gap-6 uppercase tracking-wide">
       <Link className="font-extrabold text-xl" to="/">Qualitative Canvas</Link>
       <nav className="flex gap-6">
         <Link className={active('/projects')} to="/projects">Projects</Link>

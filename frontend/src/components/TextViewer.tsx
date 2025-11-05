@@ -42,7 +42,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     const [codeName, setCodeName] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
     const textRootRef = useRef<HTMLDivElement>(null);
-  const [flashRange, setFlashRange] = useState<{ start: number; end: number } | null>(null);
+    const [flashRange, setFlashRange] = useState<{ start: number; end: number } | null>(null);
     const flashTimer = useRef<number | null>(null);
     // Detect Opera for placement tweaks
     const isOpera = useMemo(() => (typeof navigator !== 'undefined' && /\bOPR\//.test(navigator.userAgent)), []);
@@ -426,8 +426,8 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       const wrapHighlighted = (_chunkText: string, absStart: number, absEnd: number): JSX.Element[] => {
         const relStart = absStart - bStart;
         const relEnd = absEnd - bStart;
-  const isFlashing = flashRange && !(absEnd <= flashRange.start || absStart >= flashRange.end);
-  const bg = isFlashing ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30';
+        const isFlashing = flashRange && !(absEnd <= flashRange.start || absStart >= flashRange.end);
+        const bg = isFlashing ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30';
         const out: JSX.Element[] = [];
         const pushSeg = (from: number, to: number, cls: string, key: string) => {
           if (to <= from) return;
