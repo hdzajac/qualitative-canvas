@@ -15,6 +15,7 @@ import CanvasToolbarLeft from './canvas/CanvasToolbarLeft';
 import CanvasFontToolbar from './canvas/CanvasFontToolbar';
 import CanvasContextPopup from './canvas/CanvasContextPopup';
 import CanvasSizeControls from './canvas/CanvasSizeControls';
+import AnnotationSticky from './canvas/AnnotationSticky';
 
 interface CanvasProps {
   highlights: Highlight[];
@@ -57,56 +58,12 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   useEffect(() => { selectedCodeIdsRef.current = selectedCodeIds; }, [selectedCodeIds]);
   useEffect(() => { selectedThemeIdsRef.current = selectedThemeIds; }, [selectedThemeIds]);
 
-  // Dragging
-  const dragState = useRef<
-    | {
-      mode: 'node';
-      nodeIdx: number;
-      startWorld: { x: number; y: number };
-      startNode: { x: number; y: number };
-      moved: boolean;
-      // New: group drag support (indices and their starting positions)
-      group: Array<{ idx: number; startX: number; startY: number }>;
-    }
-    | {
-      mode: 'pan';
-      startOffset: { x: number; y: number };
-      startClient: { x: number; y: number };
-    }
-    | {
-      mode: 'select';
-      startClient: { x: number; y: number };
-      rect: { x: number; y: number; w: number; h: number };
-    }
-    | {
-      mode: 'resize';
-      nodeIdx: number;
-      corner: ResizeCorner;
-      startWorld: { x: number; y: number };
-      startRect: { x: number; y: number; w: number; h: number };
-      moved: boolean;
-    }
-    | {
-      mode: 'connect';
-      fromKind: NodeKind; // 'code' | 'theme'
-      fromId: string;
-      start: { x: number; y: number }; // world
-      last: { x: number; y: number }; // world
-      anchor: { x: number; y: number }; // fixed world anchor at handle center
-    }
-    | null
-  >(null);
-
-  // Cursor hint when hovering
-  const [hoverCursor, setHoverCursor] = useState<string>('default');
-
   const [projectId] = useSelectedProject();
 
   // Annotation drafts and focus state (rendered as HTML textfields)
   const [annotationDrafts, setAnnotationDrafts] = useState<Record<string, string>>({});
   const [editingAnnotation, setEditingAnnotation] = useState<null | { id: string }>(null);
   const editingInputRef = useRef<HTMLTextAreaElement | null>(null);
-  // No folded palette state; toolbar appears only for active annotation
   // Drag/resize state for annotations rendered as HTML
   const dragAnnoRef = useRef<null | { mode: 'move' | 'resize'; id: string; startClient: { x: number; y: number }; startNode: { x: number; y: number; w: number; h: number } }>(null);
   useEffect(() => {
@@ -251,6 +208,48 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       });
     });
   }, [highlights, themes, insights, annotations]);
+
+  // Dragging
+  const dragState = useRef<
+    | {
+      mode: 'node';
+      nodeIdx: number;
+      startWorld: { x: number; y: number };
+      startNode: { x: number; y: number };
+      moved: boolean;
+      group: Array<{ idx: number; startX: number; startY: number }>;
+    }
+    | {
+      mode: 'pan';
+      startOffset: { x: number; y: number };
+      startClient: { x: number; y: number };
+    }
+    | {
+      mode: 'select';
+      startClient: { x: number; y: number };
+      rect: { x: number; y: number; w: number; h: number };
+    }
+    | {
+      mode: 'resize';
+      nodeIdx: number;
+      corner: ResizeCorner;
+      startWorld: { x: number; y: number };
+      startRect: { x: number; y: number; w: number; h: number };
+      moved: boolean;
+    }
+    | {
+      mode: 'connect';
+      fromKind: NodeKind;
+      fromId: string;
+      start: { x: number; y: number };
+      last: { x: number; y: number };
+      anchor: { x: number; y: number };
+    }
+    | null
+  >(null);
+
+  // Cursor hint when hovering
+  const [hoverCursor, setHoverCursor] = useState<string>('default');
 
   // Initialize drafts for annotations when they load (don't clobber existing drafts)
   useEffect(() => {
@@ -1119,159 +1118,69 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         }}
       />
 
-      {/* Annotation textfields (persistent) */}
+      {/* Annotation textfields (persistent) via component */}
       {nodes.filter((nn): nn is AnnotationNodeView => nn.kind === 'annotation').map((n) => {
-        const fs = getFontSize(n);
-        const left = offset.x + n.x * zoom;
-        const top = offset.y + n.y * zoom;
-        const width = Math.max(20, n.w * zoom);
-        const height = Math.max(24, n.h * zoom);
-        const lineHeightPx = Math.max(12, Math.round(fs * 1.2)) * zoom;
         const id = n.id;
+        const fs = getFontSize(n);
         const val = annotationDrafts[id] ?? n.annotation?.content ?? '';
-        const bg = (n.annotation?.style && n.annotation.style.background) || '#FEF3C7'; // default sticky yellow
-        const active = editingAnnotation?.id === id;
-        const dragPad = Math.max(6, 8 * zoom); // clickable ring to drag
-        // helpers to derive outline and glow from bg
-        const hexToRgb = (hex: string): { r: number; g: number; b: number } | null => {
-          const m = hex.replace('#', '');
-          const full = m.length === 3 ? m.split('').map((c) => c + c).join('') : m;
-          const int = parseInt(full, 16);
-          if (Number.isNaN(int) || (full.length !== 6)) return null;
-          return { r: (int >> 16) & 255, g: (int >> 8) & 255, b: int & 255 };
-        };
-        const darken = (hex: string, amt: number) => {
-          const rgb = hexToRgb(hex); if (!rgb) return hex;
-          const r = Math.max(0, Math.min(255, Math.round(rgb.r * (1 - amt))));
-          const g = Math.max(0, Math.min(255, Math.round(rgb.g * (1 - amt))));
-          const b = Math.max(0, Math.min(255, Math.round(rgb.b * (1 - amt))));
-          return `rgb(${r}, ${g}, ${b})`;
-        };
-        const rgba = (hex: string, a: number) => {
-          const rgb = hexToRgb(hex); if (!rgb) return `rgba(0,0,0,${a})`;
-          return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})`;
-        };
-        // Removed header; use uniform padding inside textarea
-        const swatchSize = Math.max(16, 16 * zoom);
+        const bg = (n.annotation?.style && n.annotation.style.background) || '#FEF3C7';
         const palette: string[] = ['#FEF3C7', '#FED7AA', '#FBCFE8', '#DCFCE7', '#DBEAFE', '#E9D5FF', '#F3F4F6'];
-        const applyColor = async (color: string) => {
-          try {
-            await updateAnnotation(id, { style: { ...(n.annotation?.style || {}), background: color } });
-            setNodes(prev => prev.map(nn => (nn.kind === 'annotation' && nn.id === id) ? { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), background: color } } } : nn));
-            onUpdate();
-          } catch { toast.error('Save failed'); }
-        };
-        const applyFontSize = async (size: number) => {
-          try {
-            await updateAnnotation(id, { style: { ...(n.annotation?.style || {}), background: bg, fontSize: size } });
-            setNodes(prev => prev.map(nn => (nn.kind === 'annotation' && nn.id === id) ? { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), background: bg, fontSize: size } } } : nn));
-            onUpdate();
-          } catch { toast.error('Save failed'); }
-        };
-        const commit = async (finalText: string) => {
-          const trimmed = finalText.trim();
-          setEditingAnnotation(null);
-          try {
-            if (!trimmed) {
-              await deleteAnnotation(id);
-              toast.success('Text removed');
-            } else {
-              await updateAnnotation(id, { content: trimmed });
-              toast.success('Saved');
-            }
-            onUpdate();
-          } catch {
-            toast.error('Save failed');
-          }
-        };
         const isDraggingAnno = dragAnnoRef.current?.mode === 'move' && dragAnnoRef.current.id === id;
         const isResizingAnno = dragAnnoRef.current?.mode === 'resize' && dragAnnoRef.current.id === id;
         return (
-          <div
+          <AnnotationSticky
             key={id}
-            className="absolute z-30"
-            style={{ left, top, width, height, cursor: isResizingAnno ? 'nwse-resize' : (isDraggingAnno ? 'grabbing' : 'grab') }}
-            onMouseDownCapture={(e) => {
-              // If clicking outside the textarea, start move immediately
-              const target = e.target as HTMLElement;
-              if (target && (target.tagName.toLowerCase() === 'textarea' || target.closest('[data-resize="true"]') || target.closest('[data-options="true"]'))) return;
-              e.stopPropagation(); e.preventDefault();
-              dragAnnoRef.current = { mode: 'move', id, startClient: { x: (e as unknown as MouseEvent).clientX, y: (e as unknown as MouseEvent).clientY }, startNode: { x: n.x, y: n.y, w: n.w, h: n.h } };
-            }}
-          >
-            {/* Sticky container background & shadow with active outline in note color */}
-            <div style={{
-              position: 'absolute', inset: 0, background: bg, borderRadius: 2, zIndex: 1,
-              border: active ? `2px solid ${darken(bg, 0.25)}` : '2px solid transparent',
-              boxShadow: active
-                ? `${`0 0 0 ${Math.max(3, 3 * zoom)}px ` + rgba(bg, 0.35)}, 0 6px 14px rgba(0,0,0,0.15)`
-                : '0 6px 14px rgba(0,0,0,0.15)'
-            }} />
-
-            {/* Active toolbar (color + font size) centered above post-it */}
-            {editingAnnotation?.id === id && (
-              <div style={{ position: 'absolute', left: '50%', top: -Math.max(36, 36 * zoom), transform: 'translateX(-50%)', display: 'flex', gap: 8, background: 'rgba(255,255,255,0.95)', padding: '4px 8px', borderRadius: 6, boxShadow: '0 4px 10px rgba(0,0,0,0.15)', zIndex: 20 }}>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {palette.map((c: string) => (
-                    <button key={c} onClick={(e) => { e.stopPropagation(); void applyColor(c); }}
-                      style={{ width: swatchSize, height: swatchSize, borderRadius: 9999, border: c === bg ? `2px solid ${c}` : '1px solid rgba(0,0,0,0.2)', background: c, cursor: 'pointer' }} />
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {[
-                    { label: 'H1', size: 32 },
-                    { label: 'H2', size: 24 },
-                    { label: 'H3', size: 16 },
-                    { label: 'P', size: 12 },
-                  ].map(({ label, size }) => (
-                    <button key={label} onClick={(e) => { e.stopPropagation(); void applyFontSize(size); }}
-                      style={{ minWidth: 28, padding: '2px 6px', fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: 'pointer', border: (n.annotation?.style?.fontSize ?? fs) === size ? '2px solid #000' : '1px solid rgba(0,0,0,0.3)', background: 'white' }}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {/* Text field */}
-            <textarea
-              ref={(el) => { if (editingAnnotation?.id === id) editingInputRef.current = el; }}
-              className="outline-none bg-transparent resize-none"
-              style={{
-                position: 'absolute',
-                top: dragPad, left: dragPad, right: dragPad, bottom: dragPad,
-                width: `calc(100% - ${dragPad * 2}px)`, height: `calc(100% - ${dragPad * 2}px)`,
-                border: 'none', fontSize: fs * zoom, lineHeight: `${lineHeightPx}px`,
-                padding: Math.max(4, 6 * zoom), color: '#111827', zIndex: 4,
-              }}
-              autoFocus={editingAnnotation?.id === id}
-              value={val}
-              onChange={(e) => setAnnotationDrafts(prev => ({ ...prev, [id]: e.target.value }))}
-              onMouseDown={(e) => { /* allow selection/cursor inside textarea; prevent bubbling to canvas */ e.stopPropagation(); }}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === 'Escape') {
-                  void commit(val);
-                } else if (e.key === 'Enter' && !e.shiftKey) {
-                  // Enter to commit; Shift+Enter for newline
-                  e.preventDefault();
-                  void commit(val);
+            id={id}
+            x={n.x} y={n.y} w={n.w} h={n.h}
+            zoom={zoom}
+            offset={offset}
+            bg={bg}
+            fontSizePx={fs}
+            value={val}
+            active={editingAnnotation?.id === id}
+            isDragging={isDraggingAnno}
+            isResizing={isResizingAnno}
+            palette={palette}
+            onChange={(noteId, newVal) => setAnnotationDrafts(prev => ({ ...prev, [noteId]: newVal }))}
+            onFocus={(noteId) => setEditingAnnotation({ id: noteId })}
+            onCommit={async (noteId, finalText) => {
+              const trimmed = finalText.trim();
+              setEditingAnnotation(null);
+              try {
+                if (!trimmed) {
+                  await deleteAnnotation(noteId);
+                  toast.success('Text removed');
+                } else {
+                  await updateAnnotation(noteId, { content: trimmed });
+                  toast.success('Saved');
                 }
-              }}
-              onBlur={() => { void commit(val); }}
-              onFocus={() => setEditingAnnotation({ id })}
-            />
-            {/* Resize handle (bottom-right) */}
-            <div
-              title="Resize"
-              data-resize="true"
-              onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); dragAnnoRef.current = { mode: 'resize', id, startClient: { x: e.clientX, y: e.clientY }, startNode: { x: n.x, y: n.y, w: n.w, h: n.h } }; }}
-              style={{
-                position: 'absolute', right: 0, bottom: 0, width: Math.max(14, 14 * zoom), height: Math.max(14, 14 * zoom), cursor: 'nwse-resize', zIndex: 6,
-                background: 'linear-gradient(135deg, rgba(0,0,0,0) 50%, rgba(0,0,0,0.25) 50%)'
-              }}
-            />
-          </div>
+                onUpdate();
+              } catch {
+                toast.error('Save failed');
+              }
+            }}
+            onApplyColor={async (noteId, color) => {
+              try {
+                await updateAnnotation(noteId, { style: { ...(n.annotation?.style || {}), background: color } });
+                setNodes(prev => prev.map(nn => (nn.kind === 'annotation' && nn.id === noteId) ? { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), background: color } } } : nn));
+                onUpdate();
+              } catch { toast.error('Save failed'); }
+            }}
+            onApplyFontSize={async (noteId, size) => {
+              const currentBg = (n.annotation?.style && n.annotation.style.background) || '#FEF3C7';
+              try {
+                await updateAnnotation(noteId, { style: { ...(n.annotation?.style || {}), background: currentBg, fontSize: size } });
+                setNodes(prev => prev.map(nn => (nn.kind === 'annotation' && nn.id === noteId) ? { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), background: currentBg, fontSize: size } } } : nn));
+                onUpdate();
+              } catch { toast.error('Save failed'); }
+            }}
+            onStartMove={(noteId, clientX, clientY, startNode) => {
+              dragAnnoRef.current = { mode: 'move', id: noteId, startClient: { x: clientX, y: clientY }, startNode };
+            }}
+            onStartResize={(noteId, clientX, clientY, startNode) => {
+              dragAnnoRef.current = { mode: 'resize', id: noteId, startClient: { x: clientX, y: clientY }, startNode };
+            }}
+          />
         );
       })}
 
