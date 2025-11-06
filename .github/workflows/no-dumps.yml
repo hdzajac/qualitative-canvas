@@ -1,0 +1,21 @@
+name: Prevent committing DB dumps
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check-dumps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if any .dump files are present
+        run: |
+          set -e
+          MATCHES=$(git ls-files '*.dump' || true)
+          if [ -n "$MATCHES" ]; then
+            echo "Error: The following dump files are present in the repo:" >&2
+            echo "$MATCHES" >&2
+            exit 1
+          fi
+          echo "No dump files detected."
