@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import pool from './db/pool.js';
 import filesRoutes from './routes/files.js';
 import codesRoutes from './routes/codes.js';
@@ -16,7 +18,20 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5002;
 
-app.use(cors());
+// Security middleware
+app.set('trust proxy', 1);
+app.use(helmet({
+  contentSecurityPolicy: false,
+}));
+
+// CORS: default to strict origin if provided
+const corsOrigin = process.env.FRONTEND_ORIGIN || process.env.CORS_ORIGIN;
+app.use(cors(corsOrigin ? { origin: corsOrigin, credentials: true } : {}));
+
+// Rate limit basic abuse of API
+const limiter = rateLimit({ windowMs: 60_000, max: 600 });
+app.use(limiter);
+
 app.use(express.json({ limit: '5mb' }));
 app.use(morgan('dev'));
 

@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   frontend:
     build:
@@ -22,7 +20,8 @@ services:
     expose:
       - "5000"
     environment:
-      - DATABASE_URL=postgres://postgres:postgres@db:5432/qda
+      - DB_ENV=prod
+      - DATABASE_URL_PROD=${DATABASE_URL_PROD}
       - PORT=5000
     depends_on:
       db:

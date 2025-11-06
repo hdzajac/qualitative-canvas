@@ -1055,19 +1055,21 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
             onSetWidth200={() => { setNodes(prev => prev.map(nn => (nn.kind === n.kind && nn.id === n.id) ? { ...nn, w: 200 } : nn)); draw(); }}
             onSetWidth300={() => { setNodes(prev => prev.map(nn => (nn.kind === n.kind && nn.id === n.id) ? { ...nn, w: 300 } : nn)); draw(); }}
             fontSize={fs}
-            onChangeFontSize={(val) => { setNodes(prev => prev.map(nn => {
-              if (!(nn.kind === n.kind && nn.id === n.id)) return nn;
-              switch (n.kind) {
-                case 'code':
-                  return { ...(nn as CodeNodeView), highlight: { ...(nn as CodeNodeView).highlight!, style: { ...((nn as CodeNodeView).highlight?.style || {}), fontSize: val } } } as CodeNodeView;
-                case 'theme':
-                  return { ...(nn as ThemeNodeView), theme: { ...(nn as ThemeNodeView).theme!, style: { ...((nn as ThemeNodeView).theme?.style || {}), fontSize: val } } } as ThemeNodeView;
-                case 'insight':
-                  return { ...(nn as InsightNodeView), insight: { ...(nn as InsightNodeView).insight!, style: { ...((nn as InsightNodeView).insight?.style || {}), fontSize: val } } } as InsightNodeView;
-                case 'annotation':
-                  return { ...(nn as AnnotationNodeView), annotation: { ...(nn as AnnotationNodeView).annotation!, style: { ...((nn as AnnotationNodeView).annotation?.style || {}), fontSize: val } } } as AnnotationNodeView;
-              }
-            })); draw(); }}
+            onChangeFontSize={(val) => {
+              setNodes(prev => prev.map(nn => {
+                if (!(nn.kind === n.kind && nn.id === n.id)) return nn;
+                switch (n.kind) {
+                  case 'code':
+                    return { ...(nn as CodeNodeView), highlight: { ...(nn as CodeNodeView).highlight!, style: { ...((nn as CodeNodeView).highlight?.style || {}), fontSize: val } } } as CodeNodeView;
+                  case 'theme':
+                    return { ...(nn as ThemeNodeView), theme: { ...(nn as ThemeNodeView).theme!, style: { ...((nn as ThemeNodeView).theme?.style || {}), fontSize: val } } } as ThemeNodeView;
+                  case 'insight':
+                    return { ...(nn as InsightNodeView), insight: { ...(nn as InsightNodeView).insight!, style: { ...((nn as InsightNodeView).insight?.style || {}), fontSize: val } } } as InsightNodeView;
+                  case 'annotation':
+                    return { ...(nn as AnnotationNodeView), annotation: { ...(nn as AnnotationNodeView).annotation!, style: { ...((nn as AnnotationNodeView).annotation?.style || {}), fontSize: val } } } as AnnotationNodeView;
+                }
+              })); draw();
+            }}
             onSave={async () => {
               try {
                 if (n.kind === 'code') await updateHighlight(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.highlight?.style || {}), fontSize: getFontSize(n) } });

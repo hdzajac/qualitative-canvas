@@ -1,52 +1,49 @@
 import { Router } from 'express';
-import { v4 as uuidv4 } from 'uuid';
 import asyncHandler from 'express-async-handler';
+import { z } from 'zod';
+import filesService from '../services/filesService.js';
 
 export default function filesRoutes(pool) {
   const router = Router();
+  const service = filesService(pool);
 
-  const map = (r) => ({ id: r.id, filename: r.filename, content: r.content, createdAt: r.created_at.toISOString(), projectId: r.project_id ?? undefined });
+  const CreateSchema = z.object({ filename: z.string().min(1).max(512), content: z.string(), projectId: z.string().uuid().optional() });
+  const UpdateSchema = z.object({ filename: z.string().min(1).max(512).optional(), content: z.string().optional(), projectId: z.string().uuid().optional() });
 
   router.get('/', asyncHandler(async (req, res) => {
     const { projectId } = req.query;
-    if (projectId) {
-      const r = await pool.query('SELECT * FROM files WHERE project_id = $1 ORDER BY created_at DESC', [projectId]);
-      return res.json(r.rows.map(map));
-    }
-    const r = await pool.query('SELECT * FROM files ORDER BY created_at DESC');
-    res.json(r.rows.map(map));
+    const list = await service.list({ projectId });
+    res.json(list);
   }));
 
   router.get('/:id', asyncHandler(async (req, res) => {
-    const r = await pool.query('SELECT * FROM files WHERE id = $1', [req.params.id]);
-    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
-    res.json(map(r.rows[0]));
+    const file = await service.get(req.params.id);
+    if (!file) return res.status(404).json({ error: 'Not found' });
+    res.json(file);
   }));
 
   router.post('/', asyncHandler(async (req, res) => {
-    const { filename, content, projectId } = req.body || {};
-    if (!filename || typeof content !== 'string') return res.status(400).json({ error: 'Invalid body' });
-    const id = uuidv4();
-    const r = await pool.query('INSERT INTO files (id, filename, content, project_id) VALUES ($1,$2,$3,$4) RETURNING *', [id, filename, content, projectId ?? null]);
-    res.status(201).json(map(r.rows[0]));
+    const parsed = CreateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const { filename, content, projectId } = parsed.data;
+    const created = await service.create({ filename, content, projectId });
+    res.status(201).json(created);
   }));
 
   router.put('/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { filename, content, projectId } = req.body || {};
-    const r = await pool.query(
-      `UPDATE files SET filename = COALESCE($2, filename), content = COALESCE($3, content), project_id = COALESCE($4, project_id)
-       WHERE id = $1 RETURNING *`,
-      [id, filename ?? null, content ?? null, projectId ?? null]
-    );
-    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
-    res.json(map(r.rows[0]));
+    const parsed = UpdateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const { filename, content, projectId } = parsed.data;
+    const updated = await service.update(id, { filename, content, projectId });
+    if (!updated) return res.status(404).json({ error: 'Not found' });
+    res.json(updated);
   }));
 
   router.delete('/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const r = await pool.query('DELETE FROM files WHERE id=$1 RETURNING id', [id]);
-    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    const ok = await service.remove(id);
+    if (!ok) return res.status(404).json({ error: 'Not found' });
     res.status(204).send();
   }));
 

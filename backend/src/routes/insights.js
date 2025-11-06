@@ -1,68 +1,55 @@
 import { Router } from 'express';
-import { v4 as uuidv4 } from 'uuid';
 import asyncHandler from 'express-async-handler';
+import { z } from 'zod';
+import insightsService from '../services/insightsService.js';
 
 export default function insightsRoutes(pool) {
   const router = Router();
+  const service = insightsService(pool);
 
-  const map = (r) => ({
-    id: r.id,
-    name: r.name,
-    themeIds: r.theme_ids || [],
-    position: r.position || undefined,
-    createdAt: r.created_at.toISOString(),
-    expanded: r.expanded ?? undefined,
-    size: r.size || undefined,
-    style: r.style || undefined,
+  const CreateSchema = z.object({
+    name: z.string().min(1).max(256),
+    themeIds: z.array(z.string().uuid()).optional(),
+    position: z.any().optional(),
+    expanded: z.boolean().optional(),
+    size: z.any().optional(),
+    style: z.any().optional(),
+  });
+  const UpdateSchema = z.object({
+    name: z.string().min(1).max(256).optional(),
+    themeIds: z.array(z.string().uuid()).optional(),
+    position: z.any().optional(),
+    expanded: z.boolean().optional(),
+    size: z.any().optional(),
+    style: z.any().optional(),
   });
 
   router.get('/', asyncHandler(async (req, res) => {
     const { projectId } = req.query;
-    if (projectId) {
-      const r = await pool.query(
-        `SELECT DISTINCT i.* FROM insights i
-         JOIN LATERAL unnest(i.theme_ids) AS tid ON true
-         JOIN themes t ON t.id = tid
-         JOIN LATERAL unnest(t.code_ids) AS cid ON true
-         JOIN codes c ON c.id = cid
-         JOIN files f ON f.id = c.file_id
-         WHERE f.project_id = $1
-         ORDER BY i.created_at DESC`,
-        [projectId]
-      );
-      return res.json(r.rows.map(map));
-    }
-    const r = await pool.query('SELECT * FROM insights ORDER BY created_at DESC');
-    res.json(r.rows.map(map));
+    const list = await service.list({ projectId });
+    res.json(list);
   }));
 
   router.post('/', asyncHandler(async (req, res) => {
-    const { name, themeIds, position, expanded, size, style } = req.body || {};
-    if (!name) return res.status(400).json({ error: 'Invalid body' });
-    const id = uuidv4();
-    const r = await pool.query(
-      `INSERT INTO insights (id, name, theme_ids, position, expanded, size, style) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [id, name, Array.isArray(themeIds) ? themeIds : [], position ?? null, expanded ?? null, size ?? null, style ?? null]
-    );
-    res.status(201).json(map(r.rows[0]));
+    const parsed = CreateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const created = await service.create(parsed.data);
+    res.status(201).json(created);
   }));
 
   router.put('/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { name, themeIds, position, expanded, size, style } = req.body || {};
-    const r = await pool.query(
-      `UPDATE insights SET name=COALESCE($2,name), theme_ids=COALESCE($3,theme_ids), position=COALESCE($4,position), expanded=COALESCE($5,expanded), size=COALESCE($6,size), style=COALESCE($7,style)
-       WHERE id=$1 RETURNING *`,
-      [id, name ?? null, Array.isArray(themeIds) ? themeIds : null, position ?? null, expanded ?? null, size ?? null, style ?? null]
-    );
-    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
-    res.json(map(r.rows[0]));
+    const parsed = UpdateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const updated = await service.update(id, parsed.data);
+    if (!updated) return res.status(404).json({ error: 'Not found' });
+    res.json(updated);
   }));
 
   router.delete('/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const r = await pool.query('DELETE FROM insights WHERE id=$1 RETURNING id', [id]);
-    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    const ok = await service.remove(id);
+    if (!ok) return res.status(404).json({ error: 'Not found' });
     res.status(204).send();
   }));
 

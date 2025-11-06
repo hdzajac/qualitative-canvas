@@ -1,9 +1,11 @@
 import { Router } from 'express';
-import { v4 as uuidv4 } from 'uuid';
 import asyncHandler from 'express-async-handler';
+import { z } from 'zod';
+import themesService from '../services/themesService.js';
 
 export default function themesRoutes(pool) {
   const router = Router();
+  const service = themesService(pool);
 
   const map = (r) => ({
     id: r.id,
@@ -15,54 +17,49 @@ export default function themesRoutes(pool) {
     createdAt: r.created_at.toISOString(),
   });
 
+  const CreateSchema = z.object({
+    name: z.string().min(1).max(256),
+    codeIds: z.array(z.string().uuid()).optional(),
+    highlightIds: z.array(z.string().uuid()).optional(),
+    position: z.any().optional(),
+    size: z.any().optional(),
+    style: z.any().optional(),
+  });
+  const UpdateSchema = z.object({
+    name: z.string().min(1).max(256).optional(),
+    codeIds: z.array(z.string().uuid()).optional(),
+    highlightIds: z.array(z.string().uuid()).optional(),
+    position: z.any().optional(),
+    size: z.any().optional(),
+    style: z.any().optional(),
+  });
+
   router.get('/', asyncHandler(async (req, res) => {
     const { projectId } = req.query;
-    if (projectId) {
-      // Filter themes that reference codes from files in the given project
-      const r = await pool.query(
-        `SELECT DISTINCT t.* FROM themes t
-         JOIN LATERAL unnest(t.code_ids) AS cid ON true
-         JOIN codes c ON c.id = cid
-         JOIN files f ON f.id = c.file_id
-         WHERE f.project_id = $1
-         ORDER BY t.created_at DESC`,
-        [projectId]
-      );
-      return res.json(r.rows.map(map));
-    }
-    const r = await pool.query('SELECT * FROM themes ORDER BY created_at DESC');
-    res.json(r.rows.map(map));
+    const list = await service.list({ projectId });
+    res.json(list);
   }));
 
   router.post('/', asyncHandler(async (req, res) => {
-    const { name, codeIds, highlightIds, position, size, style } = req.body || {};
-    if (!name) return res.status(400).json({ error: 'Invalid body' });
-    const ids = Array.isArray(codeIds) ? codeIds : Array.isArray(highlightIds) ? highlightIds : [];
-    const id = uuidv4();
-    const r = await pool.query(
-      `INSERT INTO themes (id, name, code_ids, position, size, style) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [id, name, ids, position ?? null, size ?? null, style ?? null]
-    );
-    res.status(201).json(map(r.rows[0]));
+    const parsed = CreateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const created = await service.create(parsed.data);
+    res.status(201).json(created);
   }));
 
   router.put('/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { name, codeIds, highlightIds, position, size, style } = req.body || {};
-    const ids = Array.isArray(codeIds) ? codeIds : Array.isArray(highlightIds) ? highlightIds : null;
-    const r = await pool.query(
-      `UPDATE themes SET name=COALESCE($2,name), code_ids=COALESCE($3,code_ids), position=COALESCE($4,position), size=COALESCE($5,size), style=COALESCE($6,style)
-       WHERE id=$1 RETURNING *`,
-      [id, name ?? null, ids, position ?? null, size ?? null, style ?? null]
-    );
-    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
-    res.json(map(r.rows[0]));
+    const parsed = UpdateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const updated = await service.update(id, parsed.data);
+    if (!updated) return res.status(404).json({ error: 'Not found' });
+    res.json(updated);
   }));
 
   router.delete('/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const r = await pool.query('DELETE FROM themes WHERE id=$1 RETURNING id', [id]);
-    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    const ok = await service.remove(id);
+    if (!ok) return res.status(404).json({ error: 'Not found' });
     res.status(204).send();
   }));
 
