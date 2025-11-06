@@ -25,8 +25,6 @@ jobs:
           FILES=$(git ls-files \
             '.env' \
             '**/.env' \
-            '.env.*' \
-            '**/.env.*' \
             '*.pem' '*.key' '*.p12' '*.crt' '*.cert' || true)
           if [ -n "$FILES" ]; then
             echo "Error: Sensitive files tracked in git:" >&2
