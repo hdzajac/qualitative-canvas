@@ -102,8 +102,59 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
   const [projectId] = useSelectedProject();
 
+  // Annotation drafts and focus state (rendered as HTML textfields)
+  const [annotationDrafts, setAnnotationDrafts] = useState<Record<string, string>>({});
+  const [editingAnnotation, setEditingAnnotation] = useState<null | { id: string }>(null);
+  const editingInputRef = useRef<HTMLTextAreaElement | null>(null);
+  // No folded palette state; toolbar appears only for active annotation
+  // Drag/resize state for annotations rendered as HTML
+  const dragAnnoRef = useRef<null | { mode: 'move' | 'resize'; id: string; startClient: { x: number; y: number }; startNode: { x: number; y: number; w: number; h: number } }>(null);
+  useEffect(() => {
+    if (editingAnnotation && editingInputRef.current) {
+      const el = editingInputRef.current;
+      el.focus();
+      el.select();
+    }
+  }, [editingAnnotation]);
+
+  // Global mouse handlers for moving/resizing annotations
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      const st = dragAnnoRef.current; if (!st) return;
+      const dx = e.clientX - st.startClient.x; const dy = e.clientY - st.startClient.y;
+      const dxW = dx / Math.max(0.0001, zoom); const dyW = dy / Math.max(0.0001, zoom);
+      setNodes(prev => prev.map(nn => {
+        if (nn.kind !== 'annotation' || nn.id !== st.id) return nn;
+        if (st.mode === 'move') {
+          return { ...nn, x: st.startNode.x + dxW, y: st.startNode.y + dyW };
+        } else {
+          const minW = 60; const minH = 24;
+          return { ...nn, w: Math.max(minW, st.startNode.w + dxW), h: Math.max(minH, st.startNode.h + dyW) };
+        }
+      }));
+    }
+    async function onUp() {
+      const st = dragAnnoRef.current; if (!st) return;
+      dragAnnoRef.current = null;
+      const nn = nodesRef.current.find((n: NodeView) => n.kind === 'annotation' && n.id === st.id) as AnnotationNodeView | undefined;
+      if (!nn) return;
+      try {
+        await updateAnnotation(nn.id, { position: { x: nn.x, y: nn.y }, size: { w: nn.w, h: nn.h } });
+        onUpdate();
+      } catch { toast.error('Failed to save'); }
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [zoom, onUpdate]);
+
   // Build node views from data; keep local state so we can move nodes immediately
   const [nodes, setNodes] = useState<NodeView[]>([]);
+  const nodesRef = useRef<NodeView[]>([]);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   const nodeIndexByKey = useMemo(() => {
     const m = new Map<string, number>();
     nodes.forEach((n, i) => m.set(`${n.kind}:${n.id}`, i));
@@ -200,6 +251,20 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       });
     });
   }, [highlights, themes, insights, annotations]);
+
+  // Initialize drafts for annotations when they load (don't clobber existing drafts)
+  useEffect(() => {
+    setAnnotationDrafts((prev) => {
+      const next = { ...prev };
+      annotations.forEach(a => {
+        if (next[a.id] === undefined) next[a.id] = a.content || '';
+      });
+      // Optionally remove drafts for deleted annotations
+      const ids = new Set(annotations.map(a => a.id));
+      (Object.keys(next) as Array<string>).forEach((id: string) => { if (!ids.has(id)) delete next[id]; });
+      return next;
+    });
+  }, [annotations]);
 
   // Auto-fit lifecycle: reset on project change, then fit once when ready
   useEffect(() => { firstFitDone.current = false; }, [projectId]);
@@ -328,7 +393,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     const m = new Map<string, string>();
     themes.forEach(t => {
       const set = new Set<string>();
-      t.highlightIds.forEach(hid => {
+      t.highlightIds.forEach((hid: string) => {
         const n = codeFileNameById.get(hid);
         if (n) set.add(n);
       });
@@ -342,10 +407,10 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     const m = new Map<string, string>();
     insights.forEach(i => {
       const set = new Set<string>();
-      i.themeIds.forEach(tid => {
+      i.themeIds.forEach((tid: string) => {
         const t = themes.find(tt => tt.id === tid);
         if (!t) return;
-        t.highlightIds.forEach(hid => {
+        t.highlightIds.forEach((hid: string) => {
           const n = codeFileNameById.get(hid);
           if (n) set.add(n);
         });
@@ -401,7 +466,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     ctx.strokeStyle = '#b1b1b7';
     ctx.lineWidth = 1;
     themes.forEach((t) => {
-      t.highlightIds.forEach((hid) => {
+      t.highlightIds.forEach((hid: string) => {
         const a = byKey.get(`code:${hid}`);
         const b = byKey.get(`theme:${t.id}`);
         if (!a || !b) return;
@@ -413,7 +478,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       });
     });
     insights.forEach((i) => {
-      i.themeIds.forEach((tid) => {
+      i.themeIds.forEach((tid: string) => {
         const a = byKey.get(`theme:${tid}`);
         const b = byKey.get(`insight:${i.id}`);
         if (!a || !b) return;
@@ -551,6 +616,12 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     const idx = hitTestNode(world.x, world.y, nodes);
     if (idx !== -1) {
       const n = nodes[idx];
+      // Annotation: enter inline edit immediately on click (unless clicking the open icon)
+      if (n.kind === 'annotation') {
+        if (isInOpenIcon(n, world.x, world.y)) { openPopupFor(n); return; }
+        setEditingAnnotation({ id: n.id });
+        return;
+      }
       if (isInOpenIcon(n, world.x, world.y)) { openPopupFor(n); return; }
       // Start connect gesture if hitting handle (do not change selection or viewport)
       if (isInConnectHandle(n, world.x, world.y, zoom)) {
@@ -609,12 +680,12 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
               if (edge.kind === 'code-theme') {
                 const t = themes.find(tt => tt.id === edge.toId);
                 if (!t) return;
-                const newIds = t.highlightIds.filter(id => id !== edge.fromId);
+                const newIds = t.highlightIds.filter((id: string) => id !== edge.fromId);
                 await updateTheme(t.id, { highlightIds: newIds });
               } else {
                 const iobj = insights.find(ii => ii.id === edge.toId);
                 if (!iobj) return;
-                const newIds = iobj.themeIds.filter(id => id !== edge.fromId);
+                const newIds = iobj.themeIds.filter((id: string) => id !== edge.fromId);
                 await updateInsight(iobj.id, { themeIds: newIds });
               }
               toast.success('Connection removed');
@@ -703,8 +774,8 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       ctx.translate(offset.x, offset.y); ctx.scale(zoom, zoom);
       const byKey = new Map(nodes.map((n) => [`${n.kind}:${n.id}`, n] as const));
       ctx.save(); ctx.strokeStyle = '#b1b1b7'; ctx.lineWidth = 1;
-      themes.forEach((t) => { t.highlightIds.forEach((hid) => { const a = byKey.get(`code:${hid}`); const b = byKey.get(`theme:${t.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
-      insights.forEach((i) => { i.themeIds.forEach((tid) => { const a = byKey.get(`theme:${tid}`); const b = byKey.get(`insight:${i.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
+      themes.forEach((t) => { t.highlightIds.forEach((hid: string) => { const a = byKey.get(`code:${hid}`); const b = byKey.get(`theme:${t.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
+      insights.forEach((i) => { i.themeIds.forEach((tid: string) => { const a = byKey.get(`theme:${tid}`); const b = byKey.get(`insight:${i.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
       ctx.restore();
       nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll));
       ctx.restore();
@@ -756,8 +827,8 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       // Edges
       const byKey = new Map(nodes.map((n) => [`${n.kind}:${n.id}`, n] as const));
       ctx.save(); ctx.strokeStyle = '#b1b1b7'; ctx.lineWidth = 1;
-      themes.forEach((t) => { t.highlightIds.forEach((hid) => { const a = byKey.get(`code:${hid}`); const b = byKey.get(`theme:${t.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
-      insights.forEach((i) => { i.themeIds.forEach((tid) => { const a = byKey.get(`theme:${tid}`); const b = byKey.get(`insight:${i.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
+      themes.forEach((t) => { t.highlightIds.forEach((hid: string) => { const a = byKey.get(`code:${hid}`); const b = byKey.get(`theme:${t.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
+      insights.forEach((i) => { i.themeIds.forEach((tid: string) => { const a = byKey.get(`theme:${tid}`); const b = byKey.get(`insight:${i.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
       ctx.restore();
       // Nodes with potential highlight
       nodes.forEach((n) => {
@@ -806,9 +877,21 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     // Text tool: create annotation at click
     if (tool === 'text') {
       const world = screenToWorld(sx, sy);
-      await createAnnotation({ content: 'New text', position: { x: world.x, y: world.y }, projectId, size: DEFAULTS.annotation, style: { fontSize } });
-      toast.success('Text added');
-      onUpdate();
+      try {
+        const created = await createAnnotation({ content: 'New text', position: { x: world.x, y: world.y }, projectId, size: DEFAULTS.annotation, style: { fontSize } });
+        // Optimistically add a node so the textfield appears immediately
+        setNodes(prev => ([
+          ...prev,
+          { id: created.id, kind: 'annotation', x: world.x, y: world.y, w: DEFAULTS.annotation.w, h: DEFAULTS.annotation.h, annotation: created },
+        ]));
+        // Initialize as empty draft and focus for immediate typing
+        setAnnotationDrafts(prev => ({ ...prev, [created.id]: '' }));
+        setEditingAnnotation({ id: created.id });
+        toast.success('Text added');
+        onUpdate();
+      } catch {
+        toast.error('Failed to add text');
+      }
       return;
     }
 
@@ -929,7 +1012,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     const n = nodes.find((nn): nn is CodeNodeView => nn.kind === 'code' && nn.id === openEntity.id);
     const fid = n?.highlight?.fileId;
     if (!fid || fileNames[fid]) return;
-    getFile(fid).then(f => setFileNames(prev => ({ ...prev, [fid]: f.filename }))).catch(() => { });
+    getFile(fid).then((f: UploadedFile) => setFileNames(prev => ({ ...prev, [fid]: f.filename }))).catch(() => { });
   }, [openEntity, nodes, fileNames]);
 
   // Inline title editing for code in side panel
@@ -962,12 +1045,12 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         if (n.kind === 'code' && n.highlight) lines = measureWrappedLines(n.highlight.codeName || 'Untitled', contentWidth, `${fs}px ui-sans-serif, system-ui, -apple-system`);
         else if (n.kind === 'theme' && n.theme) lines = measureWrappedLines(n.theme.name || '', contentWidth, `${fs}px ui-sans-serif, system-ui, -apple-system`);
         else if (n.kind === 'insight' && n.insight) lines = measureWrappedLines(n.insight.name || '', contentWidth, `${fs}px ui-sans-serif, system-ui, -apple-system`);
-        else if (n.kind === 'annotation' && n.annotation) lines = measureWrappedLines(n.annotation.content || 'New text', contentWidth, `${fs}px ui-sans-serif, system-ui, -apple-system`);
+        // Do not auto-grow annotations; user resizes them manually
         const topPadding = 18; // space before first line baseline
         const bottomPadding = 18; // reserve for type label
         const minH = n.kind === 'code' ? DEFAULTS.code.h : n.kind === 'theme' ? DEFAULTS.theme.h : n.kind === 'insight' ? DEFAULTS.insight.h : DEFAULTS.annotation.h;
         const desired = Math.max(minH, topPadding + lines * lineHeight + bottomPadding);
-        if (desired > n.h + 0.5) { changed = true; return { ...n, h: desired }; }
+        if ((n.kind === 'code' || n.kind === 'theme' || n.kind === 'insight') && desired > n.h + 0.5) { changed = true; return { ...n, h: desired }; }
         return n;
       });
       return changed ? next : prev;
@@ -1035,6 +1118,162 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
           onUpdate();
         }}
       />
+
+      {/* Annotation textfields (persistent) */}
+      {nodes.filter((nn): nn is AnnotationNodeView => nn.kind === 'annotation').map((n) => {
+        const fs = getFontSize(n);
+        const left = offset.x + n.x * zoom;
+        const top = offset.y + n.y * zoom;
+        const width = Math.max(20, n.w * zoom);
+        const height = Math.max(24, n.h * zoom);
+        const lineHeightPx = Math.max(12, Math.round(fs * 1.2)) * zoom;
+        const id = n.id;
+        const val = annotationDrafts[id] ?? n.annotation?.content ?? '';
+        const bg = (n.annotation?.style && n.annotation.style.background) || '#FEF3C7'; // default sticky yellow
+        const active = editingAnnotation?.id === id;
+        const dragPad = Math.max(6, 8 * zoom); // clickable ring to drag
+        // helpers to derive outline and glow from bg
+        const hexToRgb = (hex: string): { r: number; g: number; b: number } | null => {
+          const m = hex.replace('#', '');
+          const full = m.length === 3 ? m.split('').map((c) => c + c).join('') : m;
+          const int = parseInt(full, 16);
+          if (Number.isNaN(int) || (full.length !== 6)) return null;
+          return { r: (int >> 16) & 255, g: (int >> 8) & 255, b: int & 255 };
+        };
+        const darken = (hex: string, amt: number) => {
+          const rgb = hexToRgb(hex); if (!rgb) return hex;
+          const r = Math.max(0, Math.min(255, Math.round(rgb.r * (1 - amt))));
+          const g = Math.max(0, Math.min(255, Math.round(rgb.g * (1 - amt))));
+          const b = Math.max(0, Math.min(255, Math.round(rgb.b * (1 - amt))));
+          return `rgb(${r}, ${g}, ${b})`;
+        };
+        const rgba = (hex: string, a: number) => {
+          const rgb = hexToRgb(hex); if (!rgb) return `rgba(0,0,0,${a})`;
+          return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})`;
+        };
+        // Removed header; use uniform padding inside textarea
+        const swatchSize = Math.max(16, 16 * zoom);
+        const palette: string[] = ['#FEF3C7', '#FED7AA', '#FBCFE8', '#DCFCE7', '#DBEAFE', '#E9D5FF', '#F3F4F6'];
+        const applyColor = async (color: string) => {
+          try {
+            await updateAnnotation(id, { style: { ...(n.annotation?.style || {}), background: color } });
+            setNodes(prev => prev.map(nn => (nn.kind === 'annotation' && nn.id === id) ? { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), background: color } } } : nn));
+            onUpdate();
+          } catch { toast.error('Save failed'); }
+        };
+        const applyFontSize = async (size: number) => {
+          try {
+            await updateAnnotation(id, { style: { ...(n.annotation?.style || {}), background: bg, fontSize: size } });
+            setNodes(prev => prev.map(nn => (nn.kind === 'annotation' && nn.id === id) ? { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), background: bg, fontSize: size } } } : nn));
+            onUpdate();
+          } catch { toast.error('Save failed'); }
+        };
+        const commit = async (finalText: string) => {
+          const trimmed = finalText.trim();
+          setEditingAnnotation(null);
+          try {
+            if (!trimmed) {
+              await deleteAnnotation(id);
+              toast.success('Text removed');
+            } else {
+              await updateAnnotation(id, { content: trimmed });
+              toast.success('Saved');
+            }
+            onUpdate();
+          } catch {
+            toast.error('Save failed');
+          }
+        };
+        const isDraggingAnno = dragAnnoRef.current?.mode === 'move' && dragAnnoRef.current.id === id;
+        const isResizingAnno = dragAnnoRef.current?.mode === 'resize' && dragAnnoRef.current.id === id;
+        return (
+          <div
+            key={id}
+            className="absolute z-30"
+            style={{ left, top, width, height, cursor: isResizingAnno ? 'nwse-resize' : (isDraggingAnno ? 'grabbing' : 'grab') }}
+            onMouseDownCapture={(e) => {
+              // If clicking outside the textarea, start move immediately
+              const target = e.target as HTMLElement;
+              if (target && (target.tagName.toLowerCase() === 'textarea' || target.closest('[data-resize="true"]') || target.closest('[data-options="true"]'))) return;
+              e.stopPropagation(); e.preventDefault();
+              dragAnnoRef.current = { mode: 'move', id, startClient: { x: (e as unknown as MouseEvent).clientX, y: (e as unknown as MouseEvent).clientY }, startNode: { x: n.x, y: n.y, w: n.w, h: n.h } };
+            }}
+          >
+            {/* Sticky container background & shadow with active outline in note color */}
+            <div style={{
+              position: 'absolute', inset: 0, background: bg, borderRadius: 2, zIndex: 1,
+              border: active ? `2px solid ${darken(bg, 0.25)}` : '2px solid transparent',
+              boxShadow: active
+                ? `${`0 0 0 ${Math.max(3, 3 * zoom)}px ` + rgba(bg, 0.35)}, 0 6px 14px rgba(0,0,0,0.15)`
+                : '0 6px 14px rgba(0,0,0,0.15)'
+            }} />
+
+            {/* Active toolbar (color + font size) centered above post-it */}
+            {editingAnnotation?.id === id && (
+              <div style={{ position: 'absolute', left: '50%', top: -Math.max(36, 36 * zoom), transform: 'translateX(-50%)', display: 'flex', gap: 8, background: 'rgba(255,255,255,0.95)', padding: '4px 8px', borderRadius: 6, boxShadow: '0 4px 10px rgba(0,0,0,0.15)', zIndex: 20 }}>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {palette.map((c: string) => (
+                    <button key={c} onClick={(e) => { e.stopPropagation(); void applyColor(c); }}
+                      style={{ width: swatchSize, height: swatchSize, borderRadius: 9999, border: c === bg ? `2px solid ${c}` : '1px solid rgba(0,0,0,0.2)', background: c, cursor: 'pointer' }} />
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {[
+                    { label: 'H1', size: 32 },
+                    { label: 'H2', size: 24 },
+                    { label: 'H3', size: 16 },
+                    { label: 'P', size: 12 },
+                  ].map(({ label, size }) => (
+                    <button key={label} onClick={(e) => { e.stopPropagation(); void applyFontSize(size); }}
+                      style={{ minWidth: 28, padding: '2px 6px', fontSize: 11, fontWeight: 600, borderRadius: 4, cursor: 'pointer', border: (n.annotation?.style?.fontSize ?? fs) === size ? '2px solid #000' : '1px solid rgba(0,0,0,0.3)', background: 'white' }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* Text field */}
+            <textarea
+              ref={(el) => { if (editingAnnotation?.id === id) editingInputRef.current = el; }}
+              className="outline-none bg-transparent resize-none"
+              style={{
+                position: 'absolute',
+                top: dragPad, left: dragPad, right: dragPad, bottom: dragPad,
+                width: `calc(100% - ${dragPad * 2}px)`, height: `calc(100% - ${dragPad * 2}px)`,
+                border: 'none', fontSize: fs * zoom, lineHeight: `${lineHeightPx}px`,
+                padding: Math.max(4, 6 * zoom), color: '#111827', zIndex: 4,
+              }}
+              autoFocus={editingAnnotation?.id === id}
+              value={val}
+              onChange={(e) => setAnnotationDrafts(prev => ({ ...prev, [id]: e.target.value }))}
+              onMouseDown={(e) => { /* allow selection/cursor inside textarea; prevent bubbling to canvas */ e.stopPropagation(); }}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Escape') {
+                  void commit(val);
+                } else if (e.key === 'Enter' && !e.shiftKey) {
+                  // Enter to commit; Shift+Enter for newline
+                  e.preventDefault();
+                  void commit(val);
+                }
+              }}
+              onBlur={() => { void commit(val); }}
+              onFocus={() => setEditingAnnotation({ id })}
+            />
+            {/* Resize handle (bottom-right) */}
+            <div
+              title="Resize"
+              data-resize="true"
+              onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); dragAnnoRef.current = { mode: 'resize', id, startClient: { x: e.clientX, y: e.clientY }, startNode: { x: n.x, y: n.y, w: n.w, h: n.h } }; }}
+              style={{
+                position: 'absolute', right: 0, bottom: 0, width: Math.max(14, 14 * zoom), height: Math.max(14, 14 * zoom), cursor: 'nwse-resize', zIndex: 6,
+                background: 'linear-gradient(135deg, rgba(0,0,0,0) 50%, rgba(0,0,0,0.25) 50%)'
+              }}
+            />
+          </div>
+        );
+      })}
 
       {/* Click-away overlay for side panel document references */}
       {openEntity && (
@@ -1169,13 +1408,17 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
                     <div className="font-semibold mb-1">Documents</div>
                     <ul className="list-disc list-inside space-y-0.5">
                       {(() => {
-                        const names = n.kind === 'theme'
-                          ? Array.from(new Set(n.theme!.highlightIds.map(hid => codeFileNameById.get(hid)).filter(Boolean)))
-                          : Array.from(new Set(n.insight!.themeIds.flatMap(tid => {
+                        const names: string[] = n.kind === 'theme'
+                          ? Array.from(new Set(n.theme!.highlightIds
+                            .map((hid: string) => codeFileNameById.get(hid))
+                            .filter((x: string | undefined): x is string => Boolean(x))))
+                          : Array.from(new Set(n.insight!.themeIds.flatMap((tid: string) => {
                             const t = themes.find(tt => tt.id === tid);
-                            return t ? t.highlightIds.map(hid => codeFileNameById.get(hid)).filter(Boolean) : [];
+                            return t ? t.highlightIds
+                              .map((hid: string) => codeFileNameById.get(hid))
+                              .filter((x: string | undefined): x is string => Boolean(x)) : [];
                           })));
-                        return names.map((name, i) => <li key={i}>{name}</li>);
+                        return names.map((name) => <li key={name}>{name}</li>);
                       })()}
                     </ul>
                   </div>
@@ -1186,7 +1429,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
                   <div className="mb-3 text-sm text-neutral-800">
                     <div className="font-semibold mb-1">Codes</div>
                     <ul className="list-disc list-inside space-y-0.5">
-                      {n.theme!.highlightIds.map(hid => {
+                      {n.theme!.highlightIds.map((hid: string) => {
                         const h = highlightById.get(hid);
                         if (!h) return null;
                         const doc = h.fileId ? (fileNameById.get(h.fileId) || '') : '';
@@ -1200,14 +1443,14 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
                 {n.kind === 'insight' && (
                   <div className="mb-3 text-sm text-neutral-800 space-y-2">
                     <div className="font-semibold mb-1">Themes</div>
-                    {n.insight!.themeIds.map(tid => {
+                    {n.insight!.themeIds.map((tid: string) => {
                       const t = themeById.get(tid);
                       if (!t) return null;
                       return (
                         <div key={tid} className="ml-1">
                           <div className="font-medium">• {t.name || '(untitled theme)'}</div>
                           <ul className="list-disc list-inside space-y-0.5 ml-4 mt-1">
-                            {t.highlightIds.map(hid => {
+                            {t.highlightIds.map((hid: string) => {
                               const h = highlightById.get(hid);
                               if (!h) return null;
                               const doc = h.fileId ? (fileNameById.get(h.fileId) || '') : '';

@@ -53,6 +53,10 @@ export function drawNode(
   getLabelScroll?: (n: NodeView) => number,
   options?: { showHandle?: boolean; highlightAsTarget?: boolean }
 ) {
+  // Annotations are rendered as HTML textfields, not drawn on canvas.
+  if (n.kind === 'annotation') {
+    return;
+  }
   ctx.save();
   const radius = 0; // no rounding
   const isSelected = (n.kind === 'code' && selectedCodeIds.includes(n.id)) || (n.kind === 'theme' && selectedThemeIds.includes(n.id));
@@ -111,10 +115,6 @@ export function drawNode(
     wrapText(ctx, n.theme.name, n.x + 12, titleY, n.w - 24, lineHeight, 1000);
   } else if (n.kind === 'insight' && n.insight) {
     wrapText(ctx, n.insight.name, n.x + 12, titleY, n.w - 24, lineHeight, 1000);
-  } else if (n.kind === 'annotation' && n.annotation) {
-    // Notes show their body directly, clamp to bounds implicitly via clip
-    const availableH = Math.max(0, n.h - (titleY - n.y) - bottomPadding);
-    wrapText(ctx, n.annotation.content || 'New text', n.x + 12, titleY, n.w - 24, lineHeight, Math.max(1, Math.floor(availableH / lineHeight)));
   }
 
   // Bottom-right label: document filename(s) with ellipsis or scroll on hover

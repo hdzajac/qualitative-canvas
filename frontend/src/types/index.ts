@@ -14,7 +14,7 @@ export interface UploadedFile {
 }
 
 export interface Size { w: number; h: number }
-export interface CardStyle { fontSize?: number }
+export interface CardStyle { fontSize?: number; background?: string }
 
 export interface Code { // was Highlight
   id: string;
