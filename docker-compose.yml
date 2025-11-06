@@ -40,10 +40,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    ports:
-      - "${DB_HOST_PORT:-5432}:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
 
+  db-dev:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: qda_dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d qda_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "${DB_DEV_HOST_PORT:-5432}:5432"
+    volumes:
+      - db_data_dev:/var/lib/postgresql/data
+
 volumes:
   db_data:
+  db_data_dev:

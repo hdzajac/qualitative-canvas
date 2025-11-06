@@ -1,6 +1,20 @@
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import pkg from 'pg';
 
+// Load env from repo root first, then fallback to current working directory.
+// This allows a single top-level .env for both root and backend/ runs.
+try {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const repoRootEnv = path.resolve(__dirname, '../../../.env');
+  if (fs.existsSync(repoRootEnv)) {
+    dotenv.config({ path: repoRootEnv });
+  }
+} catch {}
+// Also load default .env (e.g., backend/.env) if present; won't override existing vars
 dotenv.config();
 
 const { Pool } = pkg;

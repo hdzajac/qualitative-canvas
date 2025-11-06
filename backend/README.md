@@ -49,6 +49,28 @@ npm run test
 - The server initializes tables if missing for local/dev convenience.
  - Docker Compose sets `DB_ENV=prod` and uses `DATABASE_URL_PROD` to target the `db` service.
 
+### Dev and prod DBs concurrently
+
+When using the root `docker-compose.yml`:
+- `db` (prod) is internal-only and not published on the host.
+- `db-dev` (dev) is published on your host (default `localhost:5432`).
+
+Use cases:
+- Local Node backend connects to `db-dev` via `PG*_DEV` in the top-level `.env`.
+- The backend container (in Docker) connects to `db` via `DATABASE_URL_PROD`.
+
+Start both databases:
+```sh
+docker compose up -d db db-dev
+```
+
+Check status:
+```sh
+docker compose ps
+```
+
+Change dev DB port (optional): set `DB_DEV_HOST_PORT` in the top-level `.env`.
+
 ## Preserve current DB as your dev database
 If you have an existing Postgres database you want to keep as your development dataset:
 

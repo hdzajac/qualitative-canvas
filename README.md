@@ -39,6 +39,34 @@ DB_HOST_PORT=5432
 DATABASE_URL_PROD=postgres://qc_prod:prod_password_change_me@db:5432/qda
 ```
 
+### Using dev and prod DBs side-by-side (one machine)
+
+This compose file runs two Postgres databases concurrently:
+
+- `db` (prod): internal-only; not published to your host. The backend container connects to this via `DATABASE_URL_PROD` and `DB_ENV=prod`.
+- `db-dev` (dev): published on your host (default `localhost:5432`) for local tools and the local Node backend.
+
+Start both:
+```sh
+docker compose up -d db db-dev
+```
+
+Inspect status:
+```sh
+docker compose ps
+```
+
+Change dev DB host port (optional): set `DB_DEV_HOST_PORT` in `.env`, e.g.
+```sh
+echo "DB_DEV_HOST_PORT=5433" >> .env
+docker compose up -d db-dev
+```
+
+Notes:
+- Keep `db` internal-only (no ports mapping) for safety.
+- Local Node backend uses `PG*_DEV` (e.g., `PGHOST_DEV=localhost`, `PGPORT_DEV=5432`).
+- Docker backend uses `DATABASE_URL_PROD` to reach `db` over the compose network.
+
 ## Quick start (Local dev)
 
 Start Postgres in Docker:

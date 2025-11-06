@@ -19,3 +19,18 @@ jobs:
             exit 1
           fi
           echo "No dump files detected."
+      - name: Fail if sensitive files are tracked (.env, keys, certs)
+        run: |
+          set -e
+          FILES=$(git ls-files \
+            '.env' \
+            '**/.env' \
+            '.env.*' \
+            '**/.env.*' \
+            '*.pem' '*.key' '*.p12' '*.crt' '*.cert' || true)
+          if [ -n "$FILES" ]; then
+            echo "Error: Sensitive files tracked in git:" >&2
+            echo "$FILES" >&2
+            exit 1
+          fi
+          echo "No tracked sensitive files detected."
