@@ -16,6 +16,7 @@ Full-stack monorepo with:
   - Connect via a subtle handle: Code → Theme, Theme → Insight. Valid targets highlight on hover while connecting. Click an edge to remove a connection.
   - Side panel lists: Themes show their codes (+ document names); Insights show their themes and underlying codes (+ document names).
   - Per-card text size control; quick width presets when a single card is selected.
+  - Modular canvas UI: toolbars and popups are split into components for clarity.
 - API-backed persistence for positions, sizes, styles, titles, and relationships.
 
 ## Quick start (Docker)
@@ -66,6 +67,9 @@ npm run dev
     - Click an edge to remove that connection.
 - Inspect details
   - Open a card (↗ icon) to see/edit titles; side panel shows related items and document names.
+ - Delete VTT text blocks quickly
+   - Hover a VTT line to reveal a trash button; click to delete.
+   - Undo immediately via the toast action or Cmd/Ctrl+Z.
 
 ## Shortcuts & gestures
 - V: Select tool
@@ -76,6 +80,8 @@ npm run dev
 - Delete/Backspace: Delete selected items
 - Mouse wheel/trackpad: Zoom; disabled while dragging
 - “Fit” button: Fit all cards into view
+Canvas text size
+- Use the top toolbar to choose a text size; select a single Code/Theme card to enable “Apply”.
 
 Text & coding
 - C: Add code for current text selection
@@ -113,6 +119,17 @@ See `README_DOCKER.md` for full details.
 - Run tests:
   - npm run test
   - npm run test:watch
+  - Includes unit tests for canvas utilities and geometry helpers.
+
+## Frontend canvas architecture
+Modular components under `frontend/src/components/canvas/`:
+- CanvasToolbarLeft: left-side tools (select, pan, text) and Fit action
+- CanvasFontToolbar: top-center font size controls and Apply button for single selection
+- CanvasContextPopup: context actions for multi-selection (Create Theme/Insight)
+- CanvasSizeControls: width presets and per-card font size for single selection
+- CanvasDrawing/CanvasUtils/CanvasGeometry: drawing helpers, hit tests, and geometry calculations
+
+The main `Canvas.tsx` orchestrates state, interactions, and persistence while delegating presentational pieces to these components.
 
 ## License
 Apache-2.0. See `LICENSE`. For new files, you may add:

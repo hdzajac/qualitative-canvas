@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Highlight, Theme, Insight, Annotation, CardStyle, UploadedFile } from '@/types';
 import { Button } from './ui/button';
-import { MousePointer2, Hand, Type as TypeIcon, X as CloseIcon, Text as TextSizeIcon, Trash2 } from 'lucide-react';
+import { X as CloseIcon, Trash2 } from 'lucide-react';
 import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation, deleteHighlight, deleteTheme, deleteInsight, deleteAnnotation, getFile } from '@/services/api';
 import { toast } from 'sonner';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
@@ -10,6 +10,11 @@ import { NodeKind, Tool, NodeView, DEFAULTS, ResizeCorner, /* add subtype import
 import type { CodeNodeView, ThemeNodeView, InsightNodeView, AnnotationNodeView } from './canvas/CanvasTypes';
 import { clamp, toggleInArray, union, hitTestNode, intersects, measureWrappedLines } from './canvas/CanvasUtils';
 import { drawGrid, drawOrthogonal, roundRect, drawNode } from './canvas/CanvasDrawing';
+import { selectionBBox as computeSelectionBBox, placeRightOf as computePlaceRightOf } from './canvas/CanvasGeometry';
+import CanvasToolbarLeft from './canvas/CanvasToolbarLeft';
+import CanvasFontToolbar from './canvas/CanvasFontToolbar';
+import CanvasContextPopup from './canvas/CanvasContextPopup';
+import CanvasSizeControls from './canvas/CanvasSizeControls';
 
 interface CanvasProps {
   highlights: Highlight[];
@@ -457,23 +462,10 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   // Helpers to position new nodes
   const viewportCenterWorld = useCallback(() => screenToWorld(size.w / 2, size.h / 2), [screenToWorld, size.w, size.h]);
   const selectionBBox = useCallback((kinds: NodeKind[]) => {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const n of nodes) {
-      const ok = (kinds.includes('code') && selectedCodeIds.includes(n.id) && n.kind === 'code') || (kinds.includes('theme') && selectedThemeIds.includes(n.id) && n.kind === 'theme');
-      if (!ok) continue;
-      minX = Math.min(minX, n.x);
-      minY = Math.min(minY, n.y);
-      maxX = Math.max(maxX, n.x + n.w);
-      maxY = Math.max(maxY, n.y + n.h);
-    }
-    if (!isFinite(minX)) return null;
-    return { minX, minY, maxX, maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+    return computeSelectionBBox(nodes, selectedCodeIds, selectedThemeIds, kinds);
   }, [nodes, selectedCodeIds, selectedThemeIds]);
 
-  const placeRightOf = useCallback((bbox: { maxX: number; cy: number }, w: number, h: number) => {
-    const margin = 40;
-    return { x: bbox.maxX + margin, y: bbox.cy - h / 2 };
-  }, []);
+  const placeRightOf = useCallback((bbox: { maxX: number; cy: number }, w: number, h: number) => computePlaceRightOf(bbox, w, h), []);
 
   // onWheel handler bound to current state
   const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -1001,84 +993,48 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         style={{ cursor: hoverCursor }}
       />
 
-      <div className="absolute left-3 top-20 z-20 flex flex-col gap-2">
-        <Button size="icon" variant={tool === 'select' ? 'default' : 'outline'} className="rounded-none" onClick={() => setTool('select')} title="Select (V)">
-          <MousePointer2 className="w-4 h-4" />
-        </Button>
-        <Button size="icon" variant={tool === 'hand' ? 'default' : 'outline'} className="rounded-none" onClick={() => setTool('hand')} title="Pan (Space)">
-          <Hand className="w-4 h-4" />
-        </Button>
-        <Button size="icon" variant={tool === 'text' ? 'default' : 'outline'} className="rounded-none" onClick={() => setTool('text')} title="Text (T)">
-          <TypeIcon className="w-4 h-4" />
-        </Button>
-        {/* Fit to content */}
-        <Button size="sm" variant="outline" className="rounded-none" onClick={fitToContent} title="Fit to content">
-          Fit
-        </Button>
-      </div>
+      <CanvasToolbarLeft tool={tool} onSetTool={setTool} onFit={fitToContent} />
 
-      <div className="absolute z-20 top-3 left-1/2 -translate-x-1/2 bg-white border-2 border-black px-2 py-1 flex items-center gap-2">
-        <TextSizeIcon className="w-4 h-4" />
-        <select className="text-sm outline-none" value={fontSize} onChange={(e) => setFontSize(parseInt(e.target.value) || 12)}>
-          {[10, 12, 14, 16, 18, 20, 24].map(sz => <option key={sz} value={sz}>{sz}px</option>)}
-        </select>
-        {(() => {
+      <CanvasFontToolbar
+        fontSize={fontSize}
+        onChangeFontSize={setFontSize}
+        canApply={(() => {
+          const idx = selectedCodeIds.length === 1 ? nodes.findIndex(n => n.kind === 'code' && n.id === selectedCodeIds[0]) : selectedThemeIds.length === 1 ? nodes.findIndex(n => n.kind === 'theme' && n.id === selectedThemeIds[0]) : -1;
+          return idx >= 0;
+        })()}
+        onApply={() => {
           const idx = selectedCodeIds.length === 1 ? nodes.findIndex(n => n.kind === 'code' && n.id === selectedCodeIds[0]) : selectedThemeIds.length === 1 ? nodes.findIndex(n => n.kind === 'theme' && n.id === selectedThemeIds[0]) : -1;
           const n = idx >= 0 ? nodes[idx] : null;
-          return n ? <Button size="sm" className="brutal-button" onClick={() => persistFontSize(n, fontSize)}>Apply</Button> : null;
-        })()}
-      </div>
+          if (n) void persistFontSize(n, fontSize);
+        }}
+      />
 
-      {/* Contextual popup */}
-      {showPopup && (
-        <div className="absolute z-20 bg-white border-2 border-black p-2 left-3 top-3 space-y-2">
-          {selectedCodeIds.length >= 2 && (
-            <div>
-              <div className="text-xs mb-2">{selectedCodeIds.length} codes selected</div>
-              <Button
-                size="sm"
-                className="brutal-button"
-                onClick={async () => {
-                  const name = prompt('Theme name');
-                  if (!name) return;
-                  // compute desired position: to the right of selected codes, else viewport center
-                  const bbox = selectionBBox(['code']);
-                  const defaultW = DEFAULTS.theme.w; const defaultH = DEFAULTS.theme.h;
-                  const pos = bbox ? placeRightOf(bbox, defaultW, defaultH) : viewportCenterWorld();
-                  await createTheme({ name, highlightIds: selectedCodeIds, size: DEFAULTS.theme, position: pos });
-                  toast.success('Theme created');
-                  setSelectedCodeIds([]);
-                  onUpdate();
-                }}
-              >
-                Create Theme
-              </Button>
-            </div>
-          )}
-          {selectedThemeIds.length >= 1 && (
-            <div>
-              <div className="text-xs mb-2">{selectedThemeIds.length} themes selected</div>
-              <Button
-                size="sm"
-                className="brutal-button"
-                onClick={async () => {
-                  const name = prompt('Insight name');
-                  if (!name) return;
-                  const bbox = selectionBBox(['theme']);
-                  const defaultW = DEFAULTS.insight.w; const defaultH = DEFAULTS.insight.h;
-                  const pos = bbox ? placeRightOf(bbox, defaultW, defaultH) : viewportCenterWorld();
-                  await createInsight({ name, themeIds: selectedThemeIds, size: DEFAULTS.insight, position: pos });
-                  toast.success('Insight created');
-                  setSelectedThemeIds([]);
-                  onUpdate();
-                }}
-              >
-                Create Insight
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
+      <CanvasContextPopup
+        selectedCodeCount={selectedCodeIds.length}
+        selectedThemeCount={selectedThemeIds.length}
+        onCreateTheme={async () => {
+          const name = prompt('Theme name');
+          if (!name) return;
+          const bbox = selectionBBox(['code']);
+          const defaultW = DEFAULTS.theme.w; const defaultH = DEFAULTS.theme.h;
+          const pos = bbox ? placeRightOf(bbox, defaultW, defaultH) : viewportCenterWorld();
+          await createTheme({ name, highlightIds: selectedCodeIds, size: DEFAULTS.theme, position: pos });
+          toast.success('Theme created');
+          setSelectedCodeIds([]);
+          onUpdate();
+        }}
+        onCreateInsight={async () => {
+          const name = prompt('Insight name');
+          if (!name) return;
+          const bbox = selectionBBox(['theme']);
+          const defaultW = DEFAULTS.insight.w; const defaultH = DEFAULTS.insight.h;
+          const pos = bbox ? placeRightOf(bbox, defaultW, defaultH) : viewportCenterWorld();
+          await createInsight({ name, themeIds: selectedThemeIds, size: DEFAULTS.insight, position: pos });
+          toast.success('Insight created');
+          setSelectedThemeIds([]);
+          onUpdate();
+        }}
+      />
 
       {/* Click-away overlay for side panel document references */}
       {openEntity && (
@@ -1092,32 +1048,27 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         const n = singleCode || singleTheme;
         if (!n) return null;
         const fs = getFontSize(n);
+        const widthVariant: '200' | '300' = n.w <= 210 ? '200' : '300';
         return (
-          <div className="absolute right-3 top-3 z-20 bg-white border-2 border-black p-2 flex items-center gap-2">
-            <span className="text-xs">Width</span>
-            <Button size="sm" variant={n.w <= 210 ? 'default' : 'outline'} className="rounded-none h-6 px-2" onClick={() => { setNodes(prev => prev.map(nn => (nn.kind === n.kind && nn.id === n.id) ? { ...nn, w: 200 } : nn)); draw(); }}>200</Button>
-            <Button size="sm" variant={n.w >= 290 ? 'default' : 'outline'} className="rounded-none h-6 px-2" onClick={() => { setNodes(prev => prev.map(nn => (nn.kind === n.kind && nn.id === n.id) ? { ...nn, w: 300 } : nn)); draw(); }}>300</Button>
-            <span className="text-xs ml-2">Text</span>
-            <select className="text-xs border border-black px-1 py-0.5" value={fs} onChange={(e) => {
-              const val = parseInt(e.target.value) || 12;
-              setNodes(prev => prev.map(nn => {
-                if (!(nn.kind === n.kind && nn.id === n.id)) return nn;
-                switch (n.kind) {
-                  case 'code':
-                    return { ...(nn as CodeNodeView), highlight: { ...(nn as CodeNodeView).highlight!, style: { ...((nn as CodeNodeView).highlight?.style || {}), fontSize: val } } } as CodeNodeView;
-                  case 'theme':
-                    return { ...(nn as ThemeNodeView), theme: { ...(nn as ThemeNodeView).theme!, style: { ...((nn as ThemeNodeView).theme?.style || {}), fontSize: val } } } as ThemeNodeView;
-                  case 'insight':
-                    return { ...(nn as InsightNodeView), insight: { ...(nn as InsightNodeView).insight!, style: { ...((nn as InsightNodeView).insight?.style || {}), fontSize: val } } } as InsightNodeView;
-                  case 'annotation':
-                    return { ...(nn as AnnotationNodeView), annotation: { ...(nn as AnnotationNodeView).annotation!, style: { ...((nn as AnnotationNodeView).annotation?.style || {}), fontSize: val } } } as AnnotationNodeView;
-                }
-              }));
-              draw();
-            }}>
-              {[10, 12, 14, 16, 18, 20, 24].map(s => <option key={s} value={s}>{s}px</option>)}
-            </select>
-            <Button size="sm" className="brutal-button" onClick={async () => {
+          <CanvasSizeControls
+            widthVariant={widthVariant}
+            onSetWidth200={() => { setNodes(prev => prev.map(nn => (nn.kind === n.kind && nn.id === n.id) ? { ...nn, w: 200 } : nn)); draw(); }}
+            onSetWidth300={() => { setNodes(prev => prev.map(nn => (nn.kind === n.kind && nn.id === n.id) ? { ...nn, w: 300 } : nn)); draw(); }}
+            fontSize={fs}
+            onChangeFontSize={(val) => { setNodes(prev => prev.map(nn => {
+              if (!(nn.kind === n.kind && nn.id === n.id)) return nn;
+              switch (n.kind) {
+                case 'code':
+                  return { ...(nn as CodeNodeView), highlight: { ...(nn as CodeNodeView).highlight!, style: { ...((nn as CodeNodeView).highlight?.style || {}), fontSize: val } } } as CodeNodeView;
+                case 'theme':
+                  return { ...(nn as ThemeNodeView), theme: { ...(nn as ThemeNodeView).theme!, style: { ...((nn as ThemeNodeView).theme?.style || {}), fontSize: val } } } as ThemeNodeView;
+                case 'insight':
+                  return { ...(nn as InsightNodeView), insight: { ...(nn as InsightNodeView).insight!, style: { ...((nn as InsightNodeView).insight?.style || {}), fontSize: val } } } as InsightNodeView;
+                case 'annotation':
+                  return { ...(nn as AnnotationNodeView), annotation: { ...(nn as AnnotationNodeView).annotation!, style: { ...((nn as AnnotationNodeView).annotation?.style || {}), fontSize: val } } } as AnnotationNodeView;
+              }
+            })); draw(); }}
+            onSave={async () => {
               try {
                 if (n.kind === 'code') await updateHighlight(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.highlight?.style || {}), fontSize: getFontSize(n) } });
                 if (n.kind === 'theme') await updateTheme(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.theme?.style || {}), fontSize: getFontSize(n) } });
@@ -1126,8 +1077,8 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
                 toast.success('Saved');
                 onUpdate();
               } catch { toast.error('Save failed'); }
-            }}>Save</Button>
-          </div>
+            }}
+          />
         );
       })()}
 
