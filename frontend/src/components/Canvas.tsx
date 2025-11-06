@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Highlight, Theme, Insight, Annotation, CardStyle, UploadedFile } from '@/types';
+import type { Highlight, Theme, Insight, Annotation, CardStyle, UploadedFile } from '../types';
 import { Button } from './ui/button';
 import { X as CloseIcon, Trash2 } from 'lucide-react';
-import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation, deleteHighlight, deleteTheme, deleteInsight, deleteAnnotation, getFile } from '@/services/api';
+import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation, deleteHighlight, deleteTheme, deleteInsight, deleteAnnotation, getFile } from '../services/api';
 import { toast } from 'sonner';
-import { useSelectedProject } from '@/hooks/useSelectedProject';
+import { useSelectedProject } from '../hooks/useSelectedProject';
 import { NodeKind, Tool, NodeView, DEFAULTS, ResizeCorner, /* add subtype imports */ } from './canvas/CanvasTypes';
 // Add explicit subtype imports for type narrowing
 import type { CodeNodeView, ThemeNodeView, InsightNodeView, AnnotationNodeView } from './canvas/CanvasTypes';
