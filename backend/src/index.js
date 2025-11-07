@@ -6,6 +6,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import pool from './db/pool.js';
 import filesRoutes from './routes/files.js';
+import mediaRoutes from './routes/media.js';
+import transcriptionRoutes from './routes/transcription.js';
 import codesRoutes from './routes/codes.js';
 import themesRoutes from './routes/themes.js';
 import insightsRoutes from './routes/insights.js';
@@ -108,6 +110,8 @@ app.get('/api/health', async (_req, res) => {
 // Routes
 app.use('/api/projects', projectsRoutes(pool));
 app.use('/api/files', filesRoutes(pool));
+app.use('/api/media', mediaRoutes(pool));
+app.use('/api', transcriptionRoutes(pool));
 app.use('/api/codes', codesRoutes(pool));
 // Backward compat: /highlights serves codes
 app.use('/api/highlights', codesRoutes(pool));
