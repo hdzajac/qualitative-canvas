@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Highlight, Theme, Insight, Annotation, CardStyle, UploadedFile } from '../types';
 import { Button } from './ui/button';
-import { X as CloseIcon, Trash2 } from 'lucide-react';
+import { X as CloseIcon, Trash2, HelpCircle } from 'lucide-react';
 import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation, deleteHighlight, deleteTheme, deleteInsight, deleteAnnotation, getFile } from '../services/api';
 import { toast } from 'sonner';
 import { useSelectedProject } from '../hooks/useSelectedProject';
@@ -248,8 +248,15 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     | null
   >(null);
 
-  // Cursor hint when hovering
+  // Cursor hint when hovering (supports special X delete cursor when over edge)
   const [hoverCursor, setHoverCursor] = useState<string>('default');
+  // Track hovered edge for highlighting
+  type EdgeHit = { kind: 'code-theme' | 'theme-insight'; fromId: string; toId: string };
+  const hoveredEdgeRef = useRef<EdgeHit | null>(null);
+  const [hoveredEdgeVersion, setHoveredEdgeVersion] = useState(0);
+
+  // Help overlay state
+  const [showHelp, setShowHelp] = useState(false);
 
   // Initialize drafts for annotations when they load (don't clobber existing drafts)
   useEffect(() => {
@@ -506,12 +513,11 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     ctx.translate(offset.x, offset.y);
     ctx.scale(zoom, zoom);
 
-    // Edges under nodes
-    // Re-implement drawEdges using extracted helpers
+    // Edges under nodes with hover highlight
     const byKey = new Map(nodes.map((n) => [`${n.kind}:${n.id}`, n] as const));
+    const hovered = hoveredEdgeRef.current;
+    const highlightNodeIds = new Set<string>();
     ctx.save();
-    ctx.strokeStyle = '#b1b1b7';
-    ctx.lineWidth = 1;
     themes.forEach((t) => {
       t.highlightIds.forEach((hid: string) => {
         const a = byKey.get(`code:${hid}`);
@@ -521,6 +527,10 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         const ay = a.y + a.h;
         const bx = b.x + b.w / 2;
         const by = b.y;
+        const isHovered = hovered && hovered.kind === 'code-theme' && hovered.fromId === hid && hovered.toId === t.id;
+        ctx.strokeStyle = isHovered ? '#dc2626' : '#b1b1b7';
+        ctx.lineWidth = isHovered ? 2.5 : 1;
+        if (isHovered) { highlightNodeIds.add(hid); highlightNodeIds.add(t.id); }
         drawOrthogonal(ctx, ax, ay, bx, by);
       });
     });
@@ -533,6 +543,10 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         const ay = a.y + a.h;
         const bx = b.x + b.w / 2;
         const by = b.y;
+        const isHovered = hovered && hovered.kind === 'theme-insight' && hovered.fromId === tid && hovered.toId === i.id;
+        ctx.strokeStyle = isHovered ? '#dc2626' : '#b1b1b7';
+        ctx.lineWidth = isHovered ? 2.5 : 1;
+        if (isHovered) { highlightNodeIds.add(tid); highlightNodeIds.add(i.id); }
         drawOrthogonal(ctx, ax, ay, bx, by);
       });
     });
@@ -543,12 +557,13 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       const isConnectingFromThis = (dragState.current && dragState.current.mode === 'connect' && dragState.current.fromId === n.id);
       const showHandle = isConnectingFromThis || ((hoverInfo.current && hoverInfo.current.kind === 'node' && hoverInfo.current.id === n.id) ? (n.kind === 'code' || n.kind === 'theme') : false);
       const isConnectTarget = Boolean(connectTargetRef.current && connectTargetRef.current.id === n.id);
-      drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll, { showHandle, highlightAsTarget: isConnectTarget });
+      const isEdgeHoverHighlight = highlightNodeIds.has(n.id);
+      drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll, { showHandle, highlightAsTarget: isConnectTarget || isEdgeHoverHighlight });
     });
 
     ctx.restore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size.w, size.h, offset.x, offset.y, zoom, nodes, selectedCodeIds, selectedThemeIds, getBottomRightLabel]);
+  }, [size.w, size.h, offset.x, offset.y, zoom, nodes, selectedCodeIds, selectedThemeIds, getBottomRightLabel, hoveredEdgeVersion]);
 
   // Track hover target to control handle visibility
   const hoverInfo = useRef<null | { kind: 'node'; id: string }>(null);
@@ -610,7 +625,6 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   }
 
   // Edge model for hit-testing: store screen-space polyline of each edge
-  type EdgeHit = { kind: 'code-theme' | 'theme-insight'; fromId: string; toId: string };
   function hitTestEdge(wx: number, wy: number): EdgeHit | null {
     // Consider edges from codes->themes and themes->insights
     // Simple tolerance to an orthogonal polyline: check distance to segments
@@ -764,13 +778,22 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         hoverInfo.current = { kind: 'node', id: n.id };
         if (isInOpenIcon(n, world.x, world.y)) { setHoverCursor('pointer'); draw(); return; }
         if (isInConnectHandle(n, world.x, world.y, zoom)) { setHoverCursor('crosshair'); draw(); return; }
+        // If previously hovering an edge, clear it
+        if (hoveredEdgeRef.current) { hoveredEdgeRef.current = null; setHoveredEdgeVersion(v => v + 1); }
         setHoverCursor('move');
         draw();
       } else {
         hoverInfo.current = null;
         // edge hover?
         const edge = hitTestEdge(world.x, world.y);
-        if (edge) setHoverCursor('pointer'); else setHoverCursor('default');
+        if (edge) {
+          hoveredEdgeRef.current = edge;
+          setHoveredEdgeVersion(v => v + 1);
+          setHoverCursor('x-delete');
+        } else {
+          if (hoveredEdgeRef.current) { hoveredEdgeRef.current = null; setHoveredEdgeVersion(v => v + 1); }
+          setHoverCursor('default');
+        }
         draw();
       }
       return;
@@ -907,6 +930,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
   const onMouseLeave: React.MouseEventHandler<HTMLCanvasElement> = () => {
     setHoverCursor('default');
+    if (hoveredEdgeRef.current) { hoveredEdgeRef.current = null; setHoveredEdgeVersion(v => v + 1); }
     // clear any transient connect target highlight
     connectTargetRef.current = null;
     draw();
@@ -914,6 +938,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
   const onMouseUp: React.MouseEventHandler<HTMLCanvasElement> = async (e) => {
     const ds = dragState.current; dragState.current = null; setHoverCursor('default');
+    if (hoveredEdgeRef.current) { hoveredEdgeRef.current = null; setHoveredEdgeVersion(v => v + 1); }
     // reset potential target highlight
     connectTargetRef.current = null;
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -1109,6 +1134,10 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   // Toolbar additions: text size selector
   // ...left toolbar remains, append a small control on top center
 
+  // custom delete X cursor data URI (center hotspot 12,12)
+  const deleteCursorUrl = 'url("data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22 viewBox=%220 0 24 24%22><rect width=%2224%22 height=%2224%22 fill=%22white%22 fill-opacity=%220%22/><path d=%22M5 5 L19 19 M19 5 L5 19%22 stroke=%22%23dc2626%22 stroke-width=%223%22 stroke-linecap=%22round%22/></svg>") 12 12, pointer';
+  const resolvedCursor = hoverCursor === 'x-delete' ? deleteCursorUrl : hoverCursor;
+
   return (
     <div ref={wrapperRef} className="relative w-full h-full select-none">
       {/* Canvas layer */}
@@ -1120,7 +1149,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseLeave}
         onWheel={onWheel}
-        style={{ cursor: hoverCursor }}
+        style={{ cursor: resolvedCursor }}
       />
 
       <CanvasToolbarLeft tool={tool} onSetTool={setTool} onFit={fitToContent} />
@@ -1430,6 +1459,34 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
               </>
             );
           })()}
+        </div>
+      )}
+
+      {/* Help button & panel */}
+      <div className="absolute left-2 bottom-2 z-40" onClick={(e) => e.stopPropagation()}>
+        <Button size="icon" variant="outline" className="rounded-full shadow" onClick={() => setShowHelp(s => !s)} aria-label="Canvas help">
+          <HelpCircle className="w-5 h-5" />
+        </Button>
+      </div>
+      {showHelp && (
+        <div className="absolute left-2 bottom-14 z-40 w-80 bg-white border-2 border-black p-3 text-sm shadow-lg" onClick={(e) => e.stopPropagation()}>
+          <div className="flex justify-between items-center mb-2">
+            <div className="font-semibold">Canvas Shortcuts & Tips</div>
+            <button className="text-xs underline" onClick={() => setShowHelp(false)}>close</button>
+          </div>
+          <ul className="space-y-1 list-disc list-inside">
+            <li><span className="font-mono">Space</span> hold: pan view</li>
+            <li><span className="font-mono">Wheel</span>: zoom at cursor</li>
+            <li><span className="font-mono">V</span>: select tool</li>
+            <li><span className="font-mono">H</span>: hand (pan) tool</li>
+            <li><span className="font-mono">T</span>: create Theme (if codes selected) else Text tool</li>
+            <li><span className="font-mono">I</span>: create Insight (if themes selected)</li>
+            <li><span className="font-mono">Shift+Click</span>: multi-select</li>
+            <li><span className="font-mono">Delete</span>: delete selected codes/themes</li>
+            <li>Drag small right-side dot to connect (Code→Theme, Theme→Insight)</li>
+            <li>Hover connection: red highlight + X cursor, click removes link</li>
+            <li>Text tool: click canvas to add annotation</li>
+          </ul>
         </div>
       )}
     </div>
