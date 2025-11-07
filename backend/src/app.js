@@ -14,6 +14,7 @@ import projectsRoutes from './routes/projects.js';
 import mediaRoutes from './routes/media.js';
 import transcriptionRoutes from './routes/transcription.js';
 import segmentsRoutes from './routes/segments.js';
+import participantsRoutes from './routes/participants.js';
 import { runMigrations } from './db/migrate.js';
 
 dotenv.config();
@@ -121,6 +122,7 @@ export function buildApp() {
   app.use('/api', transcriptionRoutes(pool));
   // nested: /api/media/:mediaId/segments
   app.use('/api/media/:mediaId/segments', segmentsRoutes(pool));
+  app.use('/api/media/:mediaId/participants', participantsRoutes(pool));
 
   // Error handler
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
