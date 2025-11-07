@@ -1,4 +1,4 @@
-import type { UploadedFile, Highlight, Theme, Insight, Annotation, Project } from '@/types';
+import type { UploadedFile, Highlight, Theme, Insight, Annotation, Project, MediaFile, TranscriptSegment, TranscriptionJob } from '@/types';
 
 /**
  * API Service Layer
@@ -136,3 +136,31 @@ export const getProjects = (): Promise<Project[]> => http<Project[]>('/projects'
 export const createProject = (data: ProjectInput): Promise<Project> => http<Project>('/projects', { method: 'POST', body: JSON.stringify(data) });
 export const updateProject = (id: string, data: Partial<ProjectInput>): Promise<Project> => http<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteProject = (id: string): Promise<void> => http<void>(`/projects/${id}`, { method: 'DELETE' });
+
+// Media
+export const listMedia = (projectId?: string): Promise<MediaFile[]> =>
+  http<MediaFile[]>(projectId ? `/media?projectId=${encodeURIComponent(projectId)}` : '/media');
+
+export const getMedia = (id: string): Promise<MediaFile> => http<MediaFile>(`/media/${id}`);
+
+export async function uploadMedia(file: File, projectId?: string): Promise<MediaFile> {
+  const form = new FormData();
+  form.append('file', file);
+  if (projectId) form.append('projectId', projectId);
+  const res = await fetch(`${BASE_URL}/media`, { method: 'POST', body: form });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// Transcription jobs
+export const createTranscriptionJob = (mediaId: string, opts: { model?: string; languageHint?: string } = {}): Promise<TranscriptionJob> =>
+  http<TranscriptionJob>(`/media/${mediaId}/transcribe`, { method: 'POST', body: JSON.stringify(opts) });
+
+export const getTranscriptionJob = (jobId: string): Promise<TranscriptionJob> => http<TranscriptionJob>(`/transcribe-jobs/${jobId}`);
+
+// Segments
+export const listSegments = (mediaId: string): Promise<TranscriptSegment[]> =>
+  http<TranscriptSegment[]>(`/media/${mediaId}/segments`);
+
+export const updateSegment = (mediaId: string, segmentId: string, payload: { text?: string; participantId?: string | null }): Promise<TranscriptSegment> =>
+  http<TranscriptSegment>(`/media/${mediaId}/segments/${segmentId}`, { method: 'PUT', body: JSON.stringify(payload) });

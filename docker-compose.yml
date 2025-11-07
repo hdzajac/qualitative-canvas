@@ -28,6 +28,21 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  worker:
+    build: ./worker
+    environment:
+      - BASE_URL=http://backend:5000/api
+      - POLL_INTERVAL_SEC=3
+      # For diarization later (optional):
+      # - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    depends_on:
+      backend:
+        condition: service_started
+    restart: unless-stopped
+    # Optional model cache persistence for faster-whisper / pyannote
+    volumes:
+      - worker_models:/root/.cache
+
   db:
     image: postgres:16
     restart: always
@@ -63,3 +78,4 @@ services:
 volumes:
   db_data:
   db_data_dev:
+  worker_models:

@@ -61,3 +61,40 @@ export interface Annotation {
   size?: Size;
   style?: CardStyle;
 }
+
+// Media & transcription
+export interface MediaFile {
+  id: string;
+  projectId?: string;
+  originalFilename: string;
+  mimeType?: string;
+  storagePath: string;
+  sizeBytes?: number;
+  durationSec?: number;
+  status: 'uploaded' | 'processing' | 'done' | 'error';
+  errorMessage?: string;
+  createdAt: string;
+}
+
+export interface TranscriptSegment {
+  id: string;
+  mediaFileId: string;
+  idx: number;
+  startMs: number;
+  endMs: number;
+  text: string;
+  participantId?: string | null;
+  createdAt: string;
+}
+
+export interface TranscriptionJob {
+  id: string;
+  mediaFileId: string;
+  model?: string;
+  languageHint?: string;
+  status: 'queued' | 'processing' | 'done' | 'error';
+  startedAt?: string;
+  completedAt?: string;
+  errorMessage?: string;
+  createdAt: string;
+}

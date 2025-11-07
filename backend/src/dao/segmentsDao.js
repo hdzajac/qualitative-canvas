@@ -35,3 +35,21 @@ export async function updateSegment(pool, id, { text, participantId } = {}) {
   );
   return r.rows[0] ? mapSegment(r.rows[0]) : null;
 }
+
+export async function replaceSegmentsBulk(pool, mediaFileId, segments) {
+  // Optionally delete existing then insert provided segments with given idx
+  await pool.query('DELETE FROM transcript_segments WHERE media_file_id = $1', [mediaFileId]);
+  if (!segments || segments.length === 0) return [];
+  const values = [];
+  const params = [];
+  let p = 1;
+  for (const s of segments) {
+    // id uuid, media_file_id, idx, start_ms, end_ms, text, participant_id
+    values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+    params.push(s.id, mediaFileId, s.idx, s.startMs, s.endMs, s.text, s.participantId ?? null);
+  }
+  const q = `INSERT INTO transcript_segments (id, media_file_id, idx, start_ms, end_ms, text, participant_id)
+             VALUES ${values.join(', ')} RETURNING *`;
+  const r = await pool.query(q, params);
+  return r.rows.map(mapSegment);
+}

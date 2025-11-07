@@ -1,2 +1,5 @@
 requests==2.32.3
 python-dotenv==1.0.1
+# Optional transcription libs (commented out initially)
+# faster-whisper==1.0.3
+# torch==2.3.1

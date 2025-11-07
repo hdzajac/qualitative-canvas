@@ -22,6 +22,21 @@ export default function mediaRoutes(pool) {
     res.json(item);
   }));
 
+  // Raw content download (for worker). Streams the stored file.
+  router.get('/:id/download', asyncHandler(async (req, res) => {
+    const item = await mediaService.get(req.params.id);
+    if (!item) return res.status(404).json({ error: 'Not found' });
+    const fs = await import('fs');
+    const stream = fs.createReadStream(item.storagePath);
+    stream.on('error', (e) => {
+      console.error('Download stream error', e);
+      res.status(500).end();
+    });
+    res.setHeader('Content-Type', item.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${item.originalFilename}"`);
+    stream.pipe(res);
+  }));
+
   router.post('/', upload.single('file'), asyncHandler(async (req, res) => {
     const schema = z.object({ projectId: z.string().uuid().optional() });
     const parsed = schema.safeParse(req.body || {});

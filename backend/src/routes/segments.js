@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import asyncHandler from 'express-async-handler';
 import { z } from 'zod';
-import { listSegmentsForMedia, getSegment, updateSegment } from '../dao/segmentsDao.js';
+import { listSegmentsForMedia, getSegment, updateSegment, replaceSegmentsBulk } from '../dao/segmentsDao.js';
 import { getMedia } from '../dao/mediaDao.js';
 
 export default function segmentsRoutes(pool) {
@@ -25,6 +25,29 @@ export default function segmentsRoutes(pool) {
     if (!seg || seg.mediaFileId !== req.params.mediaId) return res.status(404).json({ error: 'Segment not found' });
     const updated = await updateSegment(pool, seg.id, parsed.data);
     res.json(updated);
+  }));
+
+  // Bulk replace segments (e.g., from worker)
+  router.post('/bulk', asyncHandler(async (req, res) => {
+    const mediaId = req.params.mediaId;
+    const schema = z.object({
+      segments: z.array(z.object({
+        id: z.string().uuid().optional(),
+        idx: z.number().int().min(0),
+        startMs: z.number().int().min(0),
+        endMs: z.number().int().min(0),
+        text: z.string().min(1),
+        participantId: z.string().uuid().nullable().optional(),
+      })).min(0),
+      replace: z.boolean().optional(),
+    });
+    const parsed = schema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const media = await getMedia(pool, mediaId);
+    if (!media) return res.status(404).json({ error: 'Media not found' });
+    const withIds = parsed.data.segments.map((s) => ({ id: s.id || crypto.randomUUID(), ...s }));
+    const result = await replaceSegmentsBulk(pool, mediaId, withIds);
+    res.status(201).json({ count: result.length });
   }));
 
   return router;

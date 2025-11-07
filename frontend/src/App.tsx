@@ -10,6 +10,7 @@ import Documents from "./pages/Documents";
 import DocumentDetail from "./pages/DocumentDetail";
 import CanvasPage from "./pages/CanvasPage";
 import Themes from "./pages/Themes";
+import Transcripts from "./pages/Transcripts";
 import Insights from "./pages/Insights";
 import CodesPage from "./pages/Codes";
 import { getProjects } from "@/services/api";
@@ -74,6 +75,7 @@ function TopBar() {
         <Link className={active('/themes')} to="/themes">Themes</Link>
         <Link className={active('/insights')} to="/insights">Insights</Link>
         <Link className={active('/canvas')} to="/canvas">Canvas</Link>
+        <Link className={active('/transcripts')} to="/transcripts">Transcripts</Link>
       </nav>
       <div className="ml-auto">
         <ProjectBadge />
@@ -99,6 +101,7 @@ const App = () => (
             <Route path="/themes" element={<Themes />} />
             <Route path="/insights" element={<Insights />} />
             <Route path="/canvas" element={<CanvasPage />} />
+            <Route path="/transcripts" element={<Transcripts />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
