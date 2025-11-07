@@ -326,7 +326,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     }
   }
 
-  // Keyboard for tools, space-panning, and delete selection
+  // Keyboard for tools, space-panning, delete selection, and quick-create Theme/Insight
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {
       const el = target as HTMLElement | null;
@@ -342,7 +342,55 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       if (e.code === 'Space') setIsSpacePanning(true);
       if (e.code === 'KeyV') setTool('select');
       if (e.code === 'KeyH') setTool('hand');
-      if (e.code === 'KeyT') setTool('text');
+      // T: Create Theme when available (codes selected); otherwise fall back to Text tool
+      if (e.code === 'KeyT' && !isEditableTarget(e.target)) {
+        const codes = selectedCodeIdsRef.current || [];
+        if (codes.length > 0) {
+          e.preventDefault();
+          (async () => {
+            const name = prompt('Theme name');
+            if (!name) return;
+            try {
+              const bbox = selectionBBox(['code']);
+              const defaultW = DEFAULTS.theme.w; const defaultH = DEFAULTS.theme.h;
+              const pos = bbox ? placeRightOf(bbox!, defaultW, defaultH) : viewportCenterWorld();
+              await createTheme({ name, highlightIds: codes, size: DEFAULTS.theme, position: pos });
+              toast.success('Theme created');
+              setSelectedCodeIds([]);
+              onUpdate();
+            } catch {
+              toast.error('Failed to create theme');
+            }
+          })();
+          return;
+        } else {
+          // no codes selected -> default to text tool
+          setTool('text');
+        }
+      }
+      // I: Create Insight when available (themes selected)
+      if (e.code === 'KeyI' && !isEditableTarget(e.target)) {
+        const ths = selectedThemeIdsRef.current || [];
+        if (ths.length > 0) {
+          e.preventDefault();
+          (async () => {
+            const name = prompt('Insight name');
+            if (!name) return;
+            try {
+              const bbox = selectionBBox(['theme']);
+              const defaultW = DEFAULTS.insight.w; const defaultH = DEFAULTS.insight.h;
+              const pos = bbox ? placeRightOf(bbox!, defaultW, defaultH) : viewportCenterWorld();
+              await createInsight({ name, themeIds: ths, size: DEFAULTS.insight, position: pos });
+              toast.success('Insight created');
+              setSelectedThemeIds([]);
+              onUpdate();
+            } catch {
+              toast.error('Failed to create insight');
+            }
+          })();
+          return;
+        }
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditableTarget(e.target)) {
         e.preventDefault();
         deleteSelection();

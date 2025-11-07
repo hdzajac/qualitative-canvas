@@ -17,6 +17,8 @@ Full-stack monorepo with:
   - Side panel lists: Themes show their codes (+ document names); Insights show their themes and underlying codes (+ document names).
   - Per-card text size control; quick width presets when a single card is selected.
   - Modular canvas UI: toolbars and popups are split into components for clarity.
+  - Annotation sticky notes: simplified (header bar removed); active selection gets a soft color glow; extra invisible margin makes dragging/resizing easier.
+  - Productivity shortcuts: Press T with codes selected to instantly create a Theme; press I with themes selected to instantly create an Insight (see Shortcuts section).
 - API-backed persistence for positions, sizes, styles, titles, and relationships.
 
 ## Quick start (Docker)
@@ -122,6 +124,7 @@ See `.env.example` for a filled-out template with dummy credentials and comments
     - Drag from a Code to a Theme, or from a Theme to an Insight.
     - Valid targets highlight as you hover.
     - Click an edge to remove that connection.
+  - Keyboard accelerators: When 2+ codes are selected press T and a Theme is created immediately (you'll be prompted for a name); when 1+ themes are selected press I to create an Insight. If no codes are selected, T falls back to the Text/Annotation tool.
 - Inspect details
   - Open a card (↗ icon) to see/edit titles; side panel shows related items and document names.
  - Delete VTT text blocks quickly
@@ -145,7 +148,8 @@ See `.env.example` for a filled-out template with dummy credentials and comments
 ## Shortcuts & gestures
 - V: Select tool
 - H or Space: Hand/pan
-- T: Text tool (add annotation)
+- T: Create Theme if codes are selected; otherwise switch to Text/Annotation tool
+- I: Create Insight if themes are selected
 - Shift+Click: Multi-select
 - Drag background: Marquee select
 - Delete/Backspace: Delete selected items
@@ -181,6 +185,50 @@ docker compose up --build -d
 - Themes: `GET/POST/PUT/DELETE /api/themes(/:id)`
 - Insights: `GET/POST/PUT/DELETE /api/insights(/:id)`
 - Annotations: `GET/POST/PUT/DELETE /api/annotations(/:id)`
+ - (Planned) Project export: `GET /api/projects/:id/export` → returns a JSON bundle
+ - (Planned) Project import: `POST /api/projects/import` → accepts a bundle and creates a new project
+
+## Project export & import (planned)
+Status: Design phase. Implementation forthcoming.
+
+Objectives:
+- Allow a project (its documents, codes, themes, insights, annotations, and connections) to be exported as a portable JSON bundle.
+- Allow importing that bundle to create a brand new project named `Imported: YYYY-MM-DD` (always a new project, no merging).
+
+Bundle draft schema (shape will be validated with `zod` and versioned):
+```jsonc
+{
+  "version": "1.0.0",          // bundle schema version
+  "exportedAt": "2025-11-07T10:15:00.000Z",
+  "project": { "title": "Original Project Name" },
+  "files": [ { "id": "f1", "name": "Interview1.vtt", "mime": "text/vtt", "content": "..." } ],
+  "codes": [ { "id": "c1", "fileId": "f1", "text": "participant mentions trust", "ranges": [ {"start": 102, "end": 145} ] } ],
+  "themes": [ { "id": "t1", "title": "Trust Building", "codeIds": ["c1"] } ],
+  "insights": [ { "id": "i1", "title": "Onboarding relies on initial trust", "themeIds": ["t1"] } ],
+  "annotations": [ { "id": "a1", "text": "Need follow-up interview", "x": 1200, "y": 640, "width": 220, "height": 160, "color": "#FFD54F" } ]
+}
+```
+
+Import algorithm (high level):
+1. Validate JSON against current version schema.
+2. Start transaction.
+3. Generate fresh IDs for each entity and build old→new ID maps.
+4. Insert in dependency order: files → codes → themes → insights → annotations → connections.
+5. Persist canvas positions/sizes/styles.
+6. Commit and return a summary (counts + new project ID).
+
+Safeguards & limits (planned):
+- Max bundle size (configurable) to prevent huge payloads.
+- Reject unknown future version (prompt for upgrade path).
+- All IDs regenerated; no collisions possible.
+- Require permission to create projects.
+
+Example response (import):
+```json
+{ "projectId": "proj_new_123", "created": {"files": 5, "codes": 142, "themes": 12, "insights": 4, "annotations": 27} }
+```
+
+Tracking: See README TODO section or project board for implementation progress.
 
 ## Troubleshooting
 - Port conflicts: change `FRONTEND_PORT`, `BACKEND_HOST_PORT`, or `DB_HOST_PORT` in `.env`.
