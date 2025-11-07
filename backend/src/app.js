@@ -124,6 +124,25 @@ export function buildApp() {
   app.use('/api/media/:mediaId/segments', segmentsRoutes(pool));
   app.use('/api/media/:mediaId/participants', participantsRoutes(pool));
 
+  // Simple metrics endpoint (for observability)
+  app.get('/api/metrics', async (_req, res) => {
+    try {
+      const jobsCount = await pool.query('SELECT status, COUNT(*)::int AS count FROM transcription_jobs GROUP BY status');
+      const mediaCount = await pool.query('SELECT status, COUNT(*)::int AS count FROM media_files GROUP BY status');
+      const segmentsCount = await pool.query('SELECT COUNT(*)::int AS count FROM transcript_segments');
+      const participantsCount = await pool.query('SELECT COUNT(*)::int AS count FROM participants');
+      res.json({
+        timestamp: new Date().toISOString(),
+        jobs: jobsCount.rows,
+        media: mediaCount.rows,
+        segments: segmentsCount.rows[0].count,
+        participants: participantsCount.rows[0].count,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Error handler
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err, _req, res, _next) => {
