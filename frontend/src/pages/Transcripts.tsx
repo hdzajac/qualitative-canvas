@@ -7,6 +7,8 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
 import { getProjects } from '@/services/api';
+import { MediaUpload } from '@/components/MediaUpload';
+import { useNavigate } from 'react-router-dom';
 
 function formatEta(seconds?: number) {
     if (seconds == null || seconds < 0) return '';
@@ -18,9 +20,9 @@ function formatEta(seconds?: number) {
 
 import type { MediaFile, TranscriptionJob } from '@/types';
 
-interface MediaRowProps { m: MediaFile; expanded: string | null; onToggleExpand: (id: string) => void; onTranscribe: (id: string) => void; shouldPoll: boolean; disabled?: boolean; onStopPolling: (id: string) => void }
+interface MediaRowProps { m: MediaFile; expanded: string | null; onToggleExpand: (id: string) => void; onTranscribe: (id: string) => void; shouldPoll: boolean; disabled?: boolean; onStopPolling: (id: string) => void; transcribingId?: string | null }
 
-function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onStopPolling }: MediaRowProps) {
+function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onStopPolling, transcribingId }: MediaRowProps) {
     const qc = useQueryClient();
     const deleteMut = useMutation({
         mutationFn: ({ id, force }: { id: string; force?: boolean }) => deleteMediaApi(id, { force }),
@@ -91,6 +93,7 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onSto
     if (m.status !== 'processing' && shouldPoll) {
         onStopPolling(m.id);
     }
+    const navigate = useNavigate();
     return (
         <TableRow>
             <TableCell className="font-medium">{m.originalFilename}</TableCell>
@@ -104,8 +107,11 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onSto
             </TableCell>
             <TableCell className="text-xs text-neutral-600">{m.sizeBytes ?? 0}</TableCell>
             <TableCell className="flex gap-2 items-center">
-                <Button size="sm" variant="outline" onClick={() => onTranscribe(m.id)} disabled={m.status === 'processing'}>
-                    Transcribe
+                <Button size="sm" variant="outline" onClick={() => onTranscribe(m.id)} disabled={m.status === 'processing' || transcribingId === m.id}>
+                    {transcribingId === m.id ? 'Starting…' : 'Transcribe'}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => navigate(`/transcripts/${m.id}`)}>
+                    View
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => onToggleExpand(m.id)}>
                     {expanded === m.id ? 'Hide segments' : 'Show segments'}
@@ -148,22 +154,25 @@ export default function Transcripts() {
     const projectName = projects.find(p => p.id === selectedProjectId)?.name || 'Project';
     const [expanded, setExpanded] = useState<string | null>(null);
     const [pollingIds, setPollingIds] = useState<Set<string>>(() => new Set());
+    const [transcribingId, setTranscribingId] = useState<string | null>(null);
     const segQuery = useQuery({
         queryKey: ['segments', expanded],
         queryFn: () => expanded ? listSegments(expanded) : Promise.resolve([]),
         enabled: Boolean(expanded),
     });
 
-    const uploadMut = useMutation({
-        mutationFn: ({ file }: { file: File }) => {
-            if (!selectedProjectId) throw new Error('Select a project before uploading media');
-            return uploadMedia(file, selectedProjectId);
-        },
-        onSuccess: () => qc.invalidateQueries({ queryKey: ['media', selectedProjectId] }),
-    });
-
     const transcribeMut = useMutation({
         mutationFn: ({ id }: { id: string }) => createTranscriptionJob(id, {}),
+        onMutate: async ({ id }) => {
+            setTranscribingId(id);
+            // Optimistically mark media as processing
+            await qc.cancelQueries({ queryKey: ['media', selectedProjectId] });
+            const prev = qc.getQueryData<MediaFile[]>(['media', selectedProjectId]);
+            if (prev) {
+                qc.setQueryData<MediaFile[]>(['media', selectedProjectId], prev.map(m => m.id === id ? { ...m, status: 'processing' as const } : m));
+            }
+            return { prev };
+        },
         onSuccess: (job) => {
             // Track that this media should poll for progress now that a job exists
             setPollingIds(prev => {
@@ -173,6 +182,7 @@ export default function Transcripts() {
             });
             qc.invalidateQueries({ queryKey: ['media', selectedProjectId] });
         },
+        onSettled: () => setTranscribingId(null),
     });
 
     const deleteMut = useMutation({
@@ -202,16 +212,14 @@ export default function Transcripts() {
                 </BreadcrumbList>
             </Breadcrumb>
 
-            <div className="flex items-center gap-4">
-                <input type="file" disabled={!selectedProjectId} title={!selectedProjectId ? 'Select a project first' : ''} onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) uploadMut.mutate({ file: f });
-                }} />
-                {uploadMut.isPending && <span>Uploading…</span>}
+            <div className="flex items-center gap-3">
+                <h1 className="text-xl font-extrabold uppercase tracking-wide">Transcripts</h1>
+                <div className="ml-auto">
+                    <MediaUpload projectId={selectedProjectId} onUploaded={() => qc.invalidateQueries({ queryKey: ['media', selectedProjectId] })} />
+                </div>
             </div>
 
             <div>
-                <h1 className="text-xl font-extrabold uppercase tracking-wide mb-2">Transcripts</h1>
                 {isLoading ? <div>Loading…</div> : (
                     <Table>
                         <TableHeader>
@@ -232,6 +240,7 @@ export default function Transcripts() {
                                     onTranscribe={(id) => transcribeMut.mutate({ id })}
                                     shouldPoll={pollingIds.has(m.id)}
                                     onStopPolling={(id) => setPollingIds(prev => { const next = new Set(prev); next.delete(id); return next; })}
+                                    transcribingId={transcribingId}
                                 />
                             ))}
                             {media && media.length === 0 && (

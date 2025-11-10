@@ -11,6 +11,7 @@ import DocumentDetail from "./pages/DocumentDetail";
 import CanvasPage from "./pages/CanvasPage";
 import Themes from "./pages/Themes";
 import Transcripts from "./pages/Transcripts";
+import TranscriptDetail from "./pages/TranscriptDetail";
 import Insights from "./pages/Insights";
 import CodesPage from "./pages/Codes";
 import { getProjects } from "@/services/api";
@@ -102,6 +103,7 @@ const App = () => (
             <Route path="/insights" element={<Insights />} />
             <Route path="/canvas" element={<CanvasPage />} />
             <Route path="/transcripts" element={<Transcripts />} />
+            <Route path="/transcripts/:id" element={<TranscriptDetail />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
