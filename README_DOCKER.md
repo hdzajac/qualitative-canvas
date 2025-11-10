@@ -1,9 +1,6 @@
-# Qualitative Canvas – Monorepo (Frontend + Backend + Postgres)
+# Qualitative Canvas – Docker Overview (Simplified Local Stack)
 
-This repository contains:
-- Frontend: Vite + React + TS (`frontend/`)
-- Backend: Node.js + Express + PostgreSQL (`backend/`)
-- Docker Compose: orchestrates frontend, backend, and Postgres
+Current workflow favors running app (frontend + backend) on host, and only infrastructure (Postgres + worker) in Docker.
 
 ---
 
@@ -15,30 +12,31 @@ This repository contains:
 
 ## Environment
 
-Top-level `.env` (optional, used by docker-compose):
-
+Top-level `.env` (local-only example):
 ```
 FRONTEND_PORT=3000
-BACKEND_HOST_PORT=5001
-# Local connection string if you run backend locally against dockerized DB
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/qda
+VITE_API_URL=http://localhost:5002
+PORT=5002
+DATABASE_URL=postgres://qc_dev:<password>@localhost:5432/qda_dev
+SIMULATE_WHISPER=1
+WORKER_BASE_URL=http://host.docker.internal:5002/api
+TEST_DB_NAME=qda_dev_test
 ```
-
-The frontend reads the API base URL via `VITE_API_URL` (baked at build time or provided at runtime). In Docker Compose, it is set to `http://localhost:${BACKEND_HOST_PORT}`.
 
 ---
 
-## Run everything with Docker (recommended)
+## Start infra (DB + worker)
 
-1) Build and start services
-
-```
-docker compose up --build
+```sh
+docker compose up -d db-dev worker
 ```
 
-2) Open the app
-- Frontend: http://localhost:${FRONTEND_PORT:-3000}
-- Backend health: http://localhost:${BACKEND_HOST_PORT:-5001}/api/health
+Then run backend + frontend locally:
+```sh
+cd backend && npm start
+# new terminal
+cd frontend && npm run dev
+```
 
 3) Stop / restart
 - Stop (keep data): `docker compose stop`
@@ -57,32 +55,8 @@ docker compose up --build
 
 ---
 
-## Local development (without Docker for the app)
-
-You can run the backend locally while using the Postgres container from Compose.
-
-1) Start only Postgres
-```
-docker compose up -d db
-```
-
-2) Backend
-```
-cd backend
-export DATABASE_URL=postgres://postgres:postgres@localhost:5432/qda
-npm install
-npm run dev
-```
-- Backend runs on http://localhost:5000
-
-3) Frontend
-```
-cd frontend
-npm install
-npm run dev
-```
-- Frontend runs on http://localhost:3000
-- During local dev, Vite proxies `/api` to `http://localhost:5000` unless `VITE_API_URL` is set.
+## Full compose (optional future)
+You can add backend + frontend back into `docker-compose.yml` later; supply only `DATABASE_URL` and `PORT` for backend, and `VITE_API_URL` build arg for frontend.
 
 ---
 
@@ -130,21 +104,23 @@ qualitative-canvas/
 
 ## Troubleshooting
 
-- Browser cannot resolve `backend:5000`:
-  - The browser can’t access Docker DNS. We configure the frontend to use `http://localhost:${BACKEND_HOST_PORT}` instead. Rebuild with Compose to propagate.
+- Browser cannot reach API:
+  - Ensure backend running on host: `npm start` in `backend/`.
+  - Confirm `VITE_API_URL` in `.env` matches backend URL.
 
-- Port 5000 already in use:
-  - Compose maps backend to `${BACKEND_HOST_PORT:-5001}` by default. Change `BACKEND_HOST_PORT` in `.env` to any free port.
+- Port conflicts:
+  - Change `FRONTEND_PORT` or `PORT` in `.env`.
 
-- DB migrations / schema:
-  - The backend initializes tables on startup with `CREATE TABLE IF NOT EXISTS` and creates indexes. No data is dropped.
+- Schema:
+  - Migrations run automatically on backend startup; tables created idempotently.
+  - Tests use a separate database (TEST_DB_NAME). The test harness will create it if missing and run migrations on both dev and test DBs.
 
-- Reset database:
-  - `docker compose down -v` to remove containers and the data volume.
+- Reset database: `docker compose down -v`.
+  - For tests only, the test DB is truncated automatically after each run; the dev DB is untouched.
 
-- Backups:
-  - `docker exec -t $(docker compose ps -q db) pg_dump -U postgres qda > backup.sql`
-  - `cat backup.sql | docker exec -i $(docker compose ps -q db) psql -U postgres -d qda`
+- Backup:
+  - `docker compose exec -T db-dev pg_dump -U qc_dev qda_dev > backup.sql`
+  - `psql postgres://qc_dev:<password>@localhost:5432/qda_dev < backup.sql`
 
 ---
 

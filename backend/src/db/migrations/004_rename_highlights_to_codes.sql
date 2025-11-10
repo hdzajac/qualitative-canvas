@@ -33,10 +33,19 @@ ALTER TABLE IF EXISTS codes
 ALTER TABLE IF EXISTS themes
   ADD COLUMN IF NOT EXISTS code_ids UUID[] NOT NULL DEFAULT '{}';
 
--- Copy values from legacy highlight_ids when available
-UPDATE themes SET code_ids = highlight_ids
-WHERE highlight_ids IS NOT NULL AND (
-  code_ids IS NULL OR array_length(code_ids,1) IS NULL OR array_length(code_ids,1) = 0
-);
+-- Copy values from legacy highlight_ids when available (guard if column exists)
+DO $do$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'themes' AND column_name = 'highlight_ids'
+  ) THEN
+    EXECUTE 'UPDATE themes SET code_ids = highlight_ids
+      WHERE highlight_ids IS NOT NULL AND (
+        code_ids IS NULL OR array_length(code_ids,1) IS NULL OR array_length(code_ids,1) = 0
+      )';
+  END IF;
+END
+$do$;
 
 COMMIT;

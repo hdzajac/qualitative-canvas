@@ -17,7 +17,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool.end();
+  // Global teardown handles cleanup & pool.end
 });
 
 describe('Participants CRUD', () => {

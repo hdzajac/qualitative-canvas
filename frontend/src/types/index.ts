@@ -97,4 +97,9 @@ export interface TranscriptionJob {
   completedAt?: string;
   errorMessage?: string;
   createdAt: string;
+  // Progress tracking (optional fields populated when worker PATCHes progress)
+  processedMs?: number; // milliseconds processed so far
+  totalMs?: number;     // total media duration in milliseconds if known
+  etaSeconds?: number;  // estimated seconds remaining (heuristic)
+  updatedAt?: string;   // last progress update timestamp
 }

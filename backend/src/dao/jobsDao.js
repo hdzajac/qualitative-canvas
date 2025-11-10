@@ -8,6 +8,10 @@ export function mapJob(r) {
     startedAt: r.started_at?.toISOString?.() ?? r.started_at ?? undefined,
     completedAt: r.completed_at?.toISOString?.() ?? r.completed_at ?? undefined,
     errorMessage: r.error_message ?? undefined,
+    processedMs: r.processed_ms ?? undefined,
+    totalMs: r.total_ms ?? undefined,
+    etaSeconds: r.eta_seconds ?? undefined,
+    updatedAt: r.updated_at?.toISOString?.() ?? r.updated_at ?? undefined,
     createdAt: r.created_at?.toISOString?.() ?? r.created_at,
   };
 }
@@ -55,6 +59,30 @@ export async function leaseNextQueuedJob(pool) {
      FROM cte
      WHERE t.id = cte.id
      RETURNING t.*`
+  );
+  return r.rows[0] ? mapJob(r.rows[0]) : null;
+}
+
+export async function setJobProgress(pool, id, { processedMs, totalMs, etaSeconds }) {
+  const r = await pool.query(
+    `UPDATE transcription_jobs
+     SET processed_ms = COALESCE($2, processed_ms),
+         total_ms = COALESCE($3, total_ms),
+         eta_seconds = COALESCE($4, eta_seconds),
+         updated_at = now()
+     WHERE id = $1 RETURNING *`,
+    [id, processedMs ?? null, totalMs ?? null, etaSeconds ?? null]
+  );
+  return r.rows[0] ? mapJob(r.rows[0]) : null;
+}
+
+export async function getLatestJobForMedia(pool, mediaFileId) {
+  const r = await pool.query(
+    `SELECT * FROM transcription_jobs
+     WHERE media_file_id = $1
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [mediaFileId]
   );
   return r.rows[0] ? mapJob(r.rows[0]) : null;
 }

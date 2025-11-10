@@ -47,5 +47,26 @@ export default function transcriptionRoutes(pool) {
     res.json(job);
   }));
 
+  // Worker/UI: update job progress (processedMs / totalMs / etaSeconds)
+  router.patch('/transcribe-jobs/:id/progress', asyncHandler(async (req, res) => {
+    const schema = z.object({
+      processedMs: z.number().int().nonnegative().optional(),
+      totalMs: z.number().int().positive().optional(),
+      etaSeconds: z.number().int().nonnegative().optional(),
+    });
+    const parsed = schema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const job = await jobsService.progress(req.params.id, parsed.data);
+    if (!job) return res.status(404).json({ error: 'Not found' });
+    res.json(job);
+  }));
+
+  // Helper: latest job for a media file
+  router.get('/media/:id/latest-job', asyncHandler(async (req, res) => {
+    const job = await jobsService.getLatestForMedia(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Not found' });
+    res.json(job);
+  }));
+
   return router;
 }

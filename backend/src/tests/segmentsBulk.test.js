@@ -1,7 +1,8 @@
-import { beforeAll, describe, it, expect } from 'vitest';
+import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
 import { app, init } from '../app.js';
+import pool from '../db/pool.js';
 
 let mediaId; let projectId; let jobId;
 
@@ -37,4 +38,8 @@ describe('Bulk segment insert', () => {
     expect(list.body.length).toBe(3);
     expect(list.body[1]).toMatchObject({ idx: 1, text: 'Two' });
   });
+});
+
+afterAll(async () => {
+  // Global teardown handles cleanup & pool.end
 });

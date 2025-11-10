@@ -57,6 +57,21 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Variant that returns null on 404 instead of throwing
+async function httpMaybe<T>(path: string, init?: RequestInit): Promise<T | null> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+    ...init,
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
+  if (res.status === 204) return null;
+  return res.json() as Promise<T>;
+}
+
 // Files
 export const uploadFile = (filename: string, content: string, projectId?: string): Promise<UploadedFile> =>
   http<UploadedFile>('/files', { method: 'POST', body: JSON.stringify({ filename, content, projectId }) });
@@ -142,11 +157,13 @@ export const listMedia = (projectId?: string): Promise<MediaFile[]> =>
   http<MediaFile[]>(projectId ? `/media?projectId=${encodeURIComponent(projectId)}` : '/media');
 
 export const getMedia = (id: string): Promise<MediaFile> => http<MediaFile>(`/media/${id}`);
+export const deleteMedia = (id: string, opts?: { force?: boolean }): Promise<void> =>
+  http<void>(`/media/${id}${opts?.force ? '?force=1' : ''}`, { method: 'DELETE' });
 
-export async function uploadMedia(file: File, projectId?: string): Promise<MediaFile> {
+export async function uploadMedia(file: File, projectId: string): Promise<MediaFile> {
   const form = new FormData();
   form.append('file', file);
-  if (projectId) form.append('projectId', projectId);
+  form.append('projectId', projectId);
   const res = await fetch(`${BASE_URL}/media`, { method: 'POST', body: form });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -158,9 +175,21 @@ export const createTranscriptionJob = (mediaId: string, opts: { model?: string; 
 
 export const getTranscriptionJob = (jobId: string): Promise<TranscriptionJob> => http<TranscriptionJob>(`/transcribe-jobs/${jobId}`);
 
+// Latest job for a media (includes progress fields)
+export const getLatestJobForMedia = (mediaId: string): Promise<TranscriptionJob | null> =>
+  httpMaybe<TranscriptionJob>(`/media/${mediaId}/latest-job`);
+
 // Segments
 export const listSegments = (mediaId: string): Promise<TranscriptSegment[]> =>
   http<TranscriptSegment[]>(`/media/${mediaId}/segments`);
 
 export const updateSegment = (mediaId: string, segmentId: string, payload: { text?: string; participantId?: string | null }): Promise<TranscriptSegment> =>
   http<TranscriptSegment>(`/media/${mediaId}/segments/${segmentId}`, { method: 'PUT', body: JSON.stringify(payload) });
+
+// Finalization
+export interface FinalizedTranscriptMapping { mediaFileId: string; fileId: string; finalizedAt: string; originalSegmentCount?: number }
+export const getFinalizedTranscript = (mediaId: string): Promise<FinalizedTranscriptMapping | null> =>
+  httpMaybe<FinalizedTranscriptMapping>(`/media/${mediaId}/finalized`);
+
+export const finalizeTranscript = (mediaId: string): Promise<FinalizedTranscriptMapping> =>
+  http<FinalizedTranscriptMapping>(`/media/${mediaId}/finalize`, { method: 'POST' });

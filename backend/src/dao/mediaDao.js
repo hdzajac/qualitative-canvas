@@ -52,6 +52,12 @@ export async function updateMedia(pool, id, patch) {
   return r.rows[0] ? mapMedia(r.rows[0]) : null;
 }
 
+export async function deleteMedia(pool, id) {
+  // Return storage_path for caller to unlink
+  const r = await pool.query('DELETE FROM media_files WHERE id = $1 RETURNING storage_path', [id]);
+  return r.rows[0]?.storage_path || null;
+}
+
 export async function ensureDir(dirPath) {
   await fs.mkdir(dirPath, { recursive: true });
 }

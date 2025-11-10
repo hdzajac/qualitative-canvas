@@ -1,9 +1,11 @@
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { app, init } from '../app.js';
+import { v4 as uuidv4 } from 'uuid';
 import pool from '../db/pool.js';
 import fs from 'fs/promises';
 import path from 'path';
+import { cleanupTempTestMedia } from './cleanupTempFiles.js';
 
 // Helper: create a temp file to upload
 async function createTempMedia(content = 'fake media data') {
@@ -24,7 +26,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool.end();
+  await cleanupTempTestMedia();
+  // Global teardown handles pool.end
 });
 
 describe('Media upload & listing', () => {
@@ -73,11 +76,41 @@ describe('Transcription jobs lifecycle', () => {
     const res = await request(app).post(`/api/transcribe-jobs/${jobId}/complete`);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ status: 'done' });
+    // Also mark media status done to allow finalization (some flows may auto-update media status elsewhere)
+    const upd = await pool.query(`UPDATE media_files SET status = 'done' WHERE id = $1 RETURNING status`, [mediaId]);
+    expect(upd.rows[0].status).toBe('done');
   });
 
   it('fetches job status', async () => {
     const res = await request(app).get(`/api/transcribe-jobs/${jobId}`);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: jobId, status: 'done' });
+  });
+
+  it('finalizes transcript (idempotent)', async () => {
+    // Seed simple segments for finalization content
+    await pool.query(`DELETE FROM transcript_segments WHERE media_file_id = $1`, [mediaId]);
+    const id1 = uuidv4();
+    const id2 = uuidv4();
+    const s1 = await pool.query(`INSERT INTO transcript_segments (id, media_file_id, idx, start_ms, end_ms, text) VALUES ($1, $2, 0, 0, 1000, 'Hello world') RETURNING id`, [id1, mediaId]);
+    const s2 = await pool.query(`INSERT INTO transcript_segments (id, media_file_id, idx, start_ms, end_ms, text) VALUES ($1, $2, 1, 1000, 2000, 'Second line') RETURNING id`, [id2, mediaId]);
+    expect(s1.rows[0].id).toBeTruthy();
+    expect(s2.rows[0].id).toBeTruthy();
+    // First finalize
+    const first = await request(app).post(`/api/media/${mediaId}/finalize`).send();
+    expect(first.status).toBe(201);
+    expect(first.body).toMatchObject({ mediaFileId: mediaId, originalSegmentCount: 2 });
+    const fileId = first.body.fileId;
+    expect(fileId).toBeTruthy();
+    // Second finalize should be idempotent (return 201? or 200?). We keep 201 for simplicity but mapping unchanged.
+    const second = await request(app).post(`/api/media/${mediaId}/finalize`).send();
+    expect([200,201]).toContain(second.status); // accept either if route semantics evolve
+    expect(second.body).toMatchObject({ mediaFileId: mediaId, fileId });
+    // Fetch file content
+    const fileRes = await request(app).get(`/api/files/${fileId}`);
+    expect(fileRes.status).toBe(200);
+    expect(fileRes.body.content).toContain('Hello world');
+    expect(fileRes.body.content).toContain('Second line');
+    expect(fileRes.body.content).toMatch(/\[00:00:00 - 00:00:01\] Hello world/);
   });
 });

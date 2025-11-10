@@ -41,7 +41,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool.end();
+  // Global teardown handles cleanup & pool.end
 });
 
 describe('Segments retrieval & update', () => {

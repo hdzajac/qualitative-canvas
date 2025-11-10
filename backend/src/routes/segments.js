@@ -3,6 +3,7 @@ import asyncHandler from 'express-async-handler';
 import { z } from 'zod';
 import { listSegmentsForMedia, getSegment, updateSegment, replaceSegmentsBulk } from '../dao/segmentsDao.js';
 import { getMedia } from '../dao/mediaDao.js';
+import { randomUUID } from 'crypto';
 
 export default function segmentsRoutes(pool) {
   const router = Router({ mergeParams: true });
@@ -42,12 +43,27 @@ export default function segmentsRoutes(pool) {
       replace: z.boolean().optional(),
     });
     const parsed = schema.safeParse(req.body || {});
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    if (!parsed.success) {
+      console.error('[segments bulk] validation error', parsed.error.message, JSON.stringify(req.body).slice(0,600));
+      return res.status(400).json({ error: parsed.error.message });
+    }
+    if (parsed.data.segments.length > 5000) {
+      console.error('[segments bulk] too many segments', parsed.data.segments.length);
+      return res.status(400).json({ error: 'Too many segments (limit 5000)' });
+    }
     const media = await getMedia(pool, mediaId);
-    if (!media) return res.status(404).json({ error: 'Media not found' });
-    const withIds = parsed.data.segments.map((s) => ({ id: s.id || crypto.randomUUID(), ...s }));
-    const result = await replaceSegmentsBulk(pool, mediaId, withIds);
-    res.status(201).json({ count: result.length });
+    if (!media) {
+      console.error('[segments bulk] media not found', mediaId);
+      return res.status(404).json({ error: 'Media not found' });
+    }
+    const withIds = parsed.data.segments.map((s) => ({ id: s.id || randomUUID(), ...s }));
+    try {
+      const result = await replaceSegmentsBulk(pool, mediaId, withIds);
+      res.status(201).json({ count: result.length });
+    } catch (e) {
+      console.error('[segments bulk] DB error', e.message, e.stack?.split('\n').slice(0,5).join('\n'));
+      return res.status(500).json({ error: 'Bulk insert failed' });
+    }
   }));
 
   return router;

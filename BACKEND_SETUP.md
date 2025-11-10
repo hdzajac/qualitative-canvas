@@ -1,10 +1,10 @@
-# Backend Setup Guide
+# Backend Setup Guide (Current Local Architecture)
 
-This React frontend is ready to connect to your Node.js + Express backend. Follow this guide to set up the backend server.
+The backend in this repo already includes an Express server, PostgreSQL integration, migrations, and routes. This guide now focuses on running locally using the simplified environment strategy and adding environments later.
 
-## Database Schema
+## Database Schema (Implemented)
 
-Create these tables in your SQLite or PostgreSQL database:
+The Postgres schema is created automatically on startup (idempotent migrations + table creation). Legacy examples below are retained for reference:
 
 ### Files Table
 ```sql
@@ -88,236 +88,47 @@ CREATE TABLE annotations (
 );
 ```
 
-## Express Server Setup
+## Running the Existing Backend
 
-### 1. Initialize Node.js Project
-
-```bash
-mkdir backend
+1. Ensure Postgres is running (compose service `db-dev`).
+2. Set `DATABASE_URL` in top-level `.env`.
+3. Start backend:
+```sh
 cd backend
-npm init -y
+npm install
+npm start
+```
+4. Health: `GET /api/health`
+
+The server code lives in `backend/src/` and already separates initialization, migrations, DAOs, services, and routes.
 ```
 
-### 2. Install Dependencies
+## Frontend API Base
 
-```bash
-# For SQLite
-npm install express cors sqlite3 body-parser
+Frontend uses `VITE_API_URL` from `.env` at build/start time. Adjust it if you change backend port or host.
 
-# OR for PostgreSQL
-npm install express cors pg body-parser
-```
+## Local Stack Summary
 
-### 3. Create Express Server (server.js)
-
-```javascript
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const sqlite3 = require('sqlite3').verbose(); // or use pg for PostgreSQL
-
-const app = express();
-const PORT = 3000;
-
-// Middleware
-app.use(cors());
-app.use(bodyParser.json({ limit: '50mb' }));
-
-// Database setup (SQLite example)
-const db = new sqlite3.Database('./qualitative-data.db', (err) => {
-  if (err) {
-    console.error('Error opening database:', err);
-  } else {
-    console.log('Connected to SQLite database');
-    initializeTables();
-  }
-});
-
-// Initialize tables
-function initializeTables() {
-  // Create all tables here using the schema above
-  // Example for files table:
-  db.run(`CREATE TABLE IF NOT EXISTS files (
-    id VARCHAR(255) PRIMARY KEY,
-    filename VARCHAR(255) NOT NULL,
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )`);
-  
-  // Add other tables...
-}
-
-// ============ FILE ENDPOINTS ============
-
-app.post('/api/files', (req, res) => {
-  const { filename, content } = req.body;
-  const id = Date.now().toString();
-  const createdAt = new Date().toISOString();
-
-  db.run(
-    'INSERT INTO files (id, filename, content, created_at) VALUES (?, ?, ?, ?)',
-    [id, filename, content, createdAt],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ id, filename, content, createdAt });
-    }
-  );
-});
-
-app.get('/api/files', (req, res) => {
-  db.all('SELECT * FROM files ORDER BY created_at DESC', [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    res.json(rows);
-  });
-});
-
-app.get('/api/files/:id', (req, res) => {
-  db.get('SELECT * FROM files WHERE id = ?', [req.params.id], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    res.json(row || null);
-  });
-});
-
-// ============ HIGHLIGHT ENDPOINTS ============
-
-app.post('/api/highlights', (req, res) => {
-  const { fileId, startOffset, endOffset, text, codeName, position } = req.body;
-  const id = Date.now().toString();
-  const createdAt = new Date().toISOString();
-
-  db.run(
-    'INSERT INTO highlights (id, file_id, start_offset, end_offset, text, code_name, position_x, position_y, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, fileId, startOffset, endOffset, text, codeName, position?.x, position?.y, createdAt],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ 
-        id, 
-        fileId, 
-        startOffset, 
-        endOffset, 
-        text, 
-        codeName, 
-        position,
-        createdAt 
-      });
-    }
-  );
-});
-
-app.get('/api/highlights', (req, res) => {
-  db.all('SELECT * FROM highlights ORDER BY created_at ASC', [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    // Transform position columns back to object
-    const highlights = rows.map(row => ({
-      ...row,
-      position: row.position_x ? { x: row.position_x, y: row.position_y } : undefined
-    }));
-    res.json(highlights);
-  });
-});
-
-app.put('/api/highlights/:id', (req, res) => {
-  const updates = req.body;
-  const fields = [];
-  const values = [];
-
-  if (updates.codeName !== undefined) {
-    fields.push('code_name = ?');
-    values.push(updates.codeName);
-  }
-  if (updates.position !== undefined) {
-    fields.push('position_x = ?', 'position_y = ?');
-    values.push(updates.position.x, updates.position.y);
-  }
-
-  if (fields.length === 0) {
-    return res.status(400).json({ error: 'No valid fields to update' });
-  }
-
-  values.push(req.params.id);
-  const sql = `UPDATE highlights SET ${fields.join(', ')} WHERE id = ?`;
-
-  db.run(sql, values, function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    // Return updated record
-    db.get('SELECT * FROM highlights WHERE id = ?', [req.params.id], (err, row) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({
-        ...row,
-        position: row.position_x ? { x: row.position_x, y: row.position_y } : undefined
-      });
-    });
-  });
-});
-
-app.delete('/api/highlights/:id', (req, res) => {
-  db.run('DELETE FROM highlights WHERE id = ?', [req.params.id], function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    res.json({ success: true });
-  });
-});
-
-// ============ THEME ENDPOINTS ============
-// Similar pattern for themes, insights, and annotations
-// See the API service file (src/services/api.ts) for complete endpoint specifications
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
-});
-```
-
-## 4. Update Frontend Configuration
-
-Once your backend is running, update `src/services/api.ts`:
-
-```typescript
-const BASE_URL = 'http://localhost:3000/api'; // Update if needed
-```
-
-Then comment out or remove the mock storage functions and uncomment the actual API calls.
-
-## 5. Run Your Stack
-
-### Terminal 1 (Backend):
-```bash
-cd backend
-node server.js
-```
-
-### Terminal 2 (Frontend):
-```bash
-npm run dev
-```
+| Component  | Location  | Port | How to start                       |
+|------------|-----------|------|------------------------------------|
+| Backend    | host      | 5002 | `npm start` in `backend/`          |
+| Frontend   | host      | 3000 | `npm run dev` in `frontend/`       |
+| Postgres   | docker    | 5432 | `docker compose up -d db-dev`      |
+| Worker     | docker    | n/a  | `docker compose up -d worker`      |
 
 ## Notes
 
-- The frontend currently uses localStorage as a mock backend for development
-- All API endpoints are documented in `src/services/api.ts`
-- The database schema supports all features including drag-and-drop positioning
-- For production, consider adding authentication, validation, and error handling
-- You can export this Lovable project and integrate your backend seamlessly
+- Frontend is fully wired to backend routes; no mock storage used now.
+- Add auth/more validation before exposing publicly.
+- Use a single `DATABASE_URL` per environment going forward.
 
-## Export from Lovable
+## Future Environments
 
-1. Click your project name → Settings → "Download code"
-2. Extract the files to your local machine
-3. Run `npm install`
-4. Set up the backend following this guide
-5. Run both servers and enjoy full-stack local development!
+For staging/production inject env vars (don’t commit secrets):
+```
+NODE_ENV=production
+DATABASE_URL=postgres://<user>:<pass>@<host>:5432/<db>
+PORT=5000
+VITE_API_URL=https://your-domain/api
+```
+Run migrations before starting the server.

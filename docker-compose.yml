@@ -1,5 +1,6 @@
 services:
   frontend:
+    profiles: ["full"]
     build:
       context: ./frontend
       args:
@@ -14,59 +15,47 @@ services:
     restart: unless-stopped
 
   backend:
+    profiles: ["full"]
     build: ./backend
     ports:
       - "${BACKEND_HOST_PORT:-5001}:5000"
-    expose:
-      - "5000"
     environment:
-      - DB_ENV=prod
-      - DATABASE_URL_PROD=${DATABASE_URL_PROD}
       - PORT=5000
+      - DATABASE_URL=${DOCKER_DATABASE_URL:-postgres://${DB_DEV_USER:-qc_dev}:${DB_DEV_PASSWORD:?DB_DEV_PASSWORD must be set}@db-dev:5432/${DB_DEV_DBNAME:-qda_dev}}
     depends_on:
-      db:
+      db-dev:
         condition: service_healthy
     restart: unless-stopped
 
   worker:
     build: ./worker
     environment:
-      - BASE_URL=http://backend:5000/api
+      - BASE_URL=${WORKER_BASE_URL:-http://backend:5000/api}
       - POLL_INTERVAL_SEC=3
-      # For diarization later (optional):
-      # - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
+      - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+      - SIMULATE_WHISPER=${SIMULATE_WHISPER:-1}
+      - WORKER_AUTO_FALLBACK=0
+      - CHUNK_SECONDS=${CHUNK_SECONDS:-0}
+      - WHISPER_BEAM_SIZE=${WHISPER_BEAM_SIZE:-1}
+      - LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
     depends_on:
-      backend:
-        condition: service_started
+      db-dev:
+        condition: service_healthy
     restart: unless-stopped
-    # Optional model cache persistence for faster-whisper / pyannote
     volumes:
       - worker_models:/root/.cache
-
-  db:
-    image: postgres:16
-    restart: always
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: qda
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d qda"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    volumes:
-      - db_data:/var/lib/postgresql/data
 
   db-dev:
     image: postgres:16
     restart: always
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: qda_dev
+      POSTGRES_USER: ${DB_DEV_USER}
+      POSTGRES_PASSWORD: ${DB_DEV_PASSWORD}
+      POSTGRES_DB: ${DB_DEV_DBNAME:-qda_dev}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d qda_dev"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_DEV_USER} -d ${DB_DEV_DBNAME:-qda_dev}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -76,6 +65,5 @@ services:
       - db_data_dev:/var/lib/postgresql/data
 
 volumes:
-  db_data:
   db_data_dev:
   worker_models:

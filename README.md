@@ -5,54 +5,34 @@ Full-stack monorepo with:
 - Backend: Node.js + Express + PostgreSQL (`backend/`)
 - Docker Compose: orchestrates frontend, backend, and Postgres
 
-## Key features
-- Documents and coding
-  - Create codes by selecting text in a document; name the code in the side sheet.
-  - Accurate highlight placement across normal text and .vtt transcripts (segment-aware rendering, no layout breaks).
-  - VTT editing: edit blocks inline, caret is stable; adjacent lines from the same speaker auto-merge on blur.
-- Canvas workspace
-  - Cards for Codes, Themes, Insights, and Annotations with default sizes and auto height.
-  - Multi-select and group drag; positions persist.
-  - Connect via a subtle handle: Code → Theme, Theme → Insight. Valid targets highlight on hover while connecting. Click an edge to remove a connection.
-  - Side panel lists: Themes show their codes (+ document names); Insights show their themes and underlying codes (+ document names).
-  - Per-card text size control; quick width presets when a single card is selected.
-  - Modular canvas UI: toolbars and popups are split into components for clarity.
-  - Annotation sticky notes: simplified (header bar removed); active selection gets a soft color glow; extra invisible margin makes dragging/resizing easier.
-  - Productivity shortcuts: Press T with codes selected to instantly create a Theme; press I with themes selected to instantly create an Insight (see Shortcuts section).
-- API-backed persistence for positions, sizes, styles, titles, and relationships.
+<!-- Legacy header retained from earlier draft removed in cleanup -->
+## Quick start (Local-first Dev + Minimal Compose)
 
-## Quick start (Docker)
+Current streamlined workflow: run the backend and frontend on your host; only Postgres (and optionally the transcription worker) run in Docker.
 
+1. Copy `.env.example` to `.env` (or use the simplified `.env` already present) and ensure it contains a single local `DATABASE_URL`.
+2. Start Postgres + worker:
+  ```sh
+  docker compose up -d db-dev worker
+  ```
+3. Backend:
+  ```sh
+  cd backend
+  npm install
+  npm start  # listens on http://localhost:5002
+  ```
+4. Frontend:
+  ```sh
+  cd frontend
+  npm install
+  npm run dev  # http://localhost:3000
+  ```
+5. App expects API at `VITE_API_URL` (defaults to `http://localhost:5002`).
+
+Data persists in the volume `db_data_dev`. Remove with:
 ```sh
-docker compose up --build
+docker compose down -v
 ```
-- Frontend: http://localhost:${FRONTEND_PORT:-3000}
-- Backend health: http://localhost:${BACKEND_HOST_PORT:-5001}/api/health
-
-Data persists in the named volume `db_data`.
-
-If you set `DATABASE_URL_PROD` in your top-level `.env`, the backend container will use it (via `DB_ENV=prod`). Example:
-
-```
-# .env (for Docker)
-FRONTEND_PORT=3000
-BACKEND_HOST_PORT=5001
-DB_HOST_PORT=5432
-DATABASE_URL_PROD=postgres://qc_prod:prod_password_change_me@db:5432/qda
-```
-
-### Using dev and prod DBs side-by-side (one machine)
-
-This compose file runs two Postgres databases concurrently:
-
-- `db` (prod): internal-only; not published to your host. The backend container connects to this via `DATABASE_URL_PROD` and `DB_ENV=prod`.
-- `db-dev` (dev): published on your host (default `localhost:5432`) for local tools and the local Node backend.
-
-Start both:
-```sh
-docker compose up -d db db-dev
-```
-
 Inspect status:
 ```sh
 docker compose ps
@@ -65,54 +45,77 @@ docker compose up -d db-dev
 ```
 
 Notes:
-- Keep `db` internal-only (no ports mapping) for safety.
-- Local Node backend uses `PG*_DEV` (e.g., `PGHOST_DEV=localhost`, `PGPORT_DEV=5432`).
-- Docker backend uses `DATABASE_URL_PROD` to reach `db` over the compose network.
+- To wipe data entirely: `docker compose down -v`.
+## Environment Strategy (Simplified)
 
-## Quick start (Local dev)
+Single local `.env` contains only what you need:
+```
+FRONTEND_PORT=3000
+VITE_API_URL=http://localhost:5002
+PORT=5002
+FRONTEND_ORIGIN=http://localhost:3000
+DATABASE_URL=postgres://qc_dev:<password>@localhost:5432/qda_dev
+SIMULATE_WHISPER=1
+WHISPER_MODEL=small
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+WORKER_BASE_URL=http://host.docker.internal:5002/api
+WORKER_AUTO_FALLBACK=0
+```
 
-Start Postgres in Docker:
+Add staging/production later by injecting (never committing) a different `DATABASE_URL` and setting `NODE_ENV=production` at deploy time.
+
+## Run full app in Docker (optional profile `full`)
+
+You can also run frontend + backend inside Docker alongside Postgres + worker.
+
+1. Decide how the backend container gets its database URL:
+   - Option A (single var): set `DOCKER_DATABASE_URL=postgres://qc_dev:<password>@db-dev:5432/qda_dev`
+   - Option B (fallback assembly): omit `DOCKER_DATABASE_URL` and set the trio `DB_DEV_USER`, `DB_DEV_PASSWORD`, `DB_DEV_DBNAME` (Compose will build the URL; password is required).
+2. Ensure `.env` has at least:
+   ```
+   BACKEND_HOST_PORT=5001
+   FRONTEND_PORT=3000
+   # One of the following approaches
+   # DOCKER_DATABASE_URL=postgres://qc_dev:<password>@db-dev:5432/qda_dev
+   DB_DEV_USER=qc_dev
+   DB_DEV_PASSWORD=<password>
+   DB_DEV_DBNAME=qda_dev
+   ```
+3. Start full stack:
+  ```sh
+  docker compose --profile full up -d
+  ```
+4. Backend API: http://localhost:${BACKEND_HOST_PORT:-5001}/api
+5. Frontend: http://localhost:${FRONTEND_PORT:-3000}
+6. Worker BASE_URL automatically defaults to host backend. When running full stack only (no local backend), you can override in `.env` before `up`:
+  ```
+  WORKER_BASE_URL=http://backend:5000/api
+  ```
+
+Important: Do NOT run local host backend/frontend simultaneously with the Docker versions (port conflicts, duplicate jobs). Stop local processes first.
+
+Common commands:
 ```sh
-docker compose up -d db
+docker compose --profile full ps
+docker compose --profile full logs -f backend
+docker compose --profile full down
 ```
 
-Copy `.env.example` to `.env` and adjust dev values:
-```
-cp .env.example .env
-# Edit: PGHOST_DEV, PGPORT_DEV, PGUSER_DEV, PGPASSWORD_DEV, PGDATABASE_DEV
-```
-
-Backend (local on 5002):
+To return to local-first mode, just stop the `frontend` and `backend` containers:
 ```sh
-cd backend
-npm install
-npm run dev
+docker compose --profile full stop frontend backend
 ```
-- Runs on http://localhost:5002
 
-Frontend (local on 3000):
-```sh
-cd frontend
-npm install
-npm run dev
-```
-- Runs on http://localhost:3000
-- The app uses `VITE_API_URL` (set in top-level `.env`) to call the backend (defaults to `http://localhost:5002`).
+Persisted data remains in `db_data_dev`; switching modes doesn’t affect it.
 
-## Environment & configuration
+## Adding More Environments Later
 
-This repo supports dual DB environments (dev/prod). The backend selects which DB to use based on `DB_ENV` (or `NODE_ENV`).
-
-Order of precedence:
-1) `DATABASE_URL_DEV` / `DATABASE_URL_PROD`
-2) Discrete vars: `PGHOST_DEV`/`PGHOST_PROD`, `PGPORT_DEV`/`PGPORT_PROD`, `PGUSER_DEV`/`PGUSER_PROD`, `PGPASSWORD_DEV`/`PGPASSWORD_PROD`, `PGDATABASE_DEV`/`PGDATABASE_PROD`
-3) Fallbacks: `DATABASE_URL` or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE`
-
-Typical setups:
-- Local dev: set `PG*_DEV` to your local Postgres (or Docker’s published port on localhost). The backend defaults to `dev`.
-- Docker: set `DATABASE_URL_PROD` (the backend service uses `DB_ENV=prod` and connects to the Compose `db` service).
-
-See `.env.example` for a filled-out template with dummy credentials and comments.
+When you introduce staging/production:
+- Provide a deploy-time `DATABASE_URL`.
+- Set `NODE_ENV=production`.
+- Provide `VITE_API_URL` (or configure reverse proxy) for frontend builds.
+- Do not reuse dev credentials; rotate secrets per environment.
 
 ## Usage guide
 - Create codes
@@ -162,21 +165,13 @@ Text & coding
 - C: Add code for current text selection
 - E: Edit selected block(s) — VTT transcripts only
 
-## Running in production (Compose)
+## Production (Future)
 
-1) Create `.env` with at least:
-```
-FRONTEND_PORT=3000
-BACKEND_HOST_PORT=5001
-DB_HOST_PORT=5432
-DATABASE_URL_PROD=postgres://<user>:<password>@db:5432/qda
-```
-2) Start services:
-```
-docker compose up --build -d
-```
-3) Health check: http://localhost:${BACKEND_HOST_PORT}/api/health
-4) Frontend: http://localhost:${FRONTEND_PORT}
+Deployment outline (not yet wired):
+1. Build frontend with `VITE_API_URL=https://your-domain/api`.
+2. Run backend container with only: `NODE_ENV=production`, `PORT=5000`, `DATABASE_URL=...`.
+3. Add reverse proxy (nginx / Caddy) to serve frontend and proxy `/api` to backend.
+4. Add migrations step before starting the server.
 
 ## API
 - `GET /api/health`
@@ -255,19 +250,16 @@ Modular components under `frontend/src/components/canvas/`:
 
 The main `Canvas.tsx` orchestrates state, interactions, and persistence while delegating presentational pieces to these components.
 
-## Migrating current data to a dev database (optional)
-
-If you want your current data available locally, you can dump the database and restore into a `qda_dev` database running in the Docker Postgres:
-
-```
-# Inside the repo, with db service running
 docker compose exec -T db pg_dump -U postgres -d qda -Fc -f /tmp/qda.dump
 docker compose cp db:/tmp/qda.dump ./qda.dump
 docker compose exec -T db bash -lc "createdb -U postgres qda_dev || true"
 docker compose exec -T db pg_restore -U postgres -d qda_dev /tmp/qda.dump
+## Data Migration (Local)
+Dump and restore between local databases:
+```sh
+docker compose exec -T db-dev pg_dump -U qc_dev -d qda_dev > dump.sql
+psql postgres://qc_dev:<password>@localhost:5432/qda_dev < dump.sql
 ```
-
-Then set `PG*_DEV` in your `.env` to point at `qda_dev` on `localhost:5432`.
 
 ## License
 Apache-2.0. See `LICENSE`. For new files, you may add:
