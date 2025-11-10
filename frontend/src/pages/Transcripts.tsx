@@ -1,8 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listMedia, uploadMedia, createTranscriptionJob, listSegments, getLatestJobForMedia, deleteMedia as deleteMediaApi } from '@/services/api';
+import { listMedia, uploadMedia, createTranscriptionJob, listSegments, getLatestJobForMedia, deleteMedia as deleteMediaApi, getFinalizedTranscript, finalizeTranscript } from '@/services/api';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { Button } from '@/components/ui/button';
 import { useMemo, useState } from 'react';
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Progress } from '@/components/ui/progress';
+import { getProjects } from '@/services/api';
 
 function formatEta(seconds?: number) {
     if (seconds == null || seconds < 0) return '';
@@ -14,9 +18,9 @@ function formatEta(seconds?: number) {
 
 import type { MediaFile, TranscriptionJob } from '@/types';
 
-interface MediaRowProps { m: MediaFile; expanded: string | null; onToggleExpand: (id: string) => void; onTranscribe: (id: string) => void; shouldPoll: boolean; disabled?: boolean }
+interface MediaRowProps { m: MediaFile; expanded: string | null; onToggleExpand: (id: string) => void; onTranscribe: (id: string) => void; shouldPoll: boolean; disabled?: boolean; onStopPolling: (id: string) => void }
 
-function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll }: MediaRowProps) {
+function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onStopPolling }: MediaRowProps) {
     const qc = useQueryClient();
     const deleteMut = useMutation({
         mutationFn: ({ id, force }: { id: string; force?: boolean }) => deleteMediaApi(id, { force }),
@@ -53,14 +57,22 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll }: Med
         enabled: m.status === 'processing' && shouldPoll,
         refetchInterval: m.status === 'processing' && shouldPoll ? 5000 : false,
     });
+    // Fetch finalized mapping if media is done
+    const { data: finalized } = useQuery({
+        queryKey: ['finalized', m.id],
+        queryFn: () => getFinalizedTranscript(m.id),
+        enabled: m.status === 'done',
+        refetchOnWindowFocus: false,
+    });
     let progressDisplay: string = m.status;
+    let pct: number | undefined;
     if (m.status === 'processing') {
         const processedMs = job?.processedMs;
         const totalMs = job?.totalMs;
         const etaSeconds = job?.etaSeconds;
         const jobStatus = job?.status;
         if (processedMs != null && totalMs != null && totalMs > 0) {
-            const pct = Math.min(100, Math.round((processedMs / totalMs) * 100));
+            pct = Math.min(100, Math.round((processedMs / totalMs) * 100));
             progressDisplay = `processing ${pct}%`;
             if (etaSeconds != null && etaSeconds >= 0) {
                 progressDisplay += ` ETA ${formatEta(etaSeconds)}`;
@@ -71,22 +83,60 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll }: Med
         if (jobStatus === 'error' && job) {
             progressDisplay = `error${job.errorMessage ? ' ' + job.errorMessage : ''}`;
         }
+    } else if (m.status === 'done') {
+        progressDisplay = finalized ? 'done (finalized)' : 'done';
+    }
+
+    // Stop polling once job is done or error
+    if (m.status !== 'processing' && shouldPoll) {
+        onStopPolling(m.id);
     }
     return (
-        <tr key={m.id} className="border-b">
-            <td className="p-2 border">{m.originalFilename}</td>
-            <td className="p-2 border whitespace-nowrap">{progressDisplay}{m.errorMessage ? ` (${m.errorMessage})` : ''}</td>
-            <td className="p-2 border">{m.sizeBytes ?? 0}</td>
-            <td className="p-2 border flex gap-2">
+        <TableRow>
+            <TableCell className="font-medium">{m.originalFilename}</TableCell>
+            <TableCell className="w-[320px]">
+                <div className="flex flex-col gap-1">
+                    {pct != null && (
+                        <Progress value={pct} />
+                    )}
+                    <div className="text-xs text-neutral-700 truncate">{progressDisplay}{m.errorMessage ? ` (${m.errorMessage})` : ''}</div>
+                </div>
+            </TableCell>
+            <TableCell className="text-xs text-neutral-600">{m.sizeBytes ?? 0}</TableCell>
+            <TableCell className="flex gap-2 items-center">
                 <Button size="sm" variant="outline" onClick={() => onTranscribe(m.id)} disabled={m.status === 'processing'}>
                     Transcribe
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => onToggleExpand(m.id)}>
                     {expanded === m.id ? 'Hide segments' : 'Show segments'}
                 </Button>
+                {m.status === 'done' && !finalized && (
+                    <FinalizeButton mediaId={m.id} />
+                )}
+                {m.status === 'done' && finalized && (
+                    <Button size="sm" variant="secondary" onClick={() => window.location.assign(`/documents/${finalized.fileId}`)}>
+                        Open Document
+                    </Button>
+                )}
                 <DeleteMediaButton mediaId={m.id} disabled={m.status === 'processing'} />
-            </td>
-        </tr>
+            </TableCell>
+        </TableRow>
+    );
+}
+
+function FinalizeButton({ mediaId }: { mediaId: string }) {
+    const qc = useQueryClient();
+    const mut = useMutation({
+        mutationFn: () => finalizeTranscript(mediaId),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['finalized', mediaId] });
+            qc.invalidateQueries({ queryKey: ['media'] });
+        },
+    });
+    return (
+        <Button size="sm" variant="outline" disabled={mut.isPending} onClick={() => mut.mutate()}>
+            {mut.isPending ? 'Finalizing…' : 'Finalize'}
+        </Button>
     );
 }
 
@@ -94,6 +144,8 @@ export default function Transcripts() {
     const [selectedProjectId] = useSelectedProject();
     const qc = useQueryClient();
     const { data: media, isLoading } = useQuery({ queryKey: ['media', selectedProjectId], queryFn: () => listMedia(selectedProjectId) });
+    const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
+    const projectName = projects.find(p => p.id === selectedProjectId)?.name || 'Project';
     const [expanded, setExpanded] = useState<string | null>(null);
     const [pollingIds, setPollingIds] = useState<Set<string>>(() => new Set());
     const segQuery = useQuery({
@@ -129,7 +181,27 @@ export default function Transcripts() {
     });
 
     return (
-        <div className="p-6 flex flex-col gap-6">
+        <div className="container mx-auto p-6 space-y-4">
+            <Breadcrumb>
+                <BreadcrumbList>
+                    <BreadcrumbItem>
+                        <BreadcrumbLink href="/">Home</BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                        <BreadcrumbLink href="/projects">Projects</BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                        <BreadcrumbPage>{projectName}</BreadcrumbPage>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                        <BreadcrumbPage>Transcripts</BreadcrumbPage>
+                    </BreadcrumbItem>
+                </BreadcrumbList>
+            </Breadcrumb>
+
             <div className="flex items-center gap-4">
                 <input type="file" disabled={!selectedProjectId} title={!selectedProjectId ? 'Select a project first' : ''} onChange={(e) => {
                     const f = e.target.files?.[0];
@@ -139,18 +211,18 @@ export default function Transcripts() {
             </div>
 
             <div>
-                <h2 className="font-bold text-lg mb-2">Media Files</h2>
+                <h1 className="text-xl font-extrabold uppercase tracking-wide mb-2">Transcripts</h1>
                 {isLoading ? <div>Loading…</div> : (
-                    <table className="w-full text-sm border">
-                        <thead>
-                            <tr className="bg-gray-100">
-                                <th className="text-left p-2 border">Filename</th>
-                                <th className="text-left p-2 border">Status</th>
-                                <th className="text-left p-2 border">Size</th>
-                                <th className="text-left p-2 border">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>Filename</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Size</TableHead>
+                                <TableHead>Actions</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
                             {media?.map(m => (
                                 <MediaRow
                                     key={m.id}
@@ -159,24 +231,34 @@ export default function Transcripts() {
                                     onToggleExpand={(id) => setExpanded(expanded === id ? null : id)}
                                     onTranscribe={(id) => transcribeMut.mutate({ id })}
                                     shouldPoll={pollingIds.has(m.id)}
+                                    onStopPolling={(id) => setPollingIds(prev => { const next = new Set(prev); next.delete(id); return next; })}
                                 />
                             ))}
-                        </tbody>
-                    </table>
+                            {media && media.length === 0 && (
+                                <TableRow>
+                                    <TableCell colSpan={4} className="text-sm text-neutral-600">No media uploaded yet.</TableCell>
+                                </TableRow>
+                            )}
+                        </TableBody>
+                    </Table>
                 )}
             </div>
 
             {expanded && segQuery.data && (
-                <div>
-                    <h3 className="font-semibold">Segments for media {expanded}</h3>
-                    <ol className="list-decimal pl-6">
-                        {segQuery.data.map(s => (
-                            <li key={s.id} className="py-1">
-                                <span className="text-gray-500 mr-2">[{(s.startMs / 1000).toFixed(2)}–{(s.endMs / 1000).toFixed(2)}]</span>
-                                {s.text}
-                            </li>
-                        ))}
-                    </ol>
+                <div className="border-2 border-black divide-y-2 divide-black bg-white">
+                    <div className="p-2 font-semibold">Segments for media {expanded}</div>
+                    {segQuery.data.length === 0 ? (
+                        <div className="p-2 text-sm text-neutral-600">No segments yet.</div>
+                    ) : (
+                        <ol className="list-decimal p-3 pl-6 space-y-1">
+                            {segQuery.data.map(s => (
+                                <li key={s.id} className="py-1">
+                                    <span className="text-gray-500 mr-2">[{(s.startMs / 1000).toFixed(2)}–{(s.endMs / 1000).toFixed(2)}]</span>
+                                    {s.text}
+                                </li>
+                            ))}
+                        </ol>
+                    )}
                 </div>
             )}
         </div>
