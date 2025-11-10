@@ -1,0 +1,59 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [ whisper ]
+  pull_request:
+    branches: [ whisper ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: qc_dev
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qda_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qc_dev -d qda_dev" \
+          --health-interval 5s \
+          --health-timeout 5s \
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://qc_dev:postgres@localhost:5432/qda_dev
+      TEST_DB_NAME: qda_dev_test
+      WORKER_BASE_URL: http://localhost:5000/api
+      PORT: 5000
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: backend/package.json
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U qc_dev && break
+            sleep 2
+          done
+      - name: Install backend deps
+        working-directory: backend
+        run: npm ci
+      - name: Seed dev DB
+        working-directory: backend
+        run: npm run seed
+      - name: Create test DB
+        run: psql "$DATABASE_URL" -c 'CREATE DATABASE qda_dev_test;' || true
+      - name: Seed test DB
+        working-directory: backend
+        run: npm run seed:test
+      - name: Run tests
+        working-directory: backend
+        run: npm test
