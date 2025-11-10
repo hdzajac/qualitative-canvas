@@ -19,9 +19,9 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U qc_dev -d qda_dev" \
-          --health-interval 5s \
-          --health-timeout 5s \
+          --health-cmd "pg_isready -U qc_dev -d qda_dev"
+          --health-interval 5s
+          --health-timeout 5s
           --health-retries 10
     env:
       DATABASE_URL: postgres://qc_dev:postgres@localhost:5432/qda_dev
@@ -37,6 +37,10 @@ jobs:
           node-version: 18
           cache: 'npm'
           cache-dependency-path: backend/package.json
+      - name: Install Postgres client tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
       - name: Wait for Postgres
         run: |
           for i in {1..30}; do
