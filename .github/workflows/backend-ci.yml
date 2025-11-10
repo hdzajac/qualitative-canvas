@@ -28,7 +28,6 @@ jobs:
       TEST_DB_NAME: qda_dev_test
       WORKER_BASE_URL: http://localhost:5000/api
       PORT: 5000
-      NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
@@ -53,11 +52,17 @@ jobs:
       - name: Seed dev DB
         working-directory: backend
         run: npm run seed
+        env:
+          NODE_ENV: development
       - name: Create test DB
         run: psql "$DATABASE_URL" -c 'CREATE DATABASE qda_dev_test;' || true
       - name: Seed test DB
         working-directory: backend
         run: npm run seed:test
+        env:
+          NODE_ENV: test
       - name: Run tests
         working-directory: backend
         run: npm test
+        env:
+          NODE_ENV: test
