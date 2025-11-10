@@ -95,7 +95,8 @@ export default function DocumentDetail() {
                                 content={file.content}
                                 highlights={docHighlights}
                                 onHighlightCreated={() => refetchHighlights()}
-                                isVtt={/\.vtt$/i.test(file.filename)}
+                                // Treat finalized transcripts (*.transcript.txt) as VTT-like for nicer rendering
+                                isVtt={/\.(vtt|transcript\.txt)$/i.test(file.filename)}
                                 framed={false}
                             />
                         </div>

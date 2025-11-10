@@ -305,7 +305,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
             if (Array.isArray(chunk)) {
               parts.push(...chunk);
             } else {
-              parts.push(chunk);
+              parts.push(<React.Fragment key={`t-${cursor}-${hs}`}>{chunk}</React.Fragment>);
             }
           }
           const highlightedChunk = wrapHighlighted(text.substring(hs, he), hs, he);
@@ -324,7 +324,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         if (Array.isArray(chunk)) {
           parts.push(...chunk);
         } else {
-          parts.push(chunk);
+          parts.push(<React.Fragment key={`t-${cursor}-${bEnd}`}>{chunk}</React.Fragment>);
         }
       }
       if (parts.length === 0) return wrapText(text.substring(bStart, bEnd), bStart, bEnd);
@@ -337,9 +337,11 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       const bEnd = block.end;
       const full = text.substring(bStart, bEnd);
 
-      // Try to match full VTT line with timestamp first
+      // Accept either bracketed "[HH:MM:SS - HH:MM:SS]" format (our finalized transcripts)
+      // or plain "HH:MM:SS [Speaker:] ..." format.
+      const bracket = full.match(/^\[(\d{1,2}:\d{2}:\d{2})\s*-\s*(\d{1,2}:\d{2}:\d{2})\]\s*/);
       const m = full.match(/^(\d{1,2}:\d{2}:\d{2})\s+(?:(.+?):\s+)?/);
-      if (!m) {
+      if (!bracket && !m) {
         // Fallback: no timestamp. Try to detect optional speaker label at start: "Name: speech"
         let speaker = '';
         let speakerStart = -1;
@@ -420,12 +422,25 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         return renderBlockWithHighlights(bStart, bEnd, wrapFallback, wrapFallbackHighlighted);
       }
 
-      const ts = m?.[1] ?? '';
-      const speaker = m?.[2] ?? '';
-      const tsEnd = ts ? ts.length : 0;
-      const speakerStart = m && speaker ? (m[0].indexOf(speaker)) : -1;
-      const speakerEnd = speaker ? speakerStart + speaker.length + 2 /*": "*/ : -1;
-      const speechStart = m ? m[0].length : 0;
+      // Normalize fields depending on which pattern matched
+      let ts = '';
+      let speaker = '';
+      let tsEnd = 0;
+      let speakerStart = -1;
+      let speakerEnd = -1;
+      let speechStart = 0;
+      if (bracket) {
+        ts = bracket[1] || '';
+        tsEnd = bracket[0].length; // include the entire bracket as timestamp region
+        speechStart = bracket[0].length;
+      } else if (m) {
+        ts = m[1] || '';
+        speaker = m[2] || '';
+        tsEnd = ts ? ts.length : 0;
+        speakerStart = m && speaker ? (m[0].indexOf(speaker)) : -1;
+        speakerEnd = speaker ? speakerStart + speaker.length + 2 /*": "*/ : -1;
+        speechStart = m ? m[0].length : 0;
+      }
 
       const wrap = (_chunkText: string, absStart: number, absEnd: number): JSX.Element[] => {
         const relStart = absStart - bStart;

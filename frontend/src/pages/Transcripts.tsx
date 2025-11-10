@@ -138,6 +138,11 @@ function FinalizeButton({ mediaId }: { mediaId: string }) {
             qc.invalidateQueries({ queryKey: ['finalized', mediaId] });
             qc.invalidateQueries({ queryKey: ['media'] });
         },
+        onError: (err: unknown) => {
+            const msg = err instanceof Error ? err.message : 'Failed to finalize';
+            // Show a simple alert; could be replaced with toast if desired
+            alert(`Finalize failed: ${msg}`);
+        }
     });
     return (
         <Button size="sm" variant="outline" disabled={mut.isPending} onClick={() => mut.mutate()}>
