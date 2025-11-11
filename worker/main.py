@@ -31,7 +31,9 @@ WHISPER_MODEL = os.getenv('WHISPER_MODEL', 'small')
 WHISPER_DEVICE = os.getenv('WHISPER_DEVICE', 'cpu')  # cpu | cuda
 WHISPER_COMPUTE_TYPE = os.getenv('WHISPER_COMPUTE_TYPE', 'int8')  # int8 | float16 | float32
 WHISPER_BEAM_SIZE = int(os.getenv('WHISPER_BEAM_SIZE', '1'))
-SIMULATE_WHISPER = os.getenv('SIMULATE_WHISPER', '0') == '1'
+# Explicitly force simulation off unless explicitly set to '1' AND allow override via FORCE_SIM=1 for dev testing
+_sim_env = os.getenv('SIMULATE_WHISPER', '0')
+SIMULATE_WHISPER = (_sim_env == '1') and (os.getenv('FORCE_REAL_WHISPER', '0') != '1')
 DIARIZATION_TOKEN = os.getenv('HUGGING_FACE_HUB_TOKEN')
 AUTO_FALLBACK = os.getenv('WORKER_AUTO_FALLBACK', '1') == '1'
 LOCAL_BACKEND_PORT = os.getenv('LOCAL_BACKEND_PORT', '5002')

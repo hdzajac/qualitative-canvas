@@ -35,7 +35,8 @@ services:
       - WHISPER_MODEL=${WHISPER_MODEL:-small}
       - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
       - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
-      - SIMULATE_WHISPER=${SIMULATE_WHISPER:-1}
+      # Force disable simulation explicitly (ignore any host SIMULATE_WHISPER override)
+      - SIMULATE_WHISPER=0
       - WORKER_AUTO_FALLBACK=0
       - CHUNK_SECONDS=${CHUNK_SECONDS:-0}
       - WHISPER_BEAM_SIZE=${WHISPER_BEAM_SIZE:-1}
