@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from uuid import uuid4
 import tempfile
 import subprocess
+from typing import Optional
 
 WHISPER_AVAILABLE = False
 DIARIZATION_AVAILABLE = False
@@ -41,6 +42,8 @@ WHISPER_BEAM_SIZE = int(os.getenv('WHISPER_BEAM_SIZE', '1'))
 _sim_env = os.getenv('SIMULATE_WHISPER', '0')
 SIMULATE_WHISPER = (_sim_env == '1') and (os.getenv('FORCE_REAL_WHISPER', '0') != '1')
 DIARIZATION_TOKEN = os.getenv('HUGGING_FACE_HUB_TOKEN')
+DIARIZATION_MODEL = os.getenv('DIARIZATION_MODEL', 'pyannote/speaker-diarization-3.1')
+DIARIZATION_MAX_SECONDS = int(os.getenv('DIARIZATION_MAX_SECONDS', '0'))  # 0 disables truncation
 AUTO_FALLBACK = os.getenv('WORKER_AUTO_FALLBACK', '1') == '1'
 LOCAL_BACKEND_PORT = os.getenv('LOCAL_BACKEND_PORT', '5002')
 CHUNK_SECONDS = int(os.getenv('CHUNK_SECONDS', '0'))  # 0 disables chunking
@@ -468,13 +471,67 @@ def run_diarization(base_url: str, media):  # pragma: no cover - heavy
                         pass
     except Exception:
         pass
-    pipeline = Pipeline.from_pretrained('pyannote/speaker-diarization')
+    log_info(f"Loading diarization model: {DIARIZATION_MODEL}")
+    pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL)
     audio_bytes = requests.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
-    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-        tmp.write(audio_bytes)
-        tmp.flush()
-        tmp_path = tmp.name
-    diar = pipeline(tmp_path)
+    # Write original bytes then transcode to 16k mono WAV to ensure readable format
+    src_path = None
+    wav_path = None
+    final_wav_path: Optional[str] = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as src:
+            src.write(audio_bytes)
+            src.flush()
+            src_path = src.name
+        wav_path = src_path + '.wav'
+        try:
+            subprocess.run(['ffmpeg', '-y', '-i', src_path, '-ar', '16000', '-ac', '1', wav_path], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except Exception as e:
+            log_warn(f"ffmpeg conversion for diarization failed: {e}")
+            return
+        # Optionally truncate overly long audio for faster diarization on CPU
+        final_wav_path = wav_path
+        duration_sec = None
+        try:
+            import soundfile as sf  # type: ignore
+            info = sf.info(wav_path)
+            if info.samplerate and info.frames:
+                duration_sec = int(info.frames / info.samplerate)
+        except Exception:
+            duration_sec = None
+        if DIARIZATION_MAX_SECONDS and duration_sec and duration_sec > DIARIZATION_MAX_SECONDS:
+            capped_path = wav_path.replace('.wav', f'.cap{DIARIZATION_MAX_SECONDS}.wav')
+            try:
+                subprocess.run(['ffmpeg', '-y', '-i', wav_path, '-t', str(DIARIZATION_MAX_SECONDS), capped_path], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                final_wav_path = capped_path
+                log_info(f"Diarization: truncated audio from {duration_sec}s to {DIARIZATION_MAX_SECONDS}s")
+            except Exception as e:
+                log_warn(f"ffmpeg truncate failed (continuing with full length): {e}")
+        if duration_sec:
+            log_info(f"Diarization: audio duration ~{duration_sec}s, starting inference…")
+        else:
+            log_info("Diarization: starting inference…")
+        t0 = time.perf_counter()
+        diar = pipeline(final_wav_path or wav_path)
+        t_ms = int((time.perf_counter() - t0) * 1000)
+        log_info(f"Diarization inference done in {t_ms}ms")
+    finally:
+        # Best-effort cleanup
+        try:
+            if src_path and os.path.exists(src_path):
+                os.remove(src_path)
+        except Exception:
+            pass
+        try:
+            if wav_path and os.path.exists(wav_path):
+                os.remove(wav_path)
+        except Exception:
+            pass
+        try:
+            if final_wav_path and final_wav_path != wav_path and os.path.exists(final_wav_path):
+                os.remove(final_wav_path)
+        except Exception:
+            pass
     # Placeholder: future step will map diarization speakers to participants and update segments
     turns = list(diar.itertracks(yield_label=True))
     print(f"Diarization completed: {len(turns)} speaker turns")

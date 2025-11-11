@@ -26,6 +26,9 @@ export default function TranscriptDetail() {
     const projectName = projects.find(p => p.id === projectId)?.name || 'Project';
     const { data: media } = useQuery({ queryKey: ['mediaItem', id], queryFn: () => getMedia(id!), enabled: !!id });
     const { data: job } = useQuery({ queryKey: ['latestJob', id], queryFn: () => getLatestJobForMedia(id!), enabled: !!id && media?.status === 'processing', refetchInterval: media?.status === 'processing' ? 5000 : false });
+    // Light polling fallback: if we have no job yet but status is processing locally (optimistic), start short-lived polling until first job appears
+    const shouldBootstrapPoll = !!id && media?.status === 'processing' && !job;
+    const { data: bootstrapJob } = useQuery({ queryKey: ['latestJobBootstrap', id], queryFn: () => getLatestJobForMedia(id!), enabled: shouldBootstrapPoll, refetchInterval: shouldBootstrapPoll ? 3000 : false });
     const { data: segments = [] } = useQuery({ queryKey: ['segments', id], queryFn: () => listSegments(id!), enabled: !!id });
     const { data: participants = [] } = useQuery({ queryKey: ['participants', id], queryFn: () => listParticipants(id!), enabled: !!id });
     const { data: counts = [] } = useQuery({ queryKey: ['participantCounts', id], queryFn: () => getParticipantSegmentCounts(id!), enabled: !!id });
@@ -81,12 +84,13 @@ export default function TranscriptDetail() {
     let pct: number | undefined;
     // Display string separate from strict status enum to avoid type conflicts
     let statusLabelDisplay: string | undefined = media?.status;
-    if (media?.status === 'processing' && job) {
-        if (job.totalMs && job.processedMs) {
-            pct = Math.min(100, Math.round((job.processedMs / job.totalMs) * 100));
+    const activeJob = job || bootstrapJob;
+    if (media?.status === 'processing' && activeJob) {
+        if (activeJob.totalMs && activeJob.processedMs) {
+            pct = Math.min(100, Math.round((activeJob.processedMs / activeJob.totalMs) * 100));
         }
         statusLabelDisplay = pct != null ? `Processing ${pct}%` : 'Processing…';
-        if (job.etaSeconds != null && job.etaSeconds >= 0) statusLabelDisplay += ` ETA ${formatEta(job.etaSeconds)}`;
+        if (activeJob.etaSeconds != null && activeJob.etaSeconds >= 0) statusLabelDisplay += ` ETA ${formatEta(activeJob.etaSeconds)}`;
     }
     if (media?.status === 'done') {
         statusLabelDisplay = finalized ? 'Done (finalized)' : 'Done';

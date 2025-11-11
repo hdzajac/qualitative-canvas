@@ -2,7 +2,10 @@ requests==2.32.3
 python-dotenv==1.0.1
 faster-whisper==1.0.3
 torch==2.3.1
-numpy>=1.24.0
+# Pin numpy < 2.0 due to removal of uppercase aliases (np.NAN) used by pyannote deps
+numpy==1.26.4
 soundfile>=0.12.1
 pyannote.audio==3.3.1
-huggingface_hub>=0.20.0
+# Pin hub to a version compatible with pyannote that still accepts use_auth_token in hf_hub_download
+huggingface_hub==0.19.4
+matplotlib>=3.8,<3.10

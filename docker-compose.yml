@@ -31,6 +31,10 @@ services:
     build: ./worker
     environment:
       - BASE_URL=${WORKER_BASE_URL:-http://backend:5000/api}
+      # Optional: comma-separated list of backends to try in order (e.g., container + local host)
+      - WORKER_BASE_URLS=${WORKER_BASE_URLS}
+      # Port used for automatic host fallback checks (when enabled in code)
+      - LOCAL_BACKEND_PORT=${LOCAL_BACKEND_PORT:-5001}
       - POLL_INTERVAL_SEC=3
       - WHISPER_MODEL=${WHISPER_MODEL:-small}
       - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
@@ -44,6 +48,10 @@ services:
       - AUTO_DIARIZATION_ASSIGN=${AUTO_DIARIZATION_ASSIGN:-0}
       # Required for pyannote diarization; set this in your environment before compose up
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      # Override to select a specific pyannote diarization model (defaults to a 3.x compatible snapshot)
+      - DIARIZATION_MODEL=${DIARIZATION_MODEL:-pyannote/speaker-diarization-3.1}
+      # Optionally cap diarization length in seconds to avoid very long CPU runs (0 disables)
+      - DIARIZATION_MAX_SECONDS=${DIARIZATION_MAX_SECONDS:-0}
     depends_on:
       db-dev:
         condition: service_healthy

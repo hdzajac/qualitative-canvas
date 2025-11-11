@@ -272,6 +272,8 @@ export default function Transcripts() {
                 next.add(job.mediaFileId);
                 return next;
             });
+            // Ensure detail view reflects processing immediately
+            qc.setQueryData<MediaFile | undefined>(['mediaItem', job.mediaFileId], (prev) => prev ? { ...prev, status: 'processing' as const } : prev);
             qc.invalidateQueries({ queryKey: ['media', selectedProjectId] });
         },
         onSettled: () => setTranscribingId(null),
