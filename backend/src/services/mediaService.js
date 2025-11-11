@@ -41,10 +41,13 @@ export default function mediaService(pool) {
       if (storagePath) {
         try {
           const fs = await import('fs/promises');
-          await fs.unlink(storagePath).catch(() => {});
+          await fs.unlink(storagePath);
+          console.log('[media] Unlinked file', storagePath);
         } catch (e) {
-          console.error('Failed to unlink media file', e);
+          console.error('[media] Failed to unlink media file', storagePath, e);
         }
+      } else {
+        console.warn('[media] No storage path returned for media delete id=', id);
       }
       return true;
     },

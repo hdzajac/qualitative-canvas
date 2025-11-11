@@ -99,8 +99,9 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onSto
             <TableCell className="font-medium">{m.originalFilename}</TableCell>
             <TableCell className="w-[320px]">
                 <div className="flex flex-col gap-1">
-                    {pct != null && (
-                        <Progress value={pct} />
+                    {/* Always show a progress bar placeholder while processing */}
+                    {m.status === 'processing' && (
+                        pct != null ? <Progress value={pct} /> : <Progress value={undefined} />
                     )}
                     <div className="text-xs text-neutral-700 truncate">{progressDisplay}{m.errorMessage ? ` (${m.errorMessage})` : ''}</div>
                 </div>
@@ -110,12 +111,16 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onSto
                 <Button size="sm" variant="outline" onClick={() => onTranscribe(m.id)} disabled={m.status === 'processing' || transcribingId === m.id}>
                     {transcribingId === m.id ? 'Starting…' : 'Transcribe'}
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => navigate(`/transcripts/${m.id}`)}>
-                    View
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => onToggleExpand(m.id)}>
-                    {expanded === m.id ? 'Hide segments' : 'Show segments'}
-                </Button>
+                {m.status === 'done' && (
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/transcripts/${m.id}`)}>
+                        View
+                    </Button>
+                )}
+                {m.status === 'done' && (
+                    <Button size="sm" variant="outline" onClick={() => onToggleExpand(m.id)}>
+                        {expanded === m.id ? 'Hide segments' : 'Show segments'}
+                    </Button>
+                )}
                 {m.status === 'done' && !finalized && (
                     <FinalizeButton mediaId={m.id} />
                 )}
