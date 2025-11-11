@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { listSegments, getMedia, getFinalizedTranscript, finalizeTranscript, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, assignParticipantToSegments, mergeParticipants } from '@/services/api';
+import { listSegments, getMedia, getFinalizedTranscript, finalizeTranscript, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants } from '@/services/api';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -32,21 +32,7 @@ export default function TranscriptDetail() {
     const { data: segments = [] } = useQuery({ queryKey: ['segments', id], queryFn: () => listSegments(id!), enabled: !!id });
     const { data: participants = [] } = useQuery({ queryKey: ['participants', id], queryFn: () => listParticipants(id!), enabled: !!id });
     const { data: counts = [] } = useQuery({ queryKey: ['participantCounts', id], queryFn: () => getParticipantSegmentCounts(id!), enabled: !!id });
-    const [selectedSegs, setSelectedSegs] = useState<Set<string>>(() => new Set());
-    const toggleSeg = (segId: string) => setSelectedSegs(prev => { const n = new Set(prev); if (n.has(segId)) { n.delete(segId); } else { n.add(segId); } return n; });
-    const clearSel = () => setSelectedSegs(new Set());
-    const [assignTarget, setAssignTarget] = useState<string | 'none'>('none');
-    const assignSelectedMut = useMutation({
-        mutationFn: () => assignParticipantToSegments(id!, { participantId: assignTarget === 'none' ? null : assignTarget, segmentIds: Array.from(selectedSegs) }),
-        onSuccess: () => { clearSel(); qc.invalidateQueries({ queryKey: ['segments', id] }); qc.invalidateQueries({ queryKey: ['participantCounts', id] }); }
-    });
-    const [rangeStart, setRangeStart] = useState('');
-    const [rangeEnd, setRangeEnd] = useState('');
-    const [rangeTarget, setRangeTarget] = useState<string | 'none'>('none');
-    const assignRangeMut = useMutation({
-        mutationFn: () => assignParticipantToSegments(id!, { participantId: rangeTarget === 'none' ? null : rangeTarget, startMs: hmsToMs(rangeStart), endMs: hmsToMs(rangeEnd) }),
-        onSuccess: () => { qc.invalidateQueries({ queryKey: ['segments', id] }); qc.invalidateQueries({ queryKey: ['participantCounts', id] }); }
-    });
+    // Bulk and range assignment removed per request. Segment list is now read-only aside from participant merge operations.
     const [newPart, setNewPart] = useState({ name: '' });
     const createPartMut = useMutation({
         mutationFn: () => createParticipant(id!, newPart),
@@ -138,31 +124,11 @@ export default function TranscriptDetail() {
                         <div className="text-[11px] text-neutral-500">Uploaded {new Date(media.createdAt).toLocaleString()}</div>
                     </div>
                     <div className="p-3 space-y-3">
-                        <div className="flex items-center gap-2 bg-neutral-50 p-2 border border-black">
-                            <span className="font-semibold">Bulk assign</span>
-                            <select className="border px-2 py-1" value={assignTarget} onChange={(e) => setAssignTarget(e.target.value as 'none' | string)}>
-                                <option value="none">Unassigned</option>
-                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                            </select>
-                            <Button size="sm" disabled={selectedSegs.size === 0 || assignSelectedMut.isPending} onClick={() => assignSelectedMut.mutate()}>Assign selected ({selectedSegs.size})</Button>
-                            <Button size="sm" variant="ghost" onClick={clearSel}>Clear</Button>
-                        </div>
-                        <div className="flex items-center gap-2 bg-neutral-50 p-2 border border-black">
-                            <span className="font-semibold">Assign by range</span>
-                            <input className="border px-2 py-1 w-28" placeholder="h:mm:ss" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} />
-                            <span>-</span>
-                            <input className="border px-2 py-1 w-28" placeholder="h:mm:ss" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} />
-                            <select className="border px-2 py-1" value={rangeTarget} onChange={(e) => setRangeTarget(e.target.value as 'none' | string)}>
-                                <option value="none">Unassigned</option>
-                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                            </select>
-                            <Button size="sm" disabled={!rangeStart || !rangeEnd || assignRangeMut.isPending} onClick={() => assignRangeMut.mutate()}>Assign range</Button>
-                        </div>
+                        {/* Bulk assign and range assign removed */}
                         {segments.length > 0 ? (
                             <ol className="list-decimal pl-6 space-y-1">
                                 {segments.map(s => (
                                     <li key={s.id} className="text-sm">
-                                        <input className="mr-2" type="checkbox" checked={selectedSegs.has(s.id)} onChange={() => toggleSeg(s.id)} />
                                         <span className="text-gray-500 mr-2">[{msToHms(s.startMs)}–{msToHms(s.endMs)}]</span>
                                         {s.participantName ? <span className="text-blue-700 mr-2">({s.participantName})</span> : null}
                                         {s.text}
