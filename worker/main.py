@@ -39,6 +39,7 @@ AUTO_FALLBACK = os.getenv('WORKER_AUTO_FALLBACK', '1') == '1'
 LOCAL_BACKEND_PORT = os.getenv('LOCAL_BACKEND_PORT', '5002')
 CHUNK_SECONDS = int(os.getenv('CHUNK_SECONDS', '0'))  # 0 disables chunking
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
+AUTO_DIARIZATION_ASSIGN = os.getenv('AUTO_DIARIZATION_ASSIGN', '0') == '1'
 
 _LEVELS = {'DEBUG': 10, 'INFO': 20, 'WARN': 30, 'ERROR': 40}
 _LV = _LEVELS.get(LOG_LEVEL, 20)
@@ -448,7 +449,55 @@ def run_diarization(base_url: str, media):  # pragma: no cover - heavy
         tmp_path = tmp.name
     diar = pipeline(tmp_path)
     # Placeholder: future step will map diarization speakers to participants and update segments
-    print(f"Diarization completed: {len(list(diar.itertracks(yield_label=True)))} speaker turns")
+    turns = list(diar.itertracks(yield_label=True))
+    print(f"Diarization completed: {len(turns)} speaker turns")
+    if not AUTO_DIARIZATION_ASSIGN:
+        return
+    try:
+        # Fetch existing participants
+        r = requests.get(f"{base_url}/media/{media['id']}/participants", timeout=20)
+        r.raise_for_status()
+        participants = r.json() or []
+        # Determine first-seen order of labels for stable numbering
+        first_seen = {}
+        ordered_labels = []
+        for (_seg, _track, label) in turns:
+            if label not in first_seen:
+                first_seen[label] = len(ordered_labels)
+                ordered_labels.append(label)
+        # Map labels to participant IDs; create if missing, name as "Participant N" but keep canonicalKey=original label
+        label_to_part = {}
+        for label in ordered_labels:
+            # Prefer existing by canonicalKey; if renamed by user, keep their name
+            existing = next((p for p in participants if p.get('canonicalKey') == label), None)
+            if not existing:
+                display_index = (first_seen.get(label, len(label_to_part)) or 0) + 1
+                display_name = f"Participant {display_index}"
+                cr = requests.post(
+                    f"{base_url}/media/{media['id']}/participants",
+                    json={"name": display_name, "canonicalKey": label},
+                    timeout=20,
+                )
+                cr.raise_for_status()
+                existing = cr.json()
+                participants.append(existing)
+            label_to_part[label] = existing['id']
+        # Assign by each diarized segment (turn)
+        for (segment, _track, label) in turns:
+            pid = label_to_part.get(label)
+            if not pid:
+                continue
+            start_ms = int(segment.start * 1000)
+            end_ms = int(segment.end * 1000)
+            try:
+                ar = requests.post(f"{base_url}/media/{media['id']}/segments/assign-participant", json={"participantId": pid, "startMs": start_ms, "endMs": end_ms}, timeout=20)
+                if not ar.ok:
+                    log_warn(f"assign-participant {ar.status_code} body={ar.text[:200]}")
+            except Exception as e:
+                log_warn(f"assign-participant error: {e}")
+        print(f"Auto-assigned diarization labels to segments for media {media['id']}")
+    except Exception as e:
+        log_warn(f"Diarization auto-assign failed: {e}")
 
 if __name__ == '__main__':
     main()

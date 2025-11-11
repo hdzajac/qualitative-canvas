@@ -66,3 +66,42 @@ export async function replaceSegmentsBulk(pool, mediaFileId, segments) {
   const r = await pool.query(q, params);
   return r.rows.map(mapSegment);
 }
+
+/**
+ * Bulk-assign a participant to segments by explicit IDs and/or by a time range intersection.
+ * If participantId is null, clears the participant assignment.
+ * Returns number of updated rows.
+ */
+export async function assignParticipantToSegments(pool, mediaFileId, { participantId, segmentIds, startMs, endMs }) {
+  const clauses = ['media_file_id = $1'];
+  const params = [mediaFileId];
+  let p = 2;
+  if (Array.isArray(segmentIds) && segmentIds.length > 0) {
+    const inList = segmentIds.map((_id, i) => `$${p + i}`).join(',');
+    clauses.push(`id IN (${inList})`);
+    params.push(...segmentIds);
+    p += segmentIds.length;
+  }
+  if (typeof startMs === 'number' || typeof endMs === 'number') {
+    // Overlap condition: (start_ms < endMs) AND (end_ms > startMs). Missing bounds treated as open interval.
+    if (typeof endMs === 'number') {
+      clauses.push(`start_ms < $${p++}`);
+      params.push(endMs);
+    }
+    if (typeof startMs === 'number') {
+      clauses.push(`end_ms > $${p++}`);
+      params.push(startMs);
+    }
+  }
+  if (clauses.length === 1) {
+    // No target selector provided other than media id
+    return { updated: 0 };
+  }
+  const r = await pool.query(
+    `UPDATE transcript_segments
+     SET participant_id = $${p}
+     WHERE ${clauses.join(' AND ')}`,
+    [...params, participantId ?? null]
+  );
+  return { updated: r.rowCount };
+}

@@ -41,6 +41,7 @@ services:
       - CHUNK_SECONDS=${CHUNK_SECONDS:-0}
       - WHISPER_BEAM_SIZE=${WHISPER_BEAM_SIZE:-1}
       - LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
+      - AUTO_DIARIZATION_ASSIGN=${AUTO_DIARIZATION_ASSIGN:-0}
     depends_on:
       db-dev:
         condition: service_healthy

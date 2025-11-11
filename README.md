@@ -240,6 +240,30 @@ Tracking: See README TODO section or project board for implementation progress.
   - npm run test:watch
   - Includes unit tests for canvas utilities and geometry helpers.
 
+## Shared domain types (frontend)
+
+To keep type definitions tidy and aligned with backend persistence, shared domain types are modularized under `frontend/src/types/`:
+
+- `core.ts` — Size, CardStyle
+- `projects.ts` — Project
+- `files.ts` — UploadedFile
+- `codes.ts` — Code (aka Highlight)
+- `themes.ts` — Theme
+- `insights.ts` — Insight
+- `annotations.ts` — Annotation
+- `media.ts` — MediaFile
+- `segments.ts` — TranscriptSegment
+- `transcriptionJobs.ts` — TranscriptionJob
+- `participants.ts` — Participant
+
+A barrel file `frontend/src/types/index.ts` re-exports everything so existing imports continue to work. In your code, import from the barrel:
+
+```ts
+import type { MediaFile, TranscriptSegment, Participant, FinalizedTranscriptMapping } from '@/types';
+```
+
+This avoids a single massive types file and keeps each domain cohesive. The finalized transcript mapping type is also exported from the barrel.
+
 ## Frontend canvas architecture
 Modular components under `frontend/src/components/canvas/`:
 - CanvasToolbarLeft: left-side tools (select, pan, text) and Fit action

@@ -43,3 +43,35 @@ export async function updateParticipant(pool, id, { name, canonicalKey, color })
 export async function deleteParticipant(pool, id) {
   await pool.query('DELETE FROM participants WHERE id = $1', [id]);
 }
+
+export async function listParticipantSegmentCounts(pool, mediaFileId) {
+  const r = await pool.query(
+    `SELECT ts.participant_id AS participant_id,
+            COUNT(*)::int AS count,
+            p.name AS name,
+            p.color AS color
+     FROM transcript_segments ts
+     LEFT JOIN participants p ON p.id = ts.participant_id
+     WHERE ts.media_file_id = $1
+     GROUP BY ts.participant_id, p.name, p.color
+     ORDER BY count DESC NULLS LAST`,
+    [mediaFileId]
+  );
+  return r.rows.map((row) => ({
+    participantId: row.participant_id || null,
+    name: row.name || null,
+    color: row.color || null,
+    count: row.count,
+  }));
+}
+
+export async function mergeParticipants(pool, mediaFileId, sourceId, targetId) {
+  // Reassign segments, then delete source participant
+  await pool.query(
+    `UPDATE transcript_segments SET participant_id = $3
+     WHERE media_file_id = $1 AND participant_id = $2`,
+    [mediaFileId, sourceId, targetId]
+  );
+  await pool.query('DELETE FROM participants WHERE id = $1 AND media_file_id = $2', [sourceId, mediaFileId]);
+  return { ok: true };
+}

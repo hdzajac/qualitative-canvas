@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import asyncHandler from 'express-async-handler';
 import { z } from 'zod';
-import { listSegmentsForMedia, getSegment, updateSegment, replaceSegmentsBulk, countSegmentsForMedia } from '../dao/segmentsDao.js';
+import { listSegmentsForMedia, getSegment, updateSegment, replaceSegmentsBulk, countSegmentsForMedia, assignParticipantToSegments } from '../dao/segmentsDao.js';
 import { getMedia } from '../dao/mediaDao.js';
 import { randomUUID } from 'crypto';
 
@@ -72,6 +72,30 @@ export default function segmentsRoutes(pool) {
     } catch (e) {
       console.error('[segments bulk] DB error', e.message, e.stack?.split('\n').slice(0,5).join('\n'));
       return res.status(500).json({ error: 'Bulk insert failed' });
+    }
+  }));
+
+  // Bulk assign participant to segments by IDs and/or time range
+  router.post('/assign-participant', asyncHandler(async (req, res) => {
+    const mediaId = req.params.mediaId;
+    const schema = z.object({
+      participantId: z.string().uuid().nullable(), // null clears assignment
+      segmentIds: z.array(z.string().uuid()).optional(),
+      startMs: z.number().int().min(0).optional(),
+      endMs: z.number().int().min(0).optional(),
+    }).refine((v) => (v.segmentIds && v.segmentIds.length) || v.startMs != null || v.endMs != null, {
+      message: 'Provide segmentIds or a time range to target segments',
+    });
+    const parsed = schema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const media = await getMedia(pool, mediaId);
+    if (!media) return res.status(404).json({ error: 'Media not found' });
+    try {
+      const out = await assignParticipantToSegments(pool, mediaId, parsed.data);
+      res.json({ updated: out.updated });
+    } catch (e) {
+      console.error('[segments assign-participant] error', e);
+      res.status(500).json({ error: 'Assignment failed' });
     }
   }));
 

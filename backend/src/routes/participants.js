@@ -2,7 +2,7 @@ import { Router } from 'express';
 import asyncHandler from 'express-async-handler';
 import { z } from 'zod';
 import { getMedia } from '../dao/mediaDao.js';
-import { listParticipants, createParticipant, updateParticipant, deleteParticipant } from '../dao/participantsDao.js';
+import { listParticipants, createParticipant, updateParticipant, deleteParticipant, listParticipantSegmentCounts, mergeParticipants } from '../dao/participantsDao.js';
 
 export default function participantsRoutes(pool) {
   const router = Router({ mergeParams: true });
@@ -14,6 +14,15 @@ export default function participantsRoutes(pool) {
     if (!media) return res.status(404).json({ error: 'Media not found' });
     const list = await listParticipants(pool, mediaId);
     res.json(list);
+  }));
+
+  // Segment counts per participant (includes null bucket for unassigned)
+  router.get('/segment-counts', asyncHandler(async (req, res) => {
+    const mediaId = req.params.mediaId;
+    const media = await getMedia(pool, mediaId);
+    if (!media) return res.status(404).json({ error: 'Media not found' });
+    const counts = await listParticipantSegmentCounts(pool, mediaId);
+    res.json(counts);
   }));
 
   // Create participant
@@ -42,6 +51,19 @@ export default function participantsRoutes(pool) {
   router.delete('/:participantId', asyncHandler(async (req, res) => {
     await deleteParticipant(pool, req.params.participantId);
     res.status(204).send();
+  }));
+
+  // Merge participants: move segments from source to target and delete source
+  router.post('/merge', asyncHandler(async (req, res) => {
+    const schema = z.object({ sourceId: z.string().uuid(), targetId: z.string().uuid() });
+    const parsed = schema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const mediaId = req.params.mediaId;
+    const media = await getMedia(pool, mediaId);
+    if (!media) return res.status(404).json({ error: 'Media not found' });
+    if (parsed.data.sourceId === parsed.data.targetId) return res.status(400).json({ error: 'Source and target cannot be the same' });
+    await mergeParticipants(pool, mediaId, parsed.data.sourceId, parsed.data.targetId);
+    res.json({ ok: true });
   }));
 
   return router;

@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listSegments, getMedia, getFinalizedTranscript, finalizeTranscript } from '@/services/api';
+import { useState } from 'react';
+import { listSegments, getMedia, getFinalizedTranscript, finalizeTranscript, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, assignParticipantToSegments, mergeParticipants } from '@/services/api';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -25,7 +26,50 @@ export default function TranscriptDetail() {
     const projectName = projects.find(p => p.id === projectId)?.name || 'Project';
     const { data: media } = useQuery({ queryKey: ['mediaItem', id], queryFn: () => getMedia(id!), enabled: !!id });
     const { data: job } = useQuery({ queryKey: ['latestJob', id], queryFn: () => getLatestJobForMedia(id!), enabled: !!id && media?.status === 'processing', refetchInterval: media?.status === 'processing' ? 5000 : false });
-    const { data: segments } = useQuery({ queryKey: ['segments', id], queryFn: () => listSegments(id!), enabled: !!id });
+    const { data: segments = [] } = useQuery({ queryKey: ['segments', id], queryFn: () => listSegments(id!), enabled: !!id });
+    const { data: participants = [] } = useQuery({ queryKey: ['participants', id], queryFn: () => listParticipants(id!), enabled: !!id });
+    const { data: counts = [] } = useQuery({ queryKey: ['participantCounts', id], queryFn: () => getParticipantSegmentCounts(id!), enabled: !!id });
+    const [selectedSegs, setSelectedSegs] = useState<Set<string>>(() => new Set());
+    const toggleSeg = (segId: string) => setSelectedSegs(prev => { const n = new Set(prev); if (n.has(segId)) { n.delete(segId); } else { n.add(segId); } return n; });
+    const clearSel = () => setSelectedSegs(new Set());
+    const [assignTarget, setAssignTarget] = useState<string | 'none'>('none');
+    const assignSelectedMut = useMutation({
+        mutationFn: () => assignParticipantToSegments(id!, { participantId: assignTarget === 'none' ? null : assignTarget, segmentIds: Array.from(selectedSegs) }),
+        onSuccess: () => { clearSel(); qc.invalidateQueries({ queryKey: ['segments', id] }); qc.invalidateQueries({ queryKey: ['participantCounts', id] }); }
+    });
+    const [rangeStart, setRangeStart] = useState('');
+    const [rangeEnd, setRangeEnd] = useState('');
+    const [rangeTarget, setRangeTarget] = useState<string | 'none'>('none');
+    const assignRangeMut = useMutation({
+        mutationFn: () => assignParticipantToSegments(id!, { participantId: rangeTarget === 'none' ? null : rangeTarget, startMs: hmsToMs(rangeStart), endMs: hmsToMs(rangeEnd) }),
+        onSuccess: () => { qc.invalidateQueries({ queryKey: ['segments', id] }); qc.invalidateQueries({ queryKey: ['participantCounts', id] }); }
+    });
+    const [newPart, setNewPart] = useState({ name: '' });
+    const createPartMut = useMutation({
+        mutationFn: () => createParticipant(id!, newPart),
+        onSuccess: () => { setNewPart({ name: '' }); qc.invalidateQueries({ queryKey: ['participants', id] }); },
+    });
+    const updatePartMut = useMutation({
+        mutationFn: ({ partId, name }: { partId: string; name: string }) => updateParticipant(id!, partId, { name }),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['participants', id] }),
+    });
+    const deletePartMut = useMutation({
+        mutationFn: (partId: string) => deleteParticipantApi(id!, partId),
+        onSuccess: () => { qc.invalidateQueries({ queryKey: ['participants', id] }); qc.invalidateQueries({ queryKey: ['participantCounts', id] }); },
+    });
+    // Merge participants
+    const [mergeSource, setMergeSource] = useState<string>('');
+    const [mergeTarget, setMergeTarget] = useState<string>('');
+    const mergeMut = useMutation({
+        mutationFn: () => mergeParticipants(id!, mergeSource, mergeTarget),
+        onSuccess: () => {
+            setMergeSource('');
+            setMergeTarget('');
+            qc.invalidateQueries({ queryKey: ['participants', id] });
+            qc.invalidateQueries({ queryKey: ['participantCounts', id] });
+            qc.invalidateQueries({ queryKey: ['segments', id] });
+        },
+    });
     const { data: finalized } = useQuery({ queryKey: ['finalized', id], queryFn: () => getFinalizedTranscript(id!), enabled: !!id && media?.status === 'done' });
     const finalizeMut = useMutation({
         mutationFn: () => finalizeTranscript(id!),
@@ -89,12 +133,34 @@ export default function TranscriptDetail() {
                         </div>
                         <div className="text-[11px] text-neutral-500">Uploaded {new Date(media.createdAt).toLocaleString()}</div>
                     </div>
-                    <div className="p-3">
-                        {segments && segments.length > 0 ? (
+                    <div className="p-3 space-y-3">
+                        <div className="flex items-center gap-2 bg-neutral-50 p-2 border border-black">
+                            <span className="font-semibold">Bulk assign</span>
+                            <select className="border px-2 py-1" value={assignTarget} onChange={(e) => setAssignTarget(e.target.value as 'none' | string)}>
+                                <option value="none">Unassigned</option>
+                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                            <Button size="sm" disabled={selectedSegs.size === 0 || assignSelectedMut.isPending} onClick={() => assignSelectedMut.mutate()}>Assign selected ({selectedSegs.size})</Button>
+                            <Button size="sm" variant="ghost" onClick={clearSel}>Clear</Button>
+                        </div>
+                        <div className="flex items-center gap-2 bg-neutral-50 p-2 border border-black">
+                            <span className="font-semibold">Assign by range</span>
+                            <input className="border px-2 py-1 w-28" placeholder="h:mm:ss" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} />
+                            <span>-</span>
+                            <input className="border px-2 py-1 w-28" placeholder="h:mm:ss" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} />
+                            <select className="border px-2 py-1" value={rangeTarget} onChange={(e) => setRangeTarget(e.target.value as 'none' | string)}>
+                                <option value="none">Unassigned</option>
+                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                            <Button size="sm" disabled={!rangeStart || !rangeEnd || assignRangeMut.isPending} onClick={() => assignRangeMut.mutate()}>Assign range</Button>
+                        </div>
+                        {segments.length > 0 ? (
                             <ol className="list-decimal pl-6 space-y-1">
                                 {segments.map(s => (
                                     <li key={s.id} className="text-sm">
-                                        <span className="text-gray-500 mr-2">[{(s.startMs / 1000).toFixed(2)}–{(s.endMs / 1000).toFixed(2)}]</span>
+                                        <input className="mr-2" type="checkbox" checked={selectedSegs.has(s.id)} onChange={() => toggleSeg(s.id)} />
+                                        <span className="text-gray-500 mr-2">[{msToHms(s.startMs)}–{msToHms(s.endMs)}]</span>
+                                        {s.participantName ? <span className="text-blue-700 mr-2">({s.participantName})</span> : null}
                                         {s.text}
                                     </li>
                                 ))}
@@ -102,6 +168,50 @@ export default function TranscriptDetail() {
                         ) : (
                             <div className="text-sm text-neutral-600">{media.status === 'processing' ? 'Transcription in progress… segments will appear here.' : 'No segments.'}</div>
                         )}
+                        <div className="border-t border-black pt-3">
+                            <div className="font-semibold mb-2">Participants</div>
+                            <div className="grid md:grid-cols-2 gap-3">
+                                <div>
+                                    <div className="text-xs text-neutral-600 mb-1">List</div>
+                                    <ul className="space-y-1">
+                                        {participants.map(p => (
+                                            <li key={p.id} className="flex items-center gap-2">
+                                                <input className="border px-1 py-0.5" defaultValue={p.name} onBlur={(e) => e.target.value && updatePartMut.mutate({ partId: p.id, name: e.target.value })} />
+                                                <span className="text-xs text-neutral-600">({counts.find(c => c.participantId === p.id)?.count ?? 0})</span>
+                                                <Button size="sm" variant="ghost" onClick={() => deletePartMut.mutate(p.id)}>Delete</Button>
+                                            </li>
+                                        ))}
+                                        {participants.length === 0 && <li className="text-sm text-neutral-600">No participants yet.</li>}
+                                    </ul>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-neutral-600 mb-1">Create</div>
+                                    <div className="flex items-center gap-2">
+                                        <input className="border px-2 py-1" placeholder="Name" value={newPart.name} onChange={(e) => setNewPart({ name: e.target.value })} />
+                                        <Button size="sm" disabled={!newPart.name || createPartMut.isPending} onClick={() => createPartMut.mutate()}>Add</Button>
+                                    </div>
+                                    <div className="mt-4">
+                                        <div className="text-xs text-neutral-600 mb-1">Merge participants</div>
+                                        <div className="flex items-center gap-2">
+                                            <select className="border px-2 py-1" value={mergeSource} onChange={(e) => setMergeSource(e.target.value)}>
+                                                <option value="">Source…</option>
+                                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                            </select>
+                                            <span className="text-xs text-neutral-600">into</span>
+                                            <select className="border px-2 py-1" value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
+                                                <option value="">Target…</option>
+                                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                            </select>
+                                            <Button size="sm" disabled={!mergeSource || !mergeTarget || mergeSource === mergeTarget || mergeMut.isPending} onClick={() => mergeMut.mutate()}>
+                                                {mergeMut.isPending ? 'Merging…' : 'Merge'}
+                                            </Button>
+                                        </div>
+                                        <div className="text-[11px] text-neutral-500 mt-1">Moves all segments from source to target and deletes the source participant.</div>
+                                    </div>
+                                    <div className="mt-3 text-xs text-neutral-600">Counts: {counts.map(c => (<span key={c.participantId ?? 'none'} className="mr-2">{c.name || 'Unassigned'}: {c.count}</span>))}</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             ) : (
@@ -109,4 +219,25 @@ export default function TranscriptDetail() {
             )}
         </div>
     );
+}
+
+function msToHms(ms?: number) {
+    if (ms == null) return '0:00:00';
+    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const mm = String(m).padStart(2, '0');
+    const ss = String(s).padStart(2, '0');
+    return `${h}:${mm}:${ss}`;
+}
+
+function hmsToMs(hms: string): number | undefined {
+    const m = hms.trim().match(/^(\d+):(\d{1,2}):(\d{1,2})$/);
+    if (!m) return undefined;
+    const h = parseInt(m[1], 10);
+    const mm = parseInt(m[2], 10);
+    const ss = parseInt(m[3], 10);
+    if (Number.isNaN(h) || Number.isNaN(mm) || Number.isNaN(ss)) return undefined;
+    return ((h * 3600) + (mm * 60) + ss) * 1000;
 }

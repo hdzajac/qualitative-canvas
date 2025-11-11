@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listMedia, uploadMedia, createTranscriptionJob, listSegments, getLatestJobForMedia, deleteMedia as deleteMediaApi, getFinalizedTranscript, finalizeTranscript, getSegmentCount, resetTranscription } from '@/services/api';
+import { listMedia, uploadMedia, createTranscriptionJob, listSegments, getLatestJobForMedia, deleteMedia as deleteMediaApi, getFinalizedTranscript, finalizeTranscript, getSegmentCount, resetTranscription, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, assignParticipantToSegments } from '@/services/api';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { Button } from '@/components/ui/button';
 import { useMemo, useState } from 'react';
@@ -18,7 +18,7 @@ function formatEta(seconds?: number) {
     return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
 }
 
-import type { MediaFile, TranscriptionJob } from '@/types';
+import type { MediaFile, TranscriptionJob, Participant } from '@/types';
 
 interface MediaRowProps { m: MediaFile; expanded: string | null; onToggleExpand: (id: string) => void; onTranscribe: (id: string) => void; shouldPoll: boolean; disabled?: boolean; onStopPolling: (id: string) => void; transcribingId?: string | null }
 
@@ -124,11 +124,6 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onSto
                         View
                     </Button>
                 )}
-                {m.status === 'done' && (
-                    <Button size="sm" variant="outline" onClick={() => onToggleExpand(m.id)}>
-                        {expanded === m.id ? 'Hide segments' : 'Show segments'}
-                    </Button>
-                )}
                 {m.status === 'done' && !finalized && segCount > 0 && (
                     <FinalizeButton mediaId={m.id} />
                 )}
@@ -211,6 +206,51 @@ export default function Transcripts() {
         queryKey: ['segments', expanded],
         queryFn: () => expanded ? listSegments(expanded) : Promise.resolve([]),
         enabled: Boolean(expanded),
+    });
+    const participantsQuery = useQuery({
+        queryKey: ['participants', expanded],
+        queryFn: () => expanded ? listParticipants(expanded) : Promise.resolve([] as Participant[]),
+        enabled: Boolean(expanded),
+    });
+    const countsQuery = useQuery({
+        queryKey: ['participantCounts', expanded],
+        queryFn: () => expanded ? getParticipantSegmentCounts(expanded) : Promise.resolve([] as Array<{ participantId: string | null; name: string | null; color: string | null; count: number }>),
+        enabled: Boolean(expanded),
+    });
+
+    const [selectedSegs, setSelectedSegs] = useState<Set<string>>(() => new Set());
+    const toggleSeg = (id: string) => setSelectedSegs(prev => { const n = new Set(prev); if (n.has(id)) { n.delete(id); } else { n.add(id); } return n; });
+    const clearSelection = () => setSelectedSegs(new Set());
+
+    const [newPart, setNewPart] = useState<{ name: string; canonicalKey?: string; color?: string }>({ name: '' });
+    const createPartMut = useMutation({
+        mutationFn: (data: { name: string; canonicalKey?: string; color?: string }) => createParticipant(expanded!, data),
+        onSuccess: () => { setNewPart({ name: '' }); clearSelection(); },
+        onSettled: () => { participantsQuery.refetch(); countsQuery.refetch(); }
+    });
+    const updatePartMut = useMutation({
+        mutationFn: ({ id, data }: { id: string; data: Partial<{ name: string; canonicalKey: string; color: string }> }) => updateParticipant(expanded!, id, data),
+        onSettled: () => { participantsQuery.refetch(); countsQuery.refetch(); }
+    });
+    const deletePartMut = useMutation({
+        mutationFn: (id: string) => deleteParticipantApi(expanded!, id),
+        onSettled: () => { participantsQuery.refetch(); countsQuery.refetch(); }
+    });
+
+    const [assignTarget, setAssignTarget] = useState<string | 'none'>('none');
+    const assignSelectedMut = useMutation({
+        mutationFn: () => assignParticipantToSegments(expanded!, { participantId: assignTarget === 'none' ? null : assignTarget, segmentIds: Array.from(selectedSegs) }),
+        onSuccess: () => clearSelection(),
+        onSettled: () => { segQuery.refetch(); countsQuery.refetch(); }
+    });
+
+    // Assign by time-range state + mutation
+    const [rangeStart, setRangeStart] = useState('');
+    const [rangeEnd, setRangeEnd] = useState('');
+    const [rangeTarget, setRangeTarget] = useState<string | 'none'>('none');
+    const assignRangeMut = useMutation({
+        mutationFn: () => assignParticipantToSegments(expanded!, { participantId: rangeTarget === 'none' ? null : rangeTarget, startMs: hmsToMs(rangeStart), endMs: hmsToMs(rangeEnd) }),
+        onSettled: () => { segQuery.refetch(); countsQuery.refetch(); }
     });
 
     const transcribeMut = useMutation({
@@ -305,24 +345,7 @@ export default function Transcripts() {
                 )}
             </div>
 
-            {expanded && segQuery.data && (
-                <div className="border-2 border-black divide-y-2 divide-black bg-white">
-                    <div className="p-2 font-semibold">Segments for media {expanded}</div>
-                    {segQuery.data.length === 0 ? (
-                        <div className="p-2 text-sm text-neutral-600">No segments yet.</div>
-                    ) : (
-                        <ol className="list-decimal p-3 pl-6 space-y-1">
-                            {segQuery.data.map(s => (
-                                <li key={s.id} className="py-1">
-                                    <span className="text-gray-500 mr-2">[{msToHms(s.startMs)}–{msToHms(s.endMs)}]</span>
-                                    {s.participantName ? <span className="text-blue-700 mr-2">({s.participantName})</span> : null}
-                                    {s.text}
-                                </li>
-                            ))}
-                        </ol>
-                    )}
-                </div>
-            )}
+            {/* Removed inline segments panel in favor of dedicated TranscriptDetail page */}
         </div>
     );
 }
@@ -336,4 +359,14 @@ function msToHms(ms?: number) {
     const mm = String(m).padStart(2, '0');
     const ss = String(s).padStart(2, '0');
     return `${h}:${mm}:${ss}`;
+}
+
+function hmsToMs(hms: string): number | undefined {
+    const m = hms.trim().match(/^(\d+):(\d{1,2}):(\d{1,2})$/);
+    if (!m) return undefined;
+    const h = parseInt(m[1], 10);
+    const mm = parseInt(m[2], 10);
+    const ss = parseInt(m[3], 10);
+    if (Number.isNaN(h) || Number.isNaN(mm) || Number.isNaN(ss)) return undefined;
+    return ((h * 3600) + (mm * 60) + ss) * 1000;
 }

@@ -1,4 +1,4 @@
-import type { UploadedFile, Highlight, Theme, Insight, Annotation, Project, MediaFile, TranscriptSegment, TranscriptionJob } from '@/types';
+import type { UploadedFile, Highlight, Theme, Insight, Annotation, Project, MediaFile, TranscriptSegment, TranscriptionJob, Participant, FinalizedTranscriptMapping } from '@/types';
 
 /**
  * API Service Layer
@@ -189,8 +189,13 @@ export const updateSegment = (mediaId: string, segmentId: string, payload: { tex
 export const getSegmentCount = (mediaId: string): Promise<{ count: number }> =>
   http<{ count: number }>(`/media/${mediaId}/segments/count`);
 
+// Assign participant to segments (by ids and/or time range)
+export const assignParticipantToSegments = (
+  mediaId: string,
+  payload: { participantId: string | null; segmentIds?: string[]; startMs?: number; endMs?: number }
+) => http<{ updated: number }>(`/media/${mediaId}/segments/assign-participant`, { method: 'POST', body: JSON.stringify(payload) });
+
 // Finalization
-export interface FinalizedTranscriptMapping { mediaFileId: string; fileId: string; finalizedAt: string; originalSegmentCount?: number }
 export const getFinalizedTranscript = (mediaId: string): Promise<FinalizedTranscriptMapping | null> =>
   httpMaybe<FinalizedTranscriptMapping>(`/media/${mediaId}/finalized`);
 
@@ -200,3 +205,23 @@ export const finalizeTranscript = (mediaId: string): Promise<FinalizedTranscript
 // Reset transcription for a media file (delete segments and revert status to uploaded)
 export const resetTranscription = (mediaId: string): Promise<{ ok: boolean; segmentsDeleted: number }> =>
   http<{ ok: boolean; segmentsDeleted: number }>(`/media/${mediaId}/reset`, { method: 'POST' });
+
+// Participants
+export const listParticipants = (mediaId: string): Promise<Participant[]> =>
+  http<Participant[]>(`/media/${mediaId}/participants`);
+
+export const createParticipant = (mediaId: string, data: { name: string; canonicalKey?: string; color?: string }): Promise<Participant> =>
+  http<Participant>(`/media/${mediaId}/participants`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updateParticipant = (mediaId: string, participantId: string, data: Partial<{ name: string; canonicalKey: string; color: string }>): Promise<Participant> =>
+  http<Participant>(`/media/${mediaId}/participants/${participantId}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const deleteParticipantApi = (mediaId: string, participantId: string): Promise<void> =>
+  http<void>(`/media/${mediaId}/participants/${participantId}`, { method: 'DELETE' });
+
+export const getParticipantSegmentCounts = (mediaId: string): Promise<Array<{ participantId: string | null; name: string | null; color: string | null; count: number }>> =>
+  http<Array<{ participantId: string | null; name: string | null; color: string | null; count: number }>>(`/media/${mediaId}/participants/segment-counts`);
+
+// Merge participants: move all segments from source to target and delete source
+export const mergeParticipants = (mediaId: string, sourceId: string, targetId: string): Promise<{ ok: boolean }> =>
+  http<{ ok: boolean }>(`/media/${mediaId}/participants/merge`, { method: 'POST', body: JSON.stringify({ sourceId, targetId }) });
