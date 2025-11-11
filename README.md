@@ -61,6 +61,8 @@ WHISPER_DEVICE=cpu
 WHISPER_COMPUTE_TYPE=int8
 WORKER_BASE_URL=http://host.docker.internal:5002/api
 WORKER_AUTO_FALLBACK=0
+AUTO_DIARIZATION_ASSIGN=1
+HUGGING_FACE_HUB_TOKEN=<your_hf_token>
 ```
 
 Add staging/production later by injecting (never committing) a different `DATABASE_URL` and setting `NODE_ENV=production` at deploy time.
@@ -92,6 +94,33 @@ You can also run frontend + backend inside Docker alongside Postgres + worker.
   ```
   WORKER_BASE_URL=http://backend:5000/api
   ```
+
+### Diarization (optional)
+
+To automatically detect speakers and assign participants to segments:
+
+1) Obtain a Hugging Face token with access to pyannote models and set it in your shell:
+
+```sh
+export HUGGING_FACE_HUB_TOKEN=hf_...
+export AUTO_DIARIZATION_ASSIGN=1
+```
+
+2) Start the worker (or rebuild if already running):
+
+```sh
+docker compose up -d --build worker
+```
+
+The worker logs will show flags on startup:
+
+```
+[worker][INFO] Flags: SIMULATE_WHISPER=0, DIARIZATION_AVAILABLE=1, TOKEN=present, AUTO_DIARIZATION_ASSIGN=1
+```
+
+Notes:
+- Diarization now runs regardless of simulation mode; however, for real transcripts set `SIMULATE_WHISPER=0` (default in compose).
+- Existing transcripts won’t be retroactively assigned. Use the “Reset” action on a transcript and run a new transcription job to diarize.
 
 Important: Do NOT run local host backend/frontend simultaneously with the Docker versions (port conflicts, duplicate jobs). Stop local processes first.
 

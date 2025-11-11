@@ -6,6 +6,7 @@ import pool from '../db/pool.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { cleanupTempTestMedia } from './cleanupTempFiles.js';
+import { deleteMediaDeep, deleteFiles } from './testCleanup.js';
 
 // Helper: create a temp file to upload
 async function createTempMedia(content = 'fake media data') {
@@ -27,7 +28,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await cleanupTempTestMedia();
-  // Global teardown handles pool.end
+  if (mediaId) {
+    await deleteMediaDeep(mediaId);
+  }
 });
 
 describe('Media upload & listing', () => {
@@ -107,10 +110,12 @@ describe('Transcription jobs lifecycle', () => {
     expect([200,201]).toContain(second.status); // accept either if route semantics evolve
     expect(second.body).toMatchObject({ mediaFileId: mediaId, fileId });
     // Fetch file content
-    const fileRes = await request(app).get(`/api/files/${fileId}`);
+  const fileRes = await request(app).get(`/api/files/${fileId}`);
     expect(fileRes.status).toBe(200);
     expect(fileRes.body.content).toContain('Hello world');
     expect(fileRes.body.content).toContain('Second line');
     expect(fileRes.body.content).toMatch(/\[00:00:00 - 00:00:01\] Hello world/);
+    // Cleanup the created file record explicitly so it doesn't linger across tests
+    await deleteFiles(fileId);
   });
 });

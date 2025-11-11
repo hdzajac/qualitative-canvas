@@ -1,6 +1,7 @@
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { app, init } from '../app.js';
+import { deleteMediaDeep } from './testCleanup.js';
 
 let mediaId; let projectId; let p1; let p2;
 
@@ -67,5 +68,5 @@ describe('Participants merge', () => {
 });
 
 afterAll(async () => {
-  // Global teardown handles cleanup
+  await deleteMediaDeep(mediaId);
 });

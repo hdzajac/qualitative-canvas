@@ -2,6 +2,7 @@ import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { app, init } from '../app.js';
 import pool from '../db/pool.js';
+import { deleteMediaDeep } from './testCleanup.js';
 
 let mediaId; let participantId; let projectId;
 
@@ -17,7 +18,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Global teardown handles cleanup & pool.end
+  await deleteMediaDeep(mediaId);
 });
 
 describe('Participants CRUD', () => {

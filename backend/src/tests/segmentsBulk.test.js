@@ -3,6 +3,7 @@ import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
 import { app, init } from '../app.js';
 import pool from '../db/pool.js';
+import { deleteMediaDeep } from './testCleanup.js';
 
 let mediaId; let projectId; let jobId;
 
@@ -41,5 +42,5 @@ describe('Bulk segment insert', () => {
 });
 
 afterAll(async () => {
-  // Global teardown handles cleanup & pool.end
+  await deleteMediaDeep(mediaId);
 });

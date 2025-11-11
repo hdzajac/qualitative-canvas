@@ -260,6 +260,13 @@ def post_segments_with_retry(base_url: str, media_id, segments, attempts=3, init
 
 def main():
     log_info(f"Worker starting. Backends: {', '.join(BASE_URLS)} | LOG_LEVEL={LOG_LEVEL}")
+    log_info(
+        "Flags: "
+        f"SIMULATE_WHISPER={'1' if SIMULATE_WHISPER else '0'}, "
+        f"DIARIZATION_AVAILABLE={'1' if DIARIZATION_AVAILABLE else '0'}, "
+        f"TOKEN={'present' if bool(DIARIZATION_TOKEN) else 'absent'}, "
+        f"AUTO_DIARIZATION_ASSIGN={'1' if AUTO_DIARIZATION_ASSIGN else '0'}"
+    )
     while True:
         try:
             leased = None
@@ -315,8 +322,8 @@ def main():
                     log_warn(f"fail_job call failed: {e}")
                 continue  # move to next lease
             log_info(f"Inserted {posted['count']} segments (mode={'real' if WHISPER_AVAILABLE and not SIMULATE_WHISPER else 'sim'}) cid={cid}")
-            # diarization pass
-            if DIARIZATION_AVAILABLE and DIARIZATION_TOKEN and not SIMULATE_WHISPER:
+            # diarization pass (runs when available and token present; independent of transcription simulation)
+            if DIARIZATION_AVAILABLE and DIARIZATION_TOKEN:
                 try:
                     run_diarization(base, media)
                 except Exception as e:

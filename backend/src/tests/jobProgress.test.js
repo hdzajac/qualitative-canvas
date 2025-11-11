@@ -2,6 +2,7 @@ import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { app, init } from '../app.js';
 import pool from '../db/pool.js';
+import { deleteMediaDeep } from './testCleanup.js';
 
 let projectId; let mediaId; let jobId;
 
@@ -19,7 +20,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Do not close pool; global teardown will handle cleanup & pool.end
+  await deleteMediaDeep(mediaId);
 });
 
 describe('Job progress API', () => {
