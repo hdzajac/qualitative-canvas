@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import asyncHandler from 'express-async-handler';
 import { z } from 'zod';
-import { listSegmentsForMedia, getSegment, updateSegment, replaceSegmentsBulk } from '../dao/segmentsDao.js';
+import { listSegmentsForMedia, getSegment, updateSegment, replaceSegmentsBulk, countSegmentsForMedia } from '../dao/segmentsDao.js';
 import { getMedia } from '../dao/mediaDao.js';
 import { randomUUID } from 'crypto';
 
@@ -15,6 +15,15 @@ export default function segmentsRoutes(pool) {
     if (!media) return res.status(404).json({ error: 'Media not found' });
     const list = await listSegmentsForMedia(pool, mediaId);
     res.json(list);
+  }));
+
+  // Lightweight count endpoint (avoids pulling thousands of segments just to gate UI buttons)
+  router.get('/count', asyncHandler(async (req, res) => {
+    const mediaId = req.params.mediaId;
+    const media = await getMedia(pool, mediaId);
+    if (!media) return res.status(404).json({ error: 'Media not found' });
+    const count = await countSegmentsForMedia(pool, mediaId);
+    res.json({ count });
   }));
 
   // Update a segment's text or participant

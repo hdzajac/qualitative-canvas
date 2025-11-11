@@ -51,5 +51,27 @@ export default function mediaService(pool) {
       }
       return true;
     },
+    async reset(id) {
+      const media = await getMedia(pool, id);
+      if (!media) throw new Error('Not found');
+      if (media.status === 'processing') throw new Error('Cannot reset while processing');
+      // Disallow reset if already finalized
+      const fr = await pool.query('SELECT 1 FROM transcripts_finalized WHERE media_file_id = $1', [id]);
+      if (fr.rows[0]) throw new Error('Cannot reset: transcript finalized');
+      // Delete segments
+      const del = await pool.query('DELETE FROM transcript_segments WHERE media_file_id = $1 RETURNING id', [id]);
+      // Mark media back to uploaded and clear errorMessage/duration
+      await pool.query(
+        `UPDATE media_files SET status = 'uploaded', error_message = NULL, duration_sec = NULL WHERE id = $1`,
+        [id]
+      );
+      // Optionally mark any jobs as reset (informational)
+      await pool.query(
+        `UPDATE transcription_jobs SET status = 'reset', completed_at = now() WHERE media_file_id = $1 AND status IN ('done','error','queued','processing')`,
+        [id]
+      );
+      console.log('[media] Reset transcription for media', id, 'removedSegments=', del.rowCount);
+      return { segmentsDeleted: del.rowCount };
+    },
   };
 }

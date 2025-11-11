@@ -19,6 +19,14 @@ export async function listSegmentsForMedia(pool, mediaFileId) {
   return r.rows.map(mapSegment);
 }
 
+export async function countSegmentsForMedia(pool, mediaFileId) {
+  const r = await pool.query(
+    'SELECT COUNT(*)::int AS count FROM transcript_segments WHERE media_file_id = $1',
+    [mediaFileId]
+  );
+  return r.rows[0]?.count ?? 0;
+}
+
 export async function getSegment(pool, id) {
   const r = await pool.query('SELECT * FROM transcript_segments WHERE id = $1', [id]);
   return r.rows[0] ? mapSegment(r.rows[0]) : null;

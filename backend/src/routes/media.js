@@ -70,6 +70,20 @@ export default function mediaRoutes(pool) {
     }
   }));
 
+  // Reset transcription: delete segments and revert media status (not allowed if finalized or processing)
+  router.post('/:id/reset', asyncHandler(async (req, res) => {
+    try {
+      const result = await mediaService.reset(req.params.id);
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      if (e.message === 'Not found') return res.status(404).json({ error: 'Media not found' });
+      if (e.message.includes('processing')) return res.status(409).json({ error: e.message });
+      if (e.message.includes('finalized')) return res.status(409).json({ error: e.message });
+      console.error('Reset media error', e);
+      res.status(500).json({ error: 'Reset failed' });
+    }
+  }));
+
   // Finalization status
   router.get('/:id/finalized', asyncHandler(async (req, res) => {
     const mapping = await transcriptsService.getFinalized(req.params.id);

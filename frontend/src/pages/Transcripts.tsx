@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listMedia, uploadMedia, createTranscriptionJob, listSegments, getLatestJobForMedia, deleteMedia as deleteMediaApi, getFinalizedTranscript, finalizeTranscript } from '@/services/api';
+import { listMedia, uploadMedia, createTranscriptionJob, listSegments, getLatestJobForMedia, deleteMedia as deleteMediaApi, getFinalizedTranscript, finalizeTranscript, getSegmentCount, resetTranscription } from '@/services/api';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { Button } from '@/components/ui/button';
 import { useMemo, useState } from 'react';
@@ -66,6 +66,14 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onSto
         enabled: m.status === 'done',
         refetchOnWindowFocus: false,
     });
+    // Lightweight seg count to gate Finalize/Reset buttons (avoid fetching full list per row)
+    const { data: segCountData } = useQuery({
+        queryKey: ['segmentCount', m.id],
+        queryFn: () => getSegmentCount(m.id),
+        enabled: m.status === 'done' || m.status === 'error',
+        refetchOnWindowFocus: false,
+    });
+    const segCount = segCountData?.count ?? 0;
     let progressDisplay: string = m.status;
     let pct: number | undefined;
     if (m.status === 'processing') {
@@ -121,8 +129,11 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onSto
                         {expanded === m.id ? 'Hide segments' : 'Show segments'}
                     </Button>
                 )}
-                {m.status === 'done' && !finalized && (
+                {m.status === 'done' && !finalized && segCount > 0 && (
                     <FinalizeButton mediaId={m.id} />
+                )}
+                {(m.status === 'done' || m.status === 'error') && !finalized && segCount > 0 && (
+                    <ResetButton mediaId={m.id} />
                 )}
                 {m.status === 'done' && finalized && (
                     <Button size="sm" variant="secondary" onClick={() => window.location.assign(`/documents/${finalized.fileId}`)}>
@@ -152,6 +163,37 @@ function FinalizeButton({ mediaId }: { mediaId: string }) {
     return (
         <Button size="sm" variant="outline" disabled={mut.isPending} onClick={() => mut.mutate()}>
             {mut.isPending ? 'Finalizing…' : 'Finalize'}
+        </Button>
+    );
+}
+
+function ResetButton({ mediaId }: { mediaId: string }) {
+    const qc = useQueryClient();
+    const mut = useMutation({
+        mutationFn: () => resetTranscription(mediaId),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['media'] });
+            qc.invalidateQueries({ queryKey: ['segmentCount', mediaId] });
+            qc.invalidateQueries({ queryKey: ['segments', mediaId] });
+            qc.invalidateQueries({ queryKey: ['finalized', mediaId] });
+        },
+        onError: (err: unknown) => {
+            const msg = err instanceof Error ? err.message : 'Failed to reset';
+            alert(`Reset failed: ${msg}`);
+        }
+    });
+    return (
+        <Button
+            size="sm"
+            variant="outline"
+            disabled={mut.isPending}
+            onClick={() => {
+                if (confirm('Reset transcription? This deletes all segments and reverts status to uploaded.')) {
+                    mut.mutate();
+                }
+            }}
+        >
+            {mut.isPending ? 'Resetting…' : 'Reset'}
         </Button>
     );
 }

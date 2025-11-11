@@ -186,6 +186,9 @@ export const listSegments = (mediaId: string): Promise<TranscriptSegment[]> =>
 export const updateSegment = (mediaId: string, segmentId: string, payload: { text?: string; participantId?: string | null }): Promise<TranscriptSegment> =>
   http<TranscriptSegment>(`/media/${mediaId}/segments/${segmentId}`, { method: 'PUT', body: JSON.stringify(payload) });
 
+export const getSegmentCount = (mediaId: string): Promise<{ count: number }> =>
+  http<{ count: number }>(`/media/${mediaId}/segments/count`);
+
 // Finalization
 export interface FinalizedTranscriptMapping { mediaFileId: string; fileId: string; finalizedAt: string; originalSegmentCount?: number }
 export const getFinalizedTranscript = (mediaId: string): Promise<FinalizedTranscriptMapping | null> =>
@@ -193,3 +196,7 @@ export const getFinalizedTranscript = (mediaId: string): Promise<FinalizedTransc
 
 export const finalizeTranscript = (mediaId: string): Promise<FinalizedTranscriptMapping> =>
   http<FinalizedTranscriptMapping>(`/media/${mediaId}/finalize`, { method: 'POST' });
+
+// Reset transcription for a media file (delete segments and revert status to uploaded)
+export const resetTranscription = (mediaId: string): Promise<{ ok: boolean; segmentsDeleted: number }> =>
+  http<{ ok: boolean; segmentsDeleted: number }>(`/media/${mediaId}/reset`, { method: 'POST' });
