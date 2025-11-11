@@ -16,6 +16,12 @@ except Exception as e:  # pragma: no cover
     print(f"[worker] faster-whisper not available: {e}")
 try:  # optional diarization import
     from pyannote.audio import Pipeline  # type: ignore
+    # Optional hub login for private models
+    try:
+        from huggingface_hub import login, HfFolder  # type: ignore
+    except Exception:
+        login = None
+        HfFolder = None
     DIARIZATION_AVAILABLE = True
 except Exception as e:  # pragma: no cover
     print(f"[worker] pyannote.audio not available: {e}")
@@ -448,7 +454,21 @@ def transcribe_real(base_url: str, media, text_content, job, total_ms_hint=None)
 def run_diarization(base_url: str, media):  # pragma: no cover - heavy
     if not (DIARIZATION_AVAILABLE and DIARIZATION_TOKEN):
         return
-    pipeline = Pipeline.from_pretrained('pyannote/speaker-diarization', use_auth_token=DIARIZATION_TOKEN)
+    # Authenticate with the HF Hub if possible; newer APIs use login/token instead of use_auth_token
+    try:
+        if 'login' in globals() and login and DIARIZATION_TOKEN:
+            try:
+                login(DIARIZATION_TOKEN, add_to_git_credential=False)
+            except Exception:
+                # fallback to saving token
+                if 'HfFolder' in globals() and HfFolder:
+                    try:
+                        HfFolder.save_token(DIARIZATION_TOKEN)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    pipeline = Pipeline.from_pretrained('pyannote/speaker-diarization')
     audio_bytes = requests.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
     with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
         tmp.write(audio_bytes)
