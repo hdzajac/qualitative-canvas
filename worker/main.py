@@ -574,12 +574,64 @@ def run_diarization(base_url: str, media):  # pragma: no cover - heavy
             start_ms = int(segment.start * 1000)
             end_ms = int(segment.end * 1000)
             try:
-                ar = requests.post(f"{base_url}/media/{media['id']}/segments/assign-participant", json={"participantId": pid, "startMs": start_ms, "endMs": end_ms}, timeout=20)
+                ar = requests.post(
+                    f"{base_url}/media/{media['id']}/segments/assign-participant",
+                    json={"participantId": pid, "startMs": start_ms, "endMs": end_ms},
+                    timeout=30,
+                )
                 if not ar.ok:
                     log_warn(f"assign-participant {ar.status_code} body={ar.text[:200]}")
             except Exception as e:
                 log_warn(f"assign-participant error: {e}")
         print(f"Auto-assigned diarization labels to segments for media {media['id']}")
+
+        # Fill any remaining unassigned segments by nearest diarization turn label
+        try:
+            seg_r = requests.get(f"{base_url}/media/{media['id']}/segments", timeout=30)
+            seg_r.raise_for_status()
+            seg_list = seg_r.json() or []
+            unassigned = [s for s in seg_list if not s.get('participantId')]
+            if unassigned and turns:
+                # Pre-compute centers for diarization turns
+                turn_data = []  # list of tuples: (center_ms, label)
+                for (segment, _track, label) in turns:
+                    center_ms = int(((segment.start + segment.end) * 1000) / 2)
+                    turn_data.append((center_ms, label))
+                # Assign each unassigned segment to nearest turn center
+                assign_map = {}  # pid -> list of segmentIds
+                for s in unassigned:
+                    mid = int(((s.get('startMs') or 0) + (s.get('endMs') or 0)) / 2)
+                    # Find nearest turn
+                    best = None
+                    best_d = None
+                    for (c_ms, lab) in turn_data:
+                        d = abs(c_ms - mid)
+                        if best_d is None or d < best_d:
+                            best_d = d
+                            best = lab
+                    if best is None:
+                        continue
+                    pid = label_to_part.get(best)
+                    if not pid:
+                        continue
+                    assign_map.setdefault(pid, []).append(s['id'])
+                # Batch-assign by segmentIds per participant
+                for pid, seg_ids in assign_map.items():
+                    if not seg_ids:
+                        continue
+                    try:
+                        br = requests.post(
+                            f"{base_url}/media/{media['id']}/segments/assign-participant",
+                            json={"participantId": pid, "segmentIds": seg_ids},
+                            timeout=60,
+                        )
+                        if not br.ok:
+                            log_warn(f"assign-participant fill {br.status_code} body={br.text[:200]}")
+                    except Exception as e:
+                        log_warn(f"assign-participant fill error: {e}")
+                print(f"Filled {sum(len(v) for v in assign_map.values())} previously unassigned segments by nearest speaker for media {media['id']}")
+        except Exception as e:
+            log_warn(f"post-assign fill failed: {e}")
     except Exception as e:
         log_warn(f"Diarization auto-assign failed: {e}")
 
