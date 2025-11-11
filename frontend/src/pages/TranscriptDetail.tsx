@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { listSegments, getMedia, getFinalizedTranscript, finalizeTranscript, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants } from '@/services/api';
+import type { Participant, TranscriptSegment } from '@/types';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -40,7 +41,28 @@ export default function TranscriptDetail() {
     });
     const updatePartMut = useMutation({
         mutationFn: ({ partId, name }: { partId: string; name: string }) => updateParticipant(id!, partId, { name }),
-        onSuccess: () => qc.invalidateQueries({ queryKey: ['participants', id] }),
+        onMutate: async ({ partId, name }) => {
+            await qc.cancelQueries({ queryKey: ['participants', id] });
+            await qc.cancelQueries({ queryKey: ['segments', id] });
+            const prevParts = qc.getQueryData<Participant[]>(['participants', id]);
+            const prevSegs = qc.getQueryData<TranscriptSegment[]>(['segments', id]);
+            if (prevParts) {
+                qc.setQueryData<Participant[]>(['participants', id], (old) => (old || []).map((p) => p.id === partId ? { ...p, name } : p));
+            }
+            if (prevSegs) {
+                qc.setQueryData<TranscriptSegment[]>(['segments', id], (old) => (old || []).map((s) => s.participantId === partId ? { ...s, participantName: name } : s));
+            }
+            return { prevParts, prevSegs };
+        },
+        onError: (_err, _vars, ctx) => {
+            if (ctx?.prevParts) qc.setQueryData(['participants', id], ctx.prevParts);
+            if (ctx?.prevSegs) qc.setQueryData(['segments', id], ctx.prevSegs);
+        },
+        onSettled: () => {
+            qc.invalidateQueries({ queryKey: ['participants', id] });
+            qc.invalidateQueries({ queryKey: ['participantCounts', id] });
+            qc.invalidateQueries({ queryKey: ['segments', id] });
+        },
     });
     const deletePartMut = useMutation({
         mutationFn: (partId: string) => deleteParticipantApi(id!, partId),
@@ -143,16 +165,13 @@ export default function TranscriptDetail() {
                             <div className="grid md:grid-cols-2 gap-3">
                                 <div>
                                     <div className="text-xs text-neutral-600 mb-1">List</div>
-                                    <ul className="space-y-1">
-                                        {participants.map(p => (
-                                            <li key={p.id} className="flex items-center gap-2">
-                                                <input className="border px-1 py-0.5" defaultValue={p.name} onBlur={(e) => e.target.value && updatePartMut.mutate({ partId: p.id, name: e.target.value })} />
-                                                <span className="text-xs text-neutral-600">({counts.find(c => c.participantId === p.id)?.count ?? 0})</span>
-                                                <Button size="sm" variant="ghost" onClick={() => deletePartMut.mutate(p.id)}>Delete</Button>
-                                            </li>
-                                        ))}
-                                        {participants.length === 0 && <li className="text-sm text-neutral-600">No participants yet.</li>}
-                                    </ul>
+                                    <ParticipantListForm
+                                        participants={participants}
+                                        counts={counts}
+                                        onSave={(partId, name) => updatePartMut.mutate({ partId, name })}
+                                        onDelete={(partId) => deletePartMut.mutate(partId)}
+                                        isSaving={(partId) => updatePartMut.isPending}
+                                    />
                                 </div>
                                 <div>
                                     <div className="text-xs text-neutral-600 mb-1">Create</div>
@@ -188,6 +207,55 @@ export default function TranscriptDetail() {
                 <div className="text-sm text-neutral-600">Loading media…</div>
             )}
         </div>
+    );
+}
+
+function ParticipantListForm({
+    participants,
+    counts,
+    onSave,
+    onDelete,
+    isSaving,
+}: {
+    participants: Participant[];
+    counts: Array<{ participantId: string | null; name: string | null; color: string | null; count: number }>;
+    onSave: (participantId: string, name: string) => void;
+    onDelete: (participantId: string) => void;
+    isSaving: (participantId: string) => boolean;
+}) {
+    const [names, setNames] = useState<Record<string, string>>({});
+    const valueFor = (p: Participant) => (names[p.id] ?? p.name ?? '');
+    const setValue = (id: string, v: string) => setNames(prev => ({ ...prev, [id]: v }));
+    const isDirty = (p: Participant) => valueFor(p) !== (p.name ?? '');
+    const isEmpty = (p: Participant) => valueFor(p).trim().length === 0;
+    return (
+        <ul className="space-y-1">
+            {participants.map(p => (
+                <li key={p.id} className="flex items-center gap-2">
+                    <input
+                        className="border px-2 py-1 flex-1 min-w-0"
+                        value={valueFor(p)}
+                        onChange={(e) => setValue(p.id, e.target.value)}
+                    />
+                    <span className="text-xs text-neutral-600 whitespace-nowrap">({counts.find(c => c.participantId === p.id)?.count ?? 0})</span>
+                    <Button
+                        size="sm"
+                        disabled={!isDirty(p) || isEmpty(p) || isSaving(p.id)}
+                        onClick={() => onSave(p.id, valueFor(p).trim())}
+                    >
+                        {isSaving(p.id) ? 'Saving…' : 'Save'}
+                    </Button>
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onDelete(p.id)}
+                    >
+                        Delete
+                    </Button>
+                </li>
+            ))}
+            {participants.length === 0 && <li className="text-sm text-neutral-600">No participants yet.</li>}
+        </ul>
     );
 }
 
