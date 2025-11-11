@@ -30,7 +30,10 @@ export const SelectionTooltip: React.FC<SelectionTooltipProps> = ({ rect, isVtt 
                 aria-label="Add code from selection"
             >
                 <Tag className="w-4 h-4" />
-                Add code
+                <span className="flex items-center gap-2">
+                    <span>Add code</span>
+                    <span className="text-[10px] text-white/70">C</span>
+                </span>
             </button>
             {isVtt && onEditBlocks && (
                 <>
@@ -42,7 +45,10 @@ export const SelectionTooltip: React.FC<SelectionTooltipProps> = ({ rect, isVtt 
                         aria-label="Edit selected block(s)"
                     >
                         <Pencil className="w-4 h-4" />
-                        Edit block(s)
+                        <span className="flex items-center gap-2">
+                            <span>Edit block(s)</span>
+                            <span className="text-[10px] text-white/70">E</span>
+                        </span>
                     </button>
                 </>
             )}

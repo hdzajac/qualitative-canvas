@@ -1,10 +1,11 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { listSegments, getMedia, getFinalizedTranscript, finalizeTranscript, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants } from '@/services/api';
+import { listSegments, getMedia, getFinalizedTranscript, finalizeTranscript, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants, getFile } from '@/services/api';
 import type { Participant, TranscriptSegment } from '@/types';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
+import { DocumentViewer } from '@/components/DocumentViewer';
 import { Progress } from '@/components/ui/progress';
 import { getLatestJobForMedia } from '@/services/api';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
@@ -82,6 +83,11 @@ export default function TranscriptDetail() {
         },
     });
     const { data: finalized } = useQuery({ queryKey: ['finalized', id], queryFn: () => getFinalizedTranscript(id!), enabled: !!id && media?.status === 'done' });
+    const { data: finalizedFile } = useQuery({
+        queryKey: ['finalizedFile', id, finalized?.fileId],
+        queryFn: () => getFile(finalized!.fileId),
+        enabled: !!finalized?.fileId,
+    });
     const finalizeMut = useMutation({
         mutationFn: () => finalizeTranscript(id!),
         onSuccess: () => {
@@ -146,21 +152,65 @@ export default function TranscriptDetail() {
                         <div className="text-[11px] text-neutral-500">Uploaded {new Date(media.createdAt).toLocaleString()}</div>
                     </div>
                     <div className="p-3 space-y-3">
-                        {/* Bulk assign and range assign removed */}
-                        {segments.length > 0 ? (
-                            <ol className="list-decimal pl-6 space-y-1">
-                                {segments.map(s => (
-                                    <li key={s.id} className="text-sm">
-                                        <span className="text-gray-500 mr-2">[{msToHms(s.startMs)}–{msToHms(s.endMs)}]</span>
-                                        {s.participantName ? <span className="text-blue-700 mr-2">({s.participantName})</span> : null}
-                                        {s.text}
-                                    </li>
-                                ))}
-                            </ol>
-                        ) : (
-                            <div className="text-sm text-neutral-600">{media.status === 'processing' ? 'Transcription in progress… segments will appear here.' : 'No segments.'}</div>
-                        )}
-                        <div className="border-t border-black pt-3">
+                        {/* Center document viewer with transcript content (finalized file if available, otherwise synthetic from segments) */}
+                        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
+                            <div>
+                                {segments.length > 0 || finalizedFile ? (
+                                    <DocumentViewer
+                                        fileId={finalizedFile?.id || `media-${id}-virtual`}
+                                        content={finalizedFile?.content || buildTranscriptContent(segments)}
+                                        highlights={[]}
+                                        onHighlightCreated={() => { /* no-op in transcript view */ }}
+                                        isVtt={true}
+                                        framed={false}
+                                        readOnly={true}
+                                        enableSelectionActions={false}
+                                    />
+                                ) : (
+                                    <div className="text-sm text-neutral-600">{media.status === 'processing' ? 'Transcription in progress… segments will appear here.' : 'No segments.'}</div>
+                                )}
+                            </div>
+                            <div>
+                                {/* Participants management and utilities */}
+                                <div className="font-semibold mb-2">Participants</div>
+                                <div className="grid gap-3">
+                                    <ParticipantListForm
+                                        participants={participants}
+                                        counts={counts}
+                                        onSave={(partId, name) => updatePartMut.mutate({ partId, name })}
+                                        onDelete={(partId) => deletePartMut.mutate(partId)}
+                                        isSaving={(partId) => updatePartMut.isPending}
+                                    />
+                                    <div>
+                                        <div className="text-xs text-neutral-600 mb-1">Create</div>
+                                        <div className="flex items-center gap-2">
+                                            <input className="border px-2 py-1" placeholder="Name" value={newPart.name} onChange={(e) => setNewPart({ name: e.target.value })} />
+                                            <Button size="sm" disabled={!newPart.name || createPartMut.isPending} onClick={() => createPartMut.mutate()}>Add</Button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-xs text-neutral-600 mb-1">Merge participants</div>
+                                        <div className="flex items-center gap-2">
+                                            <select className="border px-2 py-1" value={mergeSource} onChange={(e) => setMergeSource(e.target.value)}>
+                                                <option value="">Source…</option>
+                                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                            </select>
+                                            <span className="text-xs text-neutral-600">into</span>
+                                            <select className="border px-2 py-1" value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
+                                                <option value="">Target…</option>
+                                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                            </select>
+                                            <Button size="sm" disabled={!mergeSource || !mergeTarget || mergeSource === mergeTarget || mergeMut.isPending} onClick={() => mergeMut.mutate()}>
+                                                {mergeMut.isPending ? 'Merging…' : 'Merge'}
+                                            </Button>
+                                        </div>
+                                        <div className="text-[11px] text-neutral-500 mt-1">Moves all segments from source to target and deletes the source participant.</div>
+                                    </div>
+                                    <div className="text-xs text-neutral-600">Counts: {counts.map(c => (<span key={c.participantId ?? 'none'} className="mr-2">{c.name || 'Unassigned'}: {c.count}</span>))}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="border-t border-black pt-3 mt-3">
                             <div className="font-semibold mb-2">Participants</div>
                             <div className="grid md:grid-cols-2 gap-3">
                                 <div>
@@ -278,4 +328,17 @@ function hmsToMs(hms: string): number | undefined {
     const ss = parseInt(m[3], 10);
     if (Number.isNaN(h) || Number.isNaN(mm) || Number.isNaN(ss)) return undefined;
     return ((h * 3600) + (mm * 60) + ss) * 1000;
+}
+
+// Build a synthetic VTT-like content string from segments for unified viewing
+function buildTranscriptContent(segments: TranscriptSegment[]): string {
+    const sorted = [...segments].sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0));
+    const lines = sorted.map(s => {
+        const start = msToHms(s.startMs);
+        const end = msToHms(s.endMs);
+        const speaker = s.participantName ? `${s.participantName}:` : '';
+        // Timestamp and speaker on their own then speech on new line to match viewer formatting
+        return `[${start} - ${end}] ${speaker}${speaker ? '\n' : ''}${s.text}`;
+    });
+    return lines.join('\n');
 }

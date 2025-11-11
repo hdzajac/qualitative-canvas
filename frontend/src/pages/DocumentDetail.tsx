@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getFile, getHighlights, getProjects } from '@/services/api';
 import type { Highlight } from '@/types';
-import { TextViewer, TextViewerHandle } from '@/components/TextViewer';
+import { DocumentViewer, type DocumentViewerHandle } from '@/components/DocumentViewer';
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 
 export default function DocumentDetail() {
@@ -13,7 +13,7 @@ export default function DocumentDetail() {
     const { data: highlights = [], refetch: refetchHighlights } = useQuery<Highlight[]>({ queryKey: ['highlights', id], queryFn: () => getHighlights({ fileId: id! }), enabled: !!id });
     const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
 
-    const viewerRef = useRef<TextViewerHandle>(null);
+    const viewerRef = useRef<DocumentViewerHandle>(null);
     const [panelHeight, setPanelHeight] = useState<number>(0);
     const [marks, setMarks] = useState<Array<{ id: string; codeName: string; text: string; top: number; startOffset: number; endOffset: number }>>([]);
     const docHighlights = highlights; // already filtered by server
@@ -85,24 +85,18 @@ export default function DocumentDetail() {
             </Breadcrumb>
 
             <div className="border-2 border-black p-4">
-                <div className="grid grid-cols-[3fr_1fr] gap-6">
-                    <div>
-                        <h2 className="text-base md:text-lg font-bold uppercase tracking-wide mb-2">Document</h2>
-                        <div id="transcript-container">
-                            <TextViewer
-                                ref={viewerRef}
-                                fileId={file.id}
-                                content={file.content}
-                                highlights={docHighlights}
-                                onHighlightCreated={() => refetchHighlights()}
-                                // Treat finalized transcripts (*.transcript.txt) as VTT-like for nicer rendering
-                                isVtt={/\.(vtt|transcript\.txt)$/i.test(file.filename)}
-                                framed={false}
-                            />
-                        </div>
-                    </div>
-                    <div>
-                        <h2 className="text-base md:text-lg font-bold uppercase tracking-wide mb-2">Codes</h2>
+                <h2 className="text-base md:text-lg font-bold uppercase tracking-wide mb-2">Document</h2>
+                <DocumentViewer
+                    ref={viewerRef}
+                    fileId={file.id}
+                    content={file.content}
+                    highlights={docHighlights}
+                    onHighlightCreated={() => refetchHighlights()}
+                    isVtt={/\.(vtt|transcript\.txt)$/i.test(file.filename)}
+                    framed={false}
+                    readOnly={false}
+                    enableSelectionActions={true}
+                    rightPanel={(
                         <div className="pl-4 border-l-2 border-black">
                             {sortedByOffset.length === 0 ? (
                                 <div className="text-sm text-neutral-600">No codes yet.</div>
@@ -135,8 +129,8 @@ export default function DocumentDetail() {
                                 </div>
                             )}
                         </div>
-                    </div>
-                </div>
+                    )}
+                />
             </div>
         </div>
     );

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
 import SelectionTooltip from '@/components/text/SelectionTooltip';
-import { useTextSelectionHotkeys } from '@/hooks/useTextSelectionHotkeys';
+import { useSelectionActions, type SelectionRange } from '@/hooks/useSelectionActions';
 import { getDomPositionForOffset } from '@/components/text/dom';
 import { parseVttLine, parseSpeakerOnly, parseAnyLine, composeVttLine, isSemanticallyEmptyVttLine, getLineStart, getLineEndNoNl, mergePrevCurr, mergeCurrNext } from '@/components/text/vtt';
 import { Card } from '@/components/ui/card';
@@ -8,10 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Highlight } from '@/types';
-import { createHighlight, updateFile } from '@/services/api';
+import { updateFile } from '@/services/api';
 import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { DEFAULTS } from '@/components/canvas/CanvasTypes';
+// DEFAULTS not needed here; used inside selection hook
 import { getCorrectedRange as utilGetCorrectedRange } from '@/components/text/highlights';
 import { Trash2 } from 'lucide-react';
 
@@ -31,17 +31,14 @@ interface TextViewerProps {
   onHighlightCreated: () => void;
   isVtt?: boolean;
   framed?: boolean; // if true, wrap in Card frame; if false, plain container
+  // Optional behavior controls
+  readOnly?: boolean; // disable selection actions and editing
+  enableSelectionActions?: boolean; // show selection tooltip/actions (default true)
+  saveContent?: (next: string) => Promise<void>; // override default updateFile
 }
 
 export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
-  ({ fileId, content, highlights, onHighlightCreated, isVtt = false, framed = true }, ref) => {
-    const [selectedText, setSelectedText] = useState<{ text: string; start: number; end: number } | null>(null);
-    const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null);
-    // Snapshot of selection used while the sheet is open, so UI doesn't clear when focus moves
-    const [frozenSelection, setFrozenSelection] = useState<{ text: string; start: number; end: number } | null>(null);
-    const [sheetOpen, setSheetOpen] = useState(false);
-    const [codeName, setCodeName] = useState('');
-    const inputRef = useRef<HTMLInputElement>(null);
+  ({ fileId, content, highlights, onHighlightCreated, isVtt = false, framed = true, readOnly = false, enableSelectionActions = true, saveContent }, ref) => {
     const textRootRef = useRef<HTMLDivElement>(null);
     const [flashRange, setFlashRange] = useState<{ start: number; end: number } | null>(null);
     const flashTimer = useRef<number | null>(null);
@@ -59,40 +56,64 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     const saveTimer = useRef<number | null>(null);
     const lastSavedContentRef = useRef<string>(content);
     const [isSaving, setIsSaving] = useState(false);
-    const lastUndoRef = useRef<{ prev: string } | null>(null);
+    // Multi-level undo/redo stacks for committed edits (blur or deletion)
+    const undoStackRef = useRef<string[]>([]);
+    const redoStackRef = useRef<string[]>([]);
 
-    const undoDelete = useCallback(async () => {
-      const undoPrev = lastUndoRef.current?.prev;
-      if (!undoPrev) return;
+    const performUndo = useCallback(async () => {
+      if (undoStackRef.current.length === 0) return;
+      const current = lastSavedContentRef.current;
+      const prev = undoStackRef.current.pop() as string;
       try {
         setIsSaving(true);
-        await updateFile(fileId, { content: undoPrev });
-        lastSavedContentRef.current = undoPrev;
-        setText(undoPrev);
+        await updateFile(fileId, { content: prev });
+        // push current into redo stack
+        redoStackRef.current.push(current);
+        lastSavedContentRef.current = prev;
+        setText(prev);
+        setEditingRange(null);
       } catch (err) {
         console.error(err);
         toast.error('Failed to undo');
       } finally {
         setIsSaving(false);
-        lastUndoRef.current = null;
       }
     }, [fileId]);
 
-    // Global undo handler for last deletion: Cmd/Ctrl+Z
+    const performRedo = useCallback(async () => {
+      if (redoStackRef.current.length === 0) return;
+      const current = lastSavedContentRef.current;
+      const next = redoStackRef.current.pop() as string;
+      try {
+        setIsSaving(true);
+        await updateFile(fileId, { content: next });
+        // push current into undo stack
+        undoStackRef.current.push(current);
+        lastSavedContentRef.current = next;
+        setText(next);
+        setEditingRange(null);
+      } catch (err) {
+        console.error(err);
+        toast.error('Failed to redo');
+      } finally {
+        setIsSaving(false);
+      }
+    }, [fileId]);
+
+    // Global undo/redo handlers for committed edits
     useEffect(() => {
       const onKeyDown = (e: KeyboardEvent) => {
-        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
-          if (!lastUndoRef.current?.prev) return;
-          const target = e.target as HTMLElement | null;
-          const isEditable = !!target && (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
-          if (isEditable) return; // let native undo work in inputs/contentEditable
-          e.preventDefault();
-          undoDelete();
-        }
+        const target = e.target as HTMLElement | null;
+        const isEditable = !!target && (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+        if (isEditable) return; // let native undo work inside inputs/contentEditable
+        const isZ = e.key === 'z' || e.key === 'Z';
+        const isY = e.key === 'y' || e.key === 'Y';
+        if ((e.metaKey || e.ctrlKey) && isZ && !e.shiftKey) { e.preventDefault(); void performUndo(); }
+        if ((e.metaKey || e.ctrlKey) && ((isZ && e.shiftKey) || isY)) { e.preventDefault(); void performRedo(); }
       };
       document.addEventListener('keydown', onKeyDown);
       return () => document.removeEventListener('keydown', onKeyDown);
-    }, [undoDelete]);
+    }, [performUndo, performRedo]);
 
     // Choose blocks:
     // - VTT: each statement is a single line (we included one statement per line during import)
@@ -118,115 +139,51 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       return blocks.length - 1;
     }, [blocks]);
 
-    // Selection → global offsets computed against the entire container text
-    const handleSelection = useCallback(() => {
-      if (editingRange) return; // disable while editing
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0) return;
+    const startEditSelectedBlock = useCallback(() => {
+      if (!selectedTextRef.current || !isVtt || readOnly) return;
+      const selStartBlock = blockOfOffset(selectedTextRef.current.start);
+      const selEndBlock = blockOfOffset(selectedTextRef.current.end);
+      const start = Math.max(0, selStartBlock - 1);
+      const end = Math.min(blocks.length - 1, selEndBlock + 1);
+      setEditingRange({ start, end });
+      selectedTextRef.current = null;
+      // Clear any visible selection UI
+      setSelectedTextFnRef.current(null);
+      setSelectionRectFnRef.current(null);
+    }, [isVtt, readOnly, blockOfOffset, blocks]);
 
-      const range = selection.getRangeAt(0);
-      const selText = selection.toString();
+    // Internal ref so hook can access current selection before we declare the hook
+    // Selection state is managed by the selection hook. We keep refs to access/clear it inside callbacks declared before the hook.
+    const selectedTextRef = useRef<SelectionRange>(null);
+    const setSelectedTextFnRef = useRef<(sel: SelectionRange) => void>(() => { });
+    const setSelectionRectFnRef = useRef<(rect: DOMRect | null) => void>(() => { });
 
-      if (!textRootRef.current || selText.length === 0) {
-        setSelectedText(null);
-        setSelectionRect(null);
-        return;
-      }
-
-      const pre = document.createRange();
-      pre.selectNodeContents(textRootRef.current);
-      pre.setEnd(range.startContainer, range.startOffset);
-      const start = pre.toString().length;
-      const end = start + selText.length;
-
-      const rect = range.getBoundingClientRect();
-
-      setSelectedText({ text: selText, start, end });
-      setSelectionRect(rect);
-    }, [editingRange]);
-
-    // Track selection live (so the floating action is resilient and shows reliably)
-    useEffect(() => {
-      const onSelChange = () => {
-        if (editingRange) return;
-        if (sheetOpen) return; // don't clear live selection while sheet is open
-        const sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
-          setSelectedText(null);
-          setSelectionRect(null);
-          return;
-        }
-        const container = textRootRef.current; if (!container) return;
-        const range = sel.getRangeAt(0);
-        if (!container.contains(range.commonAncestorContainer)) {
-          setSelectedText(null);
-          setSelectionRect(null);
-          return;
-        }
-        const pre = document.createRange();
-        pre.selectNodeContents(container);
-        pre.setEnd(range.startContainer, range.startOffset);
-        const start = pre.toString().length;
-        const end = start + sel.toString().length;
-        const rect = range.getBoundingClientRect();
-        setSelectedText({ text: sel.toString(), start, end });
-        setSelectionRect(rect);
-      };
-      document.addEventListener('selectionchange', onSelChange);
-      return () => document.removeEventListener('selectionchange', onSelChange);
-    }, [editingRange, sheetOpen]);
-
-    // Keyboard shortcuts via hook
-    useTextSelectionHotkeys({
-      enabled: Boolean(selectedText) && !editingRange,
-      sheetOpen,
+    // Hook usage (after startEditSelectedBlock declared)
+    const {
+      // state
+      selectedText, setSelectedText,
+      selectionRect, setSelectionRect,
+      frozenSelection, setFrozenSelection,
+      sheetOpen, setSheetOpen,
+      codeName, setCodeName,
+      inputRef,
+      // actions
+      openAddCode, handleCreateCode,
+    } = useSelectionActions({
+      fileId,
+      text,
+      enabled: !editingRange,
       isVtt,
-      onAddCode: () => openAddCode(),
-      onEditBlocks: () => startEditSelectedBlock(),
+      readOnly,
+      enableSelectionActions,
+      onHighlightCreated,
+      startEditSelectedBlock,
+      getContainer: () => textRootRef.current,
     });
 
-    useEffect(() => {
-      if (sheetOpen && inputRef.current) {
-        inputRef.current.focus();
-        inputRef.current.select();
-      }
-    }, [sheetOpen]);
-
-    const openAddCode = () => {
-      if (!selectedText) return;
-      // Snapshot selection for use in the sheet
-      setFrozenSelection(selectedText);
-      setSheetOpen(true);
-    };
-
-    const handleCreateCode = async () => {
-      const activeSel = frozenSelection || selectedText;
-      if (!activeSel || !codeName.trim()) {
-        toast.error('Please provide a code name');
-        return;
-      }
-      try {
-        const snippet = text.slice(activeSel.start, activeSel.end);
-        await createHighlight({
-          fileId,
-          startOffset: activeSel.start,
-          endOffset: activeSel.end,
-          text: snippet,
-          codeName: codeName.trim(),
-          size: DEFAULTS.code,
-        });
-        toast.success('Code created');
-        setSelectedText(null);
-        setSelectionRect(null);
-        setCodeName('');
-        setSheetOpen(false);
-        setFrozenSelection(null);
-        onHighlightCreated();
-      } catch (error) {
-        toast.error('Failed to create code');
-        console.error(error);
-      }
-    };
+    // Keep refs in sync for callbacks defined before hook initialization
+    useEffect(() => { selectedTextRef.current = selectedText; }, [selectedText]);
+    useEffect(() => { setSelectedTextFnRef.current = setSelectedText; setSelectionRectFnRef.current = setSelectionRect; }, [setSelectedText, setSelectionRect]);
 
     // Map offset -> DOM position (for scroll/flash) via util
 
@@ -286,7 +243,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       bStart: number,
       bEnd: number,
       wrapText: (chunkText: string, absStart: number, absEnd: number) => JSX.Element | JSX.Element[],
-      wrapHighlighted: (chunkText: string, absStart: number, absEnd: number) => JSX.Element | JSX.Element[]
+      wrapHighlighted: (chunkText: string, absStart: number, absEnd: number, h?: Highlight) => JSX.Element | JSX.Element[]
     ) => {
       // Sort by start, then by end to ensure stable forward iteration
       const sorted = [...highlights].sort((a, b) => (a.startOffset - b.startOffset) || (a.endOffset - b.endOffset));
@@ -308,7 +265,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
               parts.push(<React.Fragment key={`t-${cursor}-${hs}`}>{chunk}</React.Fragment>);
             }
           }
-          const highlightedChunk = wrapHighlighted(text.substring(hs, he), hs, he);
+          const highlightedChunk = wrapHighlighted(text.substring(hs, he), hs, he, h);
           if (Array.isArray(highlightedChunk)) {
             highlightedChunk.forEach((el, idx) => {
               parts.push(<React.Fragment key={`h-${hs}-${he}-${idx}`}>{el}</React.Fragment>);
@@ -366,7 +323,17 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           const out: JSX.Element[] = [];
           const pushSeg = (from: number, to: number, cls: string, key: string) => {
             if (to <= from) return;
-            out.push(<span key={key} className={cls}>{full.substring(from, to)}</span>);
+            // Add ARIA label for speaker segments to aid screen readers
+            const isSpeakerSeg = speaker && from >= speakerStart && to <= speakerEnd;
+            if (isSpeakerSeg) {
+              out.push(
+                <span key={key} className={cls} aria-label={`Speaker: ${speaker}`}>
+                  {full.substring(from, to)}
+                </span>
+              );
+            } else {
+              out.push(<span key={key} className={cls}>{full.substring(from, to)}</span>);
+            }
           };
           const boundaries = [relStart];
           if (speakerStart >= 0) {
@@ -376,20 +343,18 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           if (speechStart > relStart && speechStart < relEnd) boundaries.push(speechStart);
           boundaries.push(relEnd);
           boundaries.sort((a, b) => a - b);
-          let insertedBreak = false;
           for (let i = 0; i < boundaries.length - 1; i++) {
             const s = boundaries[i];
             const e = boundaries[i + 1];
-            if (!insertedBreak && s === speechStart) { out.push(<br key={`br-fb-${bStart}-${s}`} />); insertedBreak = true; }
             let cls = 'text-sm text-neutral-800';
-            if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-2 align-top';
+            if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-1 align-top';
             // speech segments are inline to prevent line breaks in the middle of highlights
-            else if (s >= speechStart) cls = 'text-sm leading-relaxed text-neutral-800';
+            else if (s >= speechStart) cls = 'text-sm leading-snug text-neutral-800';
             pushSeg(s, e, cls, `seg-fb-${bStart}-${s}-${e}`);
           }
           return out;
         };
-        const wrapFallbackHighlighted = (_chunkText: string, absStart: number, absEnd: number): JSX.Element[] => {
+        const wrapFallbackHighlighted = (_chunkText: string, absStart: number, absEnd: number, h?: Highlight): JSX.Element[] => {
           const relStart = absStart - bStart;
           const relEnd = absEnd - bStart;
           const isFlashing = flashRange && !(absEnd <= flashRange.start || absStart >= flashRange.end);
@@ -397,7 +362,16 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           const out: JSX.Element[] = [];
           const pushSeg = (from: number, to: number, cls: string, key: string) => {
             if (to <= from) return;
-            out.push(<span key={key} className={`${cls} ${bg}`}>{full.substring(from, to)}</span>);
+            out.push(
+              <mark
+                key={key}
+                className={`${cls} ${bg}`}
+                role="mark"
+                aria-label={h?.codeName ? `Code: ${h.codeName}` : 'Highlight'}
+              >
+                {full.substring(from, to)}
+              </mark>
+            );
           };
           const boundaries = [relStart];
           if (speakerStart >= 0) {
@@ -407,14 +381,12 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           if (speechStart > relStart && speechStart < relEnd) boundaries.push(speechStart);
           boundaries.push(relEnd);
           boundaries.sort((a, b) => a - b);
-          let insertedBreak = false;
           for (let i = 0; i < boundaries.length - 1; i++) {
             const s = boundaries[i];
             const e = boundaries[i + 1];
-            if (!insertedBreak && s === speechStart) { out.push(<br key={`br-fbh-${bStart}-${s}`} />); insertedBreak = true; }
             let cls = 'text-sm text-neutral-800';
-            if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-2 align-top';
-            else if (s >= speechStart) cls = 'text-sm leading-relaxed text-neutral-800';
+            if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-1 align-top';
+            else if (s >= speechStart) cls = 'text-sm leading-snug text-neutral-800';
             pushSeg(s, e, cls, `seg-fbh-${bStart}-${s}-${e}`);
           }
           return out;
@@ -459,21 +431,35 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         if (speechStart > relStart && speechStart < relEnd) boundaries.push(speechStart);
         boundaries.push(relEnd);
         boundaries.sort((a, b) => a - b);
-        let insertedBreak = false;
         for (let i = 0; i < boundaries.length - 1; i++) {
           const s = boundaries[i];
           const e = boundaries[i + 1];
-          if (!insertedBreak && s === speechStart) { out.push(<br key={`br-${bStart}-${s}`} />); insertedBreak = true; }
           let cls = 'text-sm text-neutral-800';
           if (s < tsEnd) cls = 'text-[11px] text-neutral-400 mr-2 align-top';
-          else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-2 align-top';
-          else if (s >= speechStart) cls = 'text-sm leading-relaxed text-neutral-800'; // inline speech
-          pushSeg(s, e, cls, `seg-${bStart}-${s}-${e}`);
+          else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-0.5 align-top';
+          else if (s >= speechStart) cls = 'text-sm leading-snug text-neutral-800'; // inline speech compact
+          if (s < tsEnd) {
+            // timestamp segment
+            const label = bracket ? `From ${bracket[1]} to ${bracket[2]}` : (ts ? `At ${ts}` : 'Timestamp');
+            out.push(
+              <time key={`time-${bStart}-${s}-${e}`} className={cls} aria-label={label}>
+                {full.substring(s, e)}
+              </time>
+            );
+          } else if (speaker && s >= speakerStart && e <= speakerEnd) {
+            out.push(
+              <span key={`spk-${bStart}-${s}-${e}`} className={cls} aria-label={`Speaker: ${speaker}`}>
+                {full.substring(s, e)}
+              </span>
+            );
+          } else {
+            pushSeg(s, e, cls, `seg-${bStart}-${s}-${e}`);
+          }
         }
         return out;
       };
 
-      const wrapHighlighted = (_chunkText: string, absStart: number, absEnd: number): JSX.Element[] => {
+      const wrapHighlighted = (_chunkText: string, absStart: number, absEnd: number, h?: Highlight): JSX.Element[] => {
         const relStart = absStart - bStart;
         const relEnd = absEnd - bStart;
         const isFlashing = flashRange && !(absEnd <= flashRange.start || absStart >= flashRange.end);
@@ -481,7 +467,33 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         const out: JSX.Element[] = [];
         const pushSeg = (from: number, to: number, cls: string, key: string) => {
           if (to <= from) return;
-          out.push(<span key={key} className={`${cls} ${bg}`}>{full.substring(from, to)}</span>);
+          if (from < tsEnd) {
+            const label = bracket ? `From ${bracket[1]} to ${bracket[2]}` : (ts ? `At ${ts}` : 'Timestamp');
+            out.push(
+              <time key={`time-h-${bStart}-${from}-${to}`} className={`${cls} ${bg}`} aria-label={label}>
+                {full.substring(from, to)}
+              </time>
+            );
+            return;
+          }
+          if (speaker && from >= speakerStart && to <= speakerEnd) {
+            out.push(
+              <span key={`spk-h-${bStart}-${from}-${to}`} className={`${cls} ${bg}`} aria-label={`Speaker: ${speaker}`}>
+                {full.substring(from, to)}
+              </span>
+            );
+            return;
+          }
+          out.push(
+            <mark
+              key={key}
+              className={`${cls} ${bg}`}
+              role="mark"
+              aria-label={h?.codeName ? `Code: ${h.codeName}` : 'Highlight'}
+            >
+              {full.substring(from, to)}
+            </mark>
+          );
         };
         const boundaries = [relStart];
         if (tsEnd > relStart && tsEnd < relEnd) boundaries.push(tsEnd);
@@ -492,15 +504,14 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         if (speechStart > relStart && speechStart < relEnd) boundaries.push(speechStart);
         boundaries.push(relEnd);
         boundaries.sort((a, b) => a - b);
-        let insertedBreak = false;
+        const insertedBreak = false;
         for (let i = 0; i < boundaries.length - 1; i++) {
           const s = boundaries[i];
           const e = boundaries[i + 1];
-          if (!insertedBreak && s === speechStart) { out.push(<br key={`br-h-${bStart}-${s}`} />); insertedBreak = true; }
           let cls = 'text-sm text-neutral-800';
           if (s < tsEnd) cls = 'text-[11px] text-neutral-400 mr-2 align-top';
-          else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-2 align-top';
-          else if (s >= speechStart) cls = 'text-sm leading-relaxed text-neutral-800';
+          else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-0.5 align-top';
+          else if (s >= speechStart) cls = 'text-sm leading-snug text-neutral-800';
           pushSeg(s, e, cls, `seg-h-${bStart}-${s}-${e}`);
         }
         return out;
@@ -512,9 +523,17 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     // Generic block renderer (non-VTT)
     const renderGenericBlock = (block: { start: number; end: number }) => {
       const wrap = (chunkText: string, _absStart: number, _absEnd: number) => <>{chunkText}</>;
-      const wrapHighlighted = (chunkText: string, absStart: number, absEnd: number) => {
+      const wrapHighlighted = (chunkText: string, absStart: number, absEnd: number, h?: Highlight) => {
         const isFlashing = flashRange && !(absEnd <= flashRange.start || absStart >= flashRange.end);
-        return <span className={`${isFlashing ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30'}`}>{chunkText}</span>;
+        return (
+          <mark
+            className={`${isFlashing ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30'}`}
+            role="mark"
+            aria-label={h?.codeName ? `Code: ${h.codeName}` : 'Highlight'}
+          >
+            {chunkText}
+          </mark>
+        );
       };
       return renderBlockWithHighlights(block.start, block.end, wrap, wrapHighlighted);
     };
@@ -527,7 +546,12 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           try {
             if (next === lastSavedContentRef.current) return;
             if (!opts?.silent) setIsSaving(true);
-            await updateFile(fileId, { content: next });
+            if (readOnly) return; // do not persist in read-only mode
+            if (saveContent) {
+              await saveContent(next);
+            } else {
+              await updateFile(fileId, { content: next });
+            }
             lastSavedContentRef.current = next;
           } catch (err) {
             console.error(err);
@@ -537,19 +561,10 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           }
         }, 700);
       },
-      [fileId]
+      [fileId, saveContent, readOnly]
     );
 
-    const startEditSelectedBlock = () => {
-      if (!selectedText || !isVtt) return;
-      const selStartBlock = blockOfOffset(selectedText.start);
-      const selEndBlock = blockOfOffset(selectedText.end);
-      const start = Math.max(0, selStartBlock - 1);
-      const end = Math.min(blocks.length - 1, selEndBlock + 1);
-      setEditingRange({ start, end });
-      setSelectedText(null);
-      setSelectionRect(null);
-    };
+    // Replace references where we cleared selection
 
     const onBlockInput = (i: number): React.FormEventHandler<HTMLDivElement> => (e) => {
       if (!editingRange || i < editingRange.start || i > editingRange.end) return;
@@ -641,8 +656,10 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     const contentEl = (
       <div
         ref={textRootRef}
-        className="prose prose-sm max-w-none leading-relaxed select-text"
-        onMouseUp={handleSelection}
+        role="document"
+        aria-label="Transcript"
+        className="max-w-none leading-snug select-text"
+        onMouseUp={() => {/* selection tracking handled in hook's selectionchange listener */ }}
         onContextMenu={(e) => e.preventDefault()}
       >
         {blocks.map((b, i) => (
@@ -650,8 +667,9 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
             {isVtt && (!editingRange || i < editingRange.start || i > editingRange.end) && (
               <button
                 type="button"
-                className="absolute -left-8 top-2 opacity-0 group-hover:opacity-100 transition-opacity text-neutral-700 hover:text-red-700 bg-white border-2 border-black rounded-md p-1 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-black"
-                aria-label="Delete block"
+                className="absolute -left-10 top-1 opacity-0 group-hover:opacity-100 transition-opacity text-neutral-700 hover:text-red-700 bg-white border-2 border-black rounded-md px-2 py-1 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                aria-label="Delete block (Cmd+Z to undo)"
+                title="Delete block (Cmd+Z to undo)"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={async (e) => {
                   e.stopPropagation();
@@ -668,7 +686,9 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
                     next = next.replace(/\n{2,}/g, '\n');
                   }
                   try {
-                    lastUndoRef.current = { prev };
+                    // Push previous content to undo stack and clear redo stack
+                    undoStackRef.current.push(prev);
+                    redoStackRef.current = [];
                     setIsSaving(true);
                     await updateFile(fileId, { content: next });
                     lastSavedContentRef.current = next;
@@ -676,7 +696,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
                     toast.success('Block deleted', {
                       action: {
                         label: 'Undo',
-                        onClick: () => { void undoDelete(); },
+                        onClick: () => { void performUndo(); },
                       },
                     });
                   } catch (err) {
@@ -687,7 +707,10 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
                   }
                 }}
               >
-                <Trash2 className="w-4 h-4" />
+                <span className="flex items-center gap-1">
+                  <Trash2 className="w-4 h-4" />
+                  <span className="text-[10px] font-medium text-neutral-500">⌘Z</span>
+                </span>
               </button>
             )}
             <div
@@ -695,8 +718,8 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
               data-block-idx={i}
               data-start={b.start}
               data-end={b.end}
-              className={`whitespace-pre-wrap mb-4 p-2 pl-6 rounded ${editingRange && i >= editingRange.start && i <= editingRange.end ? 'bg-yellow-50 outline outline-2 outline-indigo-500' : 'bg-transparent'}`}
-              contentEditable={Boolean(isVtt && editingRange && i >= editingRange.start && i <= editingRange.end)}
+              className={`whitespace-pre-wrap ${((text.substring(b.start, b.end) || '').trim().length === 0) ? 'mb-1' : 'mb-2'} pl-4 ${editingRange && i >= editingRange.start && i <= editingRange.end ? 'bg-yellow-50 outline outline-2 outline-indigo-500' : 'bg-transparent'}`}
+              contentEditable={Boolean(!readOnly && isVtt && editingRange && i >= editingRange.start && i <= editingRange.end)}
               suppressContentEditableWarning
               onInput={onBlockInput(i)}
               onBlur={onBlockBlur(i)}
@@ -717,7 +740,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       <div className="relative space-y-4">
         {framed ? <Card className="p-6">{contentEl}</Card> : contentEl}
 
-        {(selectedText || frozenSelection) && selectionRect && (
+        {(selectedText || frozenSelection) && selectionRect && enableSelectionActions && !readOnly && (
           <SelectionTooltip
             rect={selectionRect}
             isVtt={isVtt}
@@ -726,7 +749,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           />
         )}
 
-        <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) { setFrozenSelection(null); } }}>
+        <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) { /* frozenSelection cleared in hook */ } }}>
           <SheetContent side="right" className="rounded-none border-l-4 border-black sm:max-w-sm">
             <SheetHeader>
               <SheetTitle className="uppercase tracking-wide">Add Code</SheetTitle>
