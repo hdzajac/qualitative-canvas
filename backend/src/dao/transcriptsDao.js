@@ -36,7 +36,7 @@ export async function finalizeTranscript(pool, mediaFileId) {
     const m = Math.floor((totalSec % 3600) / 60);
     const s = totalSec % 60;
     const mm = String(m).padStart(2,'0');
-    const hh = String(h).padStart(2,'0');
+    const hh = String(h); // h:mm:ss format (no leading zero for hours)
     const ss = String(s).padStart(2,'0');
     return `${hh}:${mm}:${ss}`;
   }

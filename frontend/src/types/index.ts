@@ -84,6 +84,7 @@ export interface TranscriptSegment {
   endMs: number;
   text: string;
   participantId?: string | null;
+  participantName?: string;
   createdAt: string;
 }
 

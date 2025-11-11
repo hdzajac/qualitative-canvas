@@ -314,7 +314,8 @@ export default function Transcripts() {
                         <ol className="list-decimal p-3 pl-6 space-y-1">
                             {segQuery.data.map(s => (
                                 <li key={s.id} className="py-1">
-                                    <span className="text-gray-500 mr-2">[{(s.startMs / 1000).toFixed(2)}–{(s.endMs / 1000).toFixed(2)}]</span>
+                                    <span className="text-gray-500 mr-2">[{msToHms(s.startMs)}–{msToHms(s.endMs)}]</span>
+                                    {s.participantName ? <span className="text-blue-700 mr-2">({s.participantName})</span> : null}
                                     {s.text}
                                 </li>
                             ))}
@@ -324,4 +325,15 @@ export default function Transcripts() {
             )}
         </div>
     );
+}
+
+function msToHms(ms?: number) {
+    if (ms == null) return '0:00:00';
+    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const mm = String(m).padStart(2, '0');
+    const ss = String(s).padStart(2, '0');
+    return `${h}:${mm}:${ss}`;
 }

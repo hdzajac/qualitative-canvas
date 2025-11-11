@@ -7,13 +7,18 @@ export function mapSegment(r) {
     endMs: r.end_ms,
     text: r.text,
     participantId: r.participant_id ?? undefined,
+    participantName: r.participant_name ?? undefined,
     createdAt: r.created_at?.toISOString?.() ?? r.created_at,
   };
 }
 
 export async function listSegmentsForMedia(pool, mediaFileId) {
   const r = await pool.query(
-    'SELECT * FROM transcript_segments WHERE media_file_id = $1 ORDER BY idx ASC',
+    `SELECT ts.*, p.name AS participant_name
+     FROM transcript_segments ts
+     LEFT JOIN participants p ON p.id = ts.participant_id
+     WHERE ts.media_file_id = $1
+     ORDER BY ts.idx ASC`,
     [mediaFileId]
   );
   return r.rows.map(mapSegment);
