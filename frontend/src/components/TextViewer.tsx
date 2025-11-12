@@ -40,6 +40,10 @@ interface TextViewerProps {
   // Optional playback handler for VTT segments
   onPlaySegment?: (startMs: number | null, endMs: number | null) => void;
   canPlay?: boolean;
+  // Current playback time (ms) to highlight active segment (optional)
+  currentTimeMs?: number | null;
+  // Auto-stop at segment end when playing (optional flag)
+  activeSegmentAutoStop?: boolean;
   // Optional VTT metadata (one per block in order) for read-only transcript interactions
   vttMeta?: Array<{ segmentId: string; startMs?: number; endMs?: number; participantId?: string | null; participantName?: string | null }>;
   // Optional participant assignment support
@@ -50,7 +54,7 @@ interface TextViewerProps {
 type MinimalParticipant = { id: string; name: string | null };
 
 export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
-  ({ fileId, content, highlights, onHighlightCreated, isVtt = false, framed = true, readOnly = false, enableSelectionActions = true, saveContent, onPlaySegment, canPlay = true, vttMeta, participants, onAssignParticipant }, ref) => {
+  ({ fileId, content, highlights, onHighlightCreated, isVtt = false, framed = true, readOnly = false, enableSelectionActions = true, saveContent, onPlaySegment, canPlay = true, currentTimeMs, activeSegmentAutoStop = false, vttMeta, participants, onAssignParticipant }, ref) => {
     const textRootRef = useRef<HTMLDivElement>(null);
     const [flashRange, setFlashRange] = useState<{ start: number; end: number } | null>(null);
     const flashTimer = useRef<number | null>(null);
@@ -497,11 +501,12 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       const startMs = meta?.startMs ?? parsedStart;
       const endMs = meta?.endMs ?? parsedEnd;
 
+      const isActive = currentTimeMs != null && startMs != null && endMs != null && currentTimeMs >= startMs && currentTimeMs < endMs;
       const playControl = (
         <button
           key={`play-${bStart}`}
           type="button"
-          className="inline-flex items-center justify-center w-6 h-6 mr-2 align-top border-2 border-black rounded-md bg-white hover:bg-neutral-50"
+          className={`inline-flex items-center justify-center w-6 h-6 mr-2 align-top border-2 border-black rounded-md ${isActive ? 'bg-black text-white' : 'bg-white hover:bg-neutral-50'}`}
           aria-label="Play segment"
           title="Play segment"
           onMouseDown={(e) => e.preventDefault()}
@@ -789,76 +794,87 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         onMouseUp={() => {/* selection tracking handled in hook's selectionchange listener */ }}
         onContextMenu={(e) => e.preventDefault()}
       >
-        {blocks.map((b, i) => (
-          <div key={`blockwrap-${i}-${b.start}`} className="relative group">
-            {isVtt && !readOnly && (!editingRange || i < editingRange.start || i > editingRange.end) && (
-              <button
-                type="button"
-                className="absolute -left-10 top-1 opacity-0 group-hover:opacity-100 transition-opacity text-neutral-700 hover:text-red-700 bg-white border-2 border-black rounded-md px-2 py-1 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-black"
-                aria-label="Delete block (Cmd+Z to undo)"
-                title="Delete block (Cmd+Z to undo)"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  // Prepare delete
-                  const block = blocks[i];
-                  if (!block) return;
-                  const prev = text;
-                  let next = prev.substring(0, block.start) + prev.substring(block.end);
-                  if (isVtt) {
-                    next = next.replace(/\n{2,}/g, '\n');
-                    const pivot = Math.max(0, Math.min(block.start, next.length - 1));
-                    next = mergePrevCurr(next, pivot);
-                    next = mergeCurrNext(next, pivot);
-                    next = next.replace(/\n{2,}/g, '\n');
-                  }
-                  try {
-                    // Push previous content to undo stack and clear redo stack
-                    undoStackRef.current.push(prev);
-                    redoStackRef.current = [];
-                    setIsSaving(true);
-                    await updateFile(fileId, { content: next });
-                    lastSavedContentRef.current = next;
-                    setText(next);
-                    toast.success('Block deleted', {
-                      action: {
-                        label: 'Undo',
-                        onClick: () => { void performUndo(); },
-                      },
-                    });
-                  } catch (err) {
-                    console.error(err);
-                    toast.error('Failed to delete block');
-                  } finally {
-                    setIsSaving(false);
-                  }
-                }}
+        {blocks.map((b, i) => {
+          // Active segment highlight (wrapper border/background)
+          let activeCls = '';
+          if (isVtt && vttMeta && currentTimeMs != null && vttMeta[i]) {
+            const sm = vttMeta[i].startMs;
+            const em = vttMeta[i].endMs;
+            if (sm != null && em != null && currentTimeMs >= sm && currentTimeMs < em) {
+              activeCls = 'bg-indigo-50 ring-1 ring-indigo-400';
+            }
+          }
+          return (
+            <div key={`blockwrap-${i}-${b.start}`} className={`relative group ${activeCls}`}>
+              {isVtt && !readOnly && (!editingRange || i < editingRange.start || i > editingRange.end) && (
+                <button
+                  type="button"
+                  className="absolute -left-10 top-1 opacity-0 group-hover:opacity-100 transition-opacity text-neutral-700 hover:text-red-700 bg-white border-2 border-black rounded-md px-2 py-1 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                  aria-label="Delete block (Cmd+Z to undo)"
+                  title="Delete block (Cmd+Z to undo)"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    // Prepare delete
+                    const block = blocks[i];
+                    if (!block) return;
+                    const prev = text;
+                    let next = prev.substring(0, block.start) + prev.substring(block.end);
+                    if (isVtt) {
+                      next = next.replace(/\n{2,}/g, '\n');
+                      const pivot = Math.max(0, Math.min(block.start, next.length - 1));
+                      next = mergePrevCurr(next, pivot);
+                      next = mergeCurrNext(next, pivot);
+                      next = next.replace(/\n{2,}/g, '\n');
+                    }
+                    try {
+                      // Push previous content to undo stack and clear redo stack
+                      undoStackRef.current.push(prev);
+                      redoStackRef.current = [];
+                      setIsSaving(true);
+                      await updateFile(fileId, { content: next });
+                      lastSavedContentRef.current = next;
+                      setText(next);
+                      toast.success('Block deleted', {
+                        action: {
+                          label: 'Undo',
+                          onClick: () => { void performUndo(); },
+                        },
+                      });
+                    } catch (err) {
+                      console.error(err);
+                      toast.error('Failed to delete block');
+                    } finally {
+                      setIsSaving(false);
+                    }
+                  }}
+                >
+                  <span className="flex items-center gap-1">
+                    <Trash2 className="w-4 h-4" />
+                    <span className="text-[10px] font-medium text-neutral-500">⌘Z</span>
+                  </span>
+                </button>
+              )}
+              <div
+                key={`block-${i}-${b.start}`}
+                data-block-idx={i}
+                data-start={b.start}
+                data-end={b.end}
+                className={`whitespace-pre-wrap ${((text.substring(b.start, b.end) || '').trim().length === 0) ? 'mb-1' : 'mb-2'} pl-4 ${editingRange && i >= editingRange.start && i <= editingRange.end ? 'bg-yellow-50 outline outline-2 outline-indigo-500' : 'bg-transparent'}`}
+                contentEditable={Boolean(!readOnly && isVtt && editingRange && i >= editingRange.start && i <= editingRange.end)}
+                suppressContentEditableWarning
+                onInput={onBlockInput(i)}
+                onBlur={onBlockBlur(i)}
               >
-                <span className="flex items-center gap-1">
-                  <Trash2 className="w-4 h-4" />
-                  <span className="text-[10px] font-medium text-neutral-500">⌘Z</span>
-                </span>
-              </button>
-            )}
-            <div
-              key={`block-${i}-${b.start}`}
-              data-block-idx={i}
-              data-start={b.start}
-              data-end={b.end}
-              className={`whitespace-pre-wrap ${((text.substring(b.start, b.end) || '').trim().length === 0) ? 'mb-1' : 'mb-2'} pl-4 ${editingRange && i >= editingRange.start && i <= editingRange.end ? 'bg-yellow-50 outline outline-2 outline-indigo-500' : 'bg-transparent'}`}
-              contentEditable={Boolean(!readOnly && isVtt && editingRange && i >= editingRange.start && i <= editingRange.end)}
-              suppressContentEditableWarning
-              onInput={onBlockInput(i)}
-              onBlur={onBlockBlur(i)}
-            >
-              {isVtt
-                ? (editingRange && i >= editingRange.start && i <= editingRange.end
-                  ? text.substring(b.start, b.end)
-                  : renderVttBlock({ start: b.start, end: b.end }, i))
-                : renderGenericBlock({ start: b.start, end: b.end })}
+                {isVtt
+                  ? (editingRange && i >= editingRange.start && i <= editingRange.end
+                    ? text.substring(b.start, b.end)
+                    : renderVttBlock({ start: b.start, end: b.end }, i))
+                  : renderGenericBlock({ start: b.start, end: b.end })}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {isSaving ? <div className="mt-2 text-xs text-neutral-500">Saving…</div> : null}
       </div>
     );

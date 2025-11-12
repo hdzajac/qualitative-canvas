@@ -1,11 +1,13 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
-import { listSegments, getMedia, getFinalizedTranscript, finalizeTranscript, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants, getFile, updateSegment } from '@/services/api';
+import { useState, useEffect } from 'react';
+import { listSegments, getMedia, getFinalizedTranscript, finalizeTranscript, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants, getFile, updateSegment, getMediaDownloadUrl } from '@/services/api';
 import type { Participant, TranscriptSegment } from '@/types';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { DocumentViewer } from '@/components/DocumentViewer';
+import { AudioProvider, useAudio } from '@/hooks/useAudio';
+import AudioBar from '@/components/AudioBar';
 import { Progress } from '@/components/ui/progress';
 import { getLatestJobForMedia } from '@/services/api';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
@@ -114,6 +116,7 @@ export default function TranscriptDetail() {
 
     // Build VTT content + metadata once per segments change
     const built = buildTranscriptContentAndMeta(segments);
+    const audioUrl = media?.status === 'done' && id ? getMediaDownloadUrl(id) : null;
 
     return (
         <div className="container mx-auto p-6 space-y-4">
@@ -161,40 +164,19 @@ export default function TranscriptDetail() {
                         <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6 items-start">
                             <div>
                                 {segments.length > 0 || finalizedFile ? (
-                                    <DocumentViewer
-                                        fileId={finalizedFile?.id || `media-${id}-virtual`}
-                                        content={finalizedFile?.content || built.content}
-                                        highlights={[]}
-                                        onHighlightCreated={() => { /* no-op in transcript view */ }}
-                                        isVtt={true}
-                                        framed={false}
-                                        readOnly={true}
-                                        enableSelectionActions={false}
-                                        vttMeta={segments.length > 0 ? built.meta : undefined}
-                                        participants={participants.map(p => ({ id: p.id, name: p.name }))}
-                                        onAssignParticipant={async (segmentId, participantId) => {
-                                            // optimistic update of segments list
-                                            await qc.cancelQueries({ queryKey: ['segments', id] });
-                                            const prev = qc.getQueryData<TranscriptSegment[]>(['segments', id]);
-                                            if (prev) {
-                                                qc.setQueryData<TranscriptSegment[]>(['segments', id], prev.map(s => s.id === segmentId ? { ...s, participantId, participantName: participants.find(p => p.id === participantId)?.name || null } : s));
-                                            }
-                                            try {
-                                                const seg = (prev || []).find(s => s.id === segmentId);
-                                                if (seg) await updateSegment(id!, segmentId, { participantId });
-                                            } finally {
-                                                qc.invalidateQueries({ queryKey: ['segments', id] });
-                                                qc.invalidateQueries({ queryKey: ['participantCounts', id] });
-                                            }
-                                        }}
-                                        canPlay={media?.status === 'done'}
-                                        onPlaySegment={(startMs, endMs) => {
-                                            // Placeholder: integrate audio element or player later
-                                            // For now emit a console log as a stub to prove wiring works.
-                                            console.log('Play segment', { startMs, endMs });
-                                            // TODO: hook into audio waveform/player component with precise seek.
-                                        }}
-                                    />
+                                    <AudioProvider>
+                                        <InnerTranscriptViewer
+                                            mediaId={id!}
+                                            audioUrl={audioUrl}
+                                            built={built}
+                                            finalizedFile={finalizedFile}
+                                            segments={segments}
+                                            participants={participants}
+                                            id={id!}
+                                            canPlay={media?.status === 'done'}
+                                            qc={qc}
+                                        />
+                                    </AudioProvider>
                                 ) : (
                                     <div className="text-sm text-neutral-600">{media.status === 'processing' ? 'Transcription in progress… segments will appear here.' : 'No segments.'}</div>
                                 )}
@@ -218,6 +200,52 @@ export default function TranscriptDetail() {
                 </div>
             ) : (
                 <div className="text-sm text-neutral-600">Loading media…</div>
+            )}
+        </div>
+    );
+}
+
+function InnerTranscriptViewer({ mediaId, audioUrl, built, finalizedFile, segments, participants, id, canPlay, qc }: { mediaId: string; audioUrl: string | null; built: { content: string; meta: Array<{ segmentId: string; startMs?: number; endMs?: number; participantId?: string | null; participantName?: string | null }> }; finalizedFile: { id: string; content: string } | undefined; segments: TranscriptSegment[]; participants: Participant[]; id: string; canPlay: boolean; qc: ReturnType<typeof useQueryClient> }) {
+    const { setSrc, currentTimeMs, playSegment } = useAudio();
+    // Load or clear source based on availability
+    useEffect(() => { setSrc(audioUrl); }, [audioUrl, setSrc]);
+    return (
+        <div className="space-y-3">
+            <DocumentViewer
+                fileId={finalizedFile?.id || `media-${id}-virtual`}
+                content={finalizedFile?.content || built.content}
+                highlights={[]}
+                onHighlightCreated={() => { /* no-op in transcript view */ }}
+                isVtt={true}
+                framed={false}
+                readOnly={true}
+                enableSelectionActions={false}
+                vttMeta={segments.length > 0 ? built.meta : undefined}
+                participants={participants.map(p => ({ id: p.id, name: p.name }))}
+                onAssignParticipant={async (segmentId, participantId) => {
+                    // optimistic update of segments list
+                    await qc.cancelQueries({ queryKey: ['segments', id] });
+                    const prev = qc.getQueryData<TranscriptSegment[]>(['segments', id]);
+                    if (prev) {
+                        qc.setQueryData<TranscriptSegment[]>(['segments', id], prev.map(s => s.id === segmentId ? { ...s, participantId, participantName: participants.find(p => p.id === participantId)?.name || null } : s));
+                    }
+                    try {
+                        const seg = (prev || []).find(s => s.id === segmentId);
+                        if (seg) await updateSegment(id!, segmentId, { participantId });
+                    } finally {
+                        qc.invalidateQueries({ queryKey: ['segments', id] });
+                        qc.invalidateQueries({ queryKey: ['participantCounts', id] });
+                    }
+                }}
+                canPlay={canPlay}
+                currentTimeMs={currentTimeMs}
+                onPlaySegment={(startMs, endMs) => {
+                    if (startMs == null) return; // stop case not needed; provider auto-pauses at end boundary
+                    playSegment(startMs, endMs ?? null);
+                }}
+            />
+            {audioUrl && (
+                <AudioBar />
             )}
         </div>
     );

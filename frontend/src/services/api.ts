@@ -160,6 +160,9 @@ export const getMedia = (id: string): Promise<MediaFile> => http<MediaFile>(`/me
 export const deleteMedia = (id: string, opts?: { force?: boolean }): Promise<void> =>
   http<void>(`/media/${id}${opts?.force ? '?force=1' : ''}`, { method: 'DELETE' });
 
+// Raw media download/stream URL (no fetch performed); can be used as <audio src={...}> source.
+export const getMediaDownloadUrl = (id: string): string => `${API_BASE.replace(/\/$/, '')}/api/media/${id}/download`;
+
 export async function uploadMedia(file: File, projectId: string): Promise<MediaFile> {
   const form = new FormData();
   form.append('file', file);
