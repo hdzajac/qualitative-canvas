@@ -19,6 +19,14 @@ export interface DocumentViewerProps {
     highlights: Highlight[];
     onHighlightCreated: () => void;
     isVtt?: boolean;
+    // Playback controls
+    onPlaySegment?: (startMs: number | null, endMs: number | null) => void;
+    canPlay?: boolean;
+    // VTT metadata and participant assignment
+    vttMeta?: Array<{ segmentId: string; startMs?: number; endMs?: number; participantId?: string | null; participantName?: string | null }>;
+    // Allow passing a lightweight participant shape (e.g. from list queries) without full metadata.
+    participants?: Array<{ id: string; name: string | null }>;
+    onAssignParticipant?: (segmentId: string, participantId: string | null) => Promise<void> | void;
     // Layout slots
     headerExtras?: React.ReactNode;
     leftPanel?: React.ReactNode; // e.g. participants management
@@ -33,7 +41,7 @@ export interface DocumentViewerProps {
 
 // Simple first iteration wrapper: uses a 3-column responsive grid if side panels provided.
 export const DocumentViewer = forwardRef<DocumentViewerHandle, DocumentViewerProps>(
-    ({ fileId, content, highlights, onHighlightCreated, isVtt = false, headerExtras, leftPanel, rightPanel, footer, framed = true, readOnly = false, enableSelectionActions = true, saveContent }, ref) => {
+    ({ fileId, content, highlights, onHighlightCreated, isVtt = false, headerExtras, leftPanel, rightPanel, footer, framed = true, readOnly = false, enableSelectionActions = true, saveContent, onPlaySegment, canPlay, vttMeta, participants, onAssignParticipant }, ref) => {
         const tvRef = React.useRef<TextViewerHandle>(null);
         useImperativeHandle(ref, () => ({
             scrollToOffset: (o: number) => tvRef.current?.scrollToOffset(o),
@@ -56,6 +64,11 @@ export const DocumentViewer = forwardRef<DocumentViewerHandle, DocumentViewerPro
                     readOnly={readOnly}
                     enableSelectionActions={enableSelectionActions}
                     saveContent={saveContent}
+                    onPlaySegment={onPlaySegment}
+                    canPlay={canPlay}
+                    vttMeta={vttMeta}
+                    participants={participants}
+                    onAssignParticipant={onAssignParticipant}
                 />
             </div>
         );

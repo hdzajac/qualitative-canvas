@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { listSegments, getMedia, getFinalizedTranscript, finalizeTranscript, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants, getFile } from '@/services/api';
+import { listSegments, getMedia, getFinalizedTranscript, finalizeTranscript, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants, getFile, updateSegment } from '@/services/api';
 import type { Participant, TranscriptSegment } from '@/types';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
@@ -82,11 +82,13 @@ export default function TranscriptDetail() {
             qc.invalidateQueries({ queryKey: ['segments', id] });
         },
     });
-    const { data: finalized } = useQuery({ queryKey: ['finalized', id], queryFn: () => getFinalizedTranscript(id!), enabled: !!id && media?.status === 'done' });
+    const { data: finalized } = useQuery({ queryKey: ['finalized', id], queryFn: () => getFinalizedTranscript(id!), enabled: !!id && media?.status === 'done', retry: false, refetchOnWindowFocus: false });
     const { data: finalizedFile } = useQuery({
         queryKey: ['finalizedFile', id, finalized?.fileId],
         queryFn: () => getFile(finalized!.fileId),
         enabled: !!finalized?.fileId,
+        retry: false,
+        refetchOnWindowFocus: false,
     });
     const finalizeMut = useMutation({
         mutationFn: () => finalizeTranscript(id!),
@@ -109,6 +111,9 @@ export default function TranscriptDetail() {
     if (media?.status === 'done') {
         statusLabelDisplay = finalized ? 'Done (finalized)' : 'Done';
     }
+
+    // Build VTT content + metadata once per segments change
+    const built = buildTranscriptContentAndMeta(segments);
 
     return (
         <div className="container mx-auto p-6 space-y-4">
@@ -153,104 +158,62 @@ export default function TranscriptDetail() {
                     </div>
                     <div className="p-3 space-y-3">
                         {/* Center document viewer with transcript content (finalized file if available, otherwise synthetic from segments) */}
-                        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
+                        <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6 items-start">
                             <div>
                                 {segments.length > 0 || finalizedFile ? (
                                     <DocumentViewer
                                         fileId={finalizedFile?.id || `media-${id}-virtual`}
-                                        content={finalizedFile?.content || buildTranscriptContent(segments)}
+                                        content={finalizedFile?.content || built.content}
                                         highlights={[]}
                                         onHighlightCreated={() => { /* no-op in transcript view */ }}
                                         isVtt={true}
                                         framed={false}
                                         readOnly={true}
                                         enableSelectionActions={false}
+                                        vttMeta={segments.length > 0 ? built.meta : undefined}
+                                        participants={participants.map(p => ({ id: p.id, name: p.name }))}
+                                        onAssignParticipant={async (segmentId, participantId) => {
+                                            // optimistic update of segments list
+                                            await qc.cancelQueries({ queryKey: ['segments', id] });
+                                            const prev = qc.getQueryData<TranscriptSegment[]>(['segments', id]);
+                                            if (prev) {
+                                                qc.setQueryData<TranscriptSegment[]>(['segments', id], prev.map(s => s.id === segmentId ? { ...s, participantId, participantName: participants.find(p => p.id === participantId)?.name || null } : s));
+                                            }
+                                            try {
+                                                const seg = (prev || []).find(s => s.id === segmentId);
+                                                if (seg) await updateSegment(id!, segmentId, { participantId });
+                                            } finally {
+                                                qc.invalidateQueries({ queryKey: ['segments', id] });
+                                                qc.invalidateQueries({ queryKey: ['participantCounts', id] });
+                                            }
+                                        }}
+                                        canPlay={media?.status === 'done'}
+                                        onPlaySegment={(startMs, endMs) => {
+                                            // Placeholder: integrate audio element or player later
+                                            // For now emit a console log as a stub to prove wiring works.
+                                            console.log('Play segment', { startMs, endMs });
+                                            // TODO: hook into audio waveform/player component with precise seek.
+                                        }}
                                     />
                                 ) : (
                                     <div className="text-sm text-neutral-600">{media.status === 'processing' ? 'Transcription in progress… segments will appear here.' : 'No segments.'}</div>
                                 )}
                             </div>
-                            <div>
-                                {/* Participants management and utilities */}
-                                <div className="font-semibold mb-2">Participants</div>
-                                <div className="grid gap-3">
-                                    <ParticipantListForm
-                                        participants={participants}
-                                        counts={counts}
-                                        onSave={(partId, name) => updatePartMut.mutate({ partId, name })}
-                                        onDelete={(partId) => deletePartMut.mutate(partId)}
-                                        isSaving={(partId) => updatePartMut.isPending}
-                                    />
-                                    <div>
-                                        <div className="text-xs text-neutral-600 mb-1">Create</div>
-                                        <div className="flex items-center gap-2">
-                                            <input className="border px-2 py-1" placeholder="Name" value={newPart.name} onChange={(e) => setNewPart({ name: e.target.value })} />
-                                            <Button size="sm" disabled={!newPart.name || createPartMut.isPending} onClick={() => createPartMut.mutate()}>Add</Button>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div className="text-xs text-neutral-600 mb-1">Merge participants</div>
-                                        <div className="flex items-center gap-2">
-                                            <select className="border px-2 py-1" value={mergeSource} onChange={(e) => setMergeSource(e.target.value)}>
-                                                <option value="">Source…</option>
-                                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                            </select>
-                                            <span className="text-xs text-neutral-600">into</span>
-                                            <select className="border px-2 py-1" value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
-                                                <option value="">Target…</option>
-                                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                            </select>
-                                            <Button size="sm" disabled={!mergeSource || !mergeTarget || mergeSource === mergeTarget || mergeMut.isPending} onClick={() => mergeMut.mutate()}>
-                                                {mergeMut.isPending ? 'Merging…' : 'Merge'}
-                                            </Button>
-                                        </div>
-                                        <div className="text-[11px] text-neutral-500 mt-1">Moves all segments from source to target and deletes the source participant.</div>
-                                    </div>
-                                    <div className="text-xs text-neutral-600">Counts: {counts.map(c => (<span key={c.participantId ?? 'none'} className="mr-2">{c.name || 'Unassigned'}: {c.count}</span>))}</div>
-                                </div>
+                            <div className="space-y-3">
+                                <ParticipantPanel
+                                    participants={participants}
+                                    counts={counts}
+                                    newPart={newPart}
+                                    onNewPartChange={(v) => setNewPart(v)}
+                                    onCreate={() => createPartMut.mutate()}
+                                    merging={{ source: mergeSource, target: mergeTarget, setSource: setMergeSource, setTarget: setMergeTarget, onMerge: () => mergeMut.mutate(), isMerging: mergeMut.isPending }}
+                                    onDelete={(id) => deletePartMut.mutate(id)}
+                                    onSave={(id, name) => updatePartMut.mutate({ partId: id, name })}
+                                    isSaving={updatePartMut.isPending}
+                                />
                             </div>
                         </div>
-                        <div className="border-t border-black pt-3 mt-3">
-                            <div className="font-semibold mb-2">Participants</div>
-                            <div className="grid md:grid-cols-2 gap-3">
-                                <div>
-                                    <div className="text-xs text-neutral-600 mb-1">List</div>
-                                    <ParticipantListForm
-                                        participants={participants}
-                                        counts={counts}
-                                        onSave={(partId, name) => updatePartMut.mutate({ partId, name })}
-                                        onDelete={(partId) => deletePartMut.mutate(partId)}
-                                        isSaving={(partId) => updatePartMut.isPending}
-                                    />
-                                </div>
-                                <div>
-                                    <div className="text-xs text-neutral-600 mb-1">Create</div>
-                                    <div className="flex items-center gap-2">
-                                        <input className="border px-2 py-1" placeholder="Name" value={newPart.name} onChange={(e) => setNewPart({ name: e.target.value })} />
-                                        <Button size="sm" disabled={!newPart.name || createPartMut.isPending} onClick={() => createPartMut.mutate()}>Add</Button>
-                                    </div>
-                                    <div className="mt-4">
-                                        <div className="text-xs text-neutral-600 mb-1">Merge participants</div>
-                                        <div className="flex items-center gap-2">
-                                            <select className="border px-2 py-1" value={mergeSource} onChange={(e) => setMergeSource(e.target.value)}>
-                                                <option value="">Source…</option>
-                                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                            </select>
-                                            <span className="text-xs text-neutral-600">into</span>
-                                            <select className="border px-2 py-1" value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
-                                                <option value="">Target…</option>
-                                                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                            </select>
-                                            <Button size="sm" disabled={!mergeSource || !mergeTarget || mergeSource === mergeTarget || mergeMut.isPending} onClick={() => mergeMut.mutate()}>
-                                                {mergeMut.isPending ? 'Merging…' : 'Merge'}
-                                            </Button>
-                                        </div>
-                                        <div className="text-[11px] text-neutral-500 mt-1">Moves all segments from source to target and deletes the source participant.</div>
-                                    </div>
-                                    <div className="mt-3 text-xs text-neutral-600">Counts: {counts.map(c => (<span key={c.participantId ?? 'none'} className="mr-2">{c.name || 'Unassigned'}: {c.count}</span>))}</div>
-                                </div>
-                            </div>
-                        </div>
+                        {/* Removed duplicated participants section below to keep layout compact */}
                     </div>
                 </div>
             ) : (
@@ -309,6 +272,82 @@ function ParticipantListForm({
     );
 }
 
+// Compact participant panel with sticky layout and scroll, designed to avoid overflow
+function ParticipantPanel({
+    participants,
+    counts,
+    newPart,
+    onNewPartChange,
+    onCreate,
+    merging,
+    onDelete,
+    onSave,
+    isSaving,
+}: {
+    participants: Participant[];
+    counts: Array<{ participantId: string | null; name: string | null; color: string | null; count: number }>;
+    newPart: { name: string };
+    onNewPartChange: (v: { name: string }) => void;
+    onCreate: () => void;
+    merging: { source: string; target: string; setSource: (v: string) => void; setTarget: (v: string) => void; onMerge: () => void; isMerging: boolean };
+    onDelete: (id: string) => void;
+    onSave: (id: string, name: string) => void;
+    isSaving: boolean;
+}) {
+    const [names, setNames] = useState<Record<string, string>>({});
+    const valueFor = (p: Participant) => (names[p.id] ?? p.name ?? '');
+    const setValue = (id: string, v: string) => setNames(prev => ({ ...prev, [id]: v }));
+    const dirty = (p: Participant) => valueFor(p) !== (p.name ?? '');
+    const empty = (p: Participant) => valueFor(p).trim().length === 0;
+    return (
+        <div className="w-full lg:w-[260px] sticky lg:top-24 overflow-hidden">
+            <div className="font-semibold mb-2">Participants</div>
+            <div className="max-h-[68vh] overflow-auto pr-1 space-y-3 text-[13px]">
+                <ul className="space-y-1">
+                    {participants.map(p => (
+                        <li key={p.id} className="flex items-center gap-2">
+                            <input className="border px-2 py-1 flex-1 min-w-0" value={valueFor(p)} onChange={(e) => setValue(p.id, e.target.value)} />
+                            <span className="text-[11px] text-neutral-600 whitespace-nowrap">({counts.find(c => c.participantId === p.id)?.count ?? 0})</span>
+                            <Button size="sm" disabled={!dirty(p) || empty(p) || isSaving} onClick={() => onSave(p.id, valueFor(p).trim())}>Save</Button>
+                            <Button size="sm" variant="ghost" onClick={() => onDelete(p.id)}>Delete</Button>
+                        </li>
+                    ))}
+                    {participants.length === 0 && <li className="text-sm text-neutral-600">No participants yet.</li>}
+                </ul>
+                <div className="pt-2 border-t border-neutral-200">
+                    <div className="text-xs text-neutral-600 mb-1">Create</div>
+                    <div className="flex items-center gap-2">
+                        <input className="border px-2 py-1 flex-1" placeholder="Name" value={newPart.name} onChange={(e) => onNewPartChange({ name: e.target.value })} />
+                        <Button size="sm" disabled={!newPart.name} onClick={onCreate}>Add</Button>
+                    </div>
+                </div>
+                <div className="pt-2 border-t border-neutral-200">
+                    <div className="text-xs text-neutral-600 mb-1">Merge</div>
+                    <div className="flex items-center gap-2">
+                        <select className="border px-2 py-1 flex-1" value={merging.source} onChange={(e) => merging.setSource(e.target.value)}>
+                            <option value="">Source…</option>
+                            {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <span className="text-xs text-neutral-600">→</span>
+                        <select className="border px-2 py-1 flex-1" value={merging.target} onChange={(e) => merging.setTarget(e.target.value)}>
+                            <option value="">Target…</option>
+                            {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <Button size="sm" disabled={!merging.source || !merging.target || merging.source === merging.target || merging.isMerging} onClick={merging.onMerge}>{merging.isMerging ? '…' : 'Merge'}</Button>
+                    </div>
+                </div>
+                <div className="pt-2 border-t border-neutral-200 text-xs text-neutral-600">
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                        {counts.map(c => (
+                            <div key={c.participantId ?? 'none'} className="truncate"><span className="font-medium">{c.name || 'Unassigned'}:</span> {c.count}</div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function msToHms(ms?: number) {
     if (ms == null) return '0:00:00';
     const totalSec = Math.max(0, Math.floor(ms / 1000));
@@ -331,14 +370,16 @@ function hmsToMs(hms: string): number | undefined {
 }
 
 // Build a synthetic VTT-like content string from segments for unified viewing
-function buildTranscriptContent(segments: TranscriptSegment[]): string {
+function buildTranscriptContentAndMeta(segments: TranscriptSegment[]): { content: string; meta: Array<{ segmentId: string; startMs?: number; endMs?: number; participantId?: string | null; participantName?: string | null }> } {
     const sorted = [...segments].sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0));
+    const meta: Array<{ segmentId: string; startMs?: number; endMs?: number; participantId?: string | null; participantName?: string | null }> = [];
     const lines = sorted.map(s => {
         const start = msToHms(s.startMs);
         const end = msToHms(s.endMs);
         const speaker = s.participantName ? `${s.participantName}:` : '';
         // Timestamp and speaker on their own then speech on new line to match viewer formatting
+        meta.push({ segmentId: s.id, startMs: s.startMs, endMs: s.endMs, participantId: s.participantId ?? null, participantName: s.participantName ?? null });
         return `[${start} - ${end}] ${speaker}${speaker ? '\n' : ''}${s.text}`;
     });
-    return lines.join('\n');
+    return { content: lines.join('\n'), meta };
 }

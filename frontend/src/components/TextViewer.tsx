@@ -13,7 +13,9 @@ import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 // DEFAULTS not needed here; used inside selection hook
 import { getCorrectedRange as utilGetCorrectedRange } from '@/components/text/highlights';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Play, Plus } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command';
 
 export type TextViewerHandle = {
   scrollToOffset: (offset: number) => void;
@@ -35,10 +37,20 @@ interface TextViewerProps {
   readOnly?: boolean; // disable selection actions and editing
   enableSelectionActions?: boolean; // show selection tooltip/actions (default true)
   saveContent?: (next: string) => Promise<void>; // override default updateFile
+  // Optional playback handler for VTT segments
+  onPlaySegment?: (startMs: number | null, endMs: number | null) => void;
+  canPlay?: boolean;
+  // Optional VTT metadata (one per block in order) for read-only transcript interactions
+  vttMeta?: Array<{ segmentId: string; startMs?: number; endMs?: number; participantId?: string | null; participantName?: string | null }>;
+  // Optional participant assignment support
+  participants?: MinimalParticipant[];
+  onAssignParticipant?: (segmentId: string, participantId: string | null) => Promise<void> | void;
 }
 
+type MinimalParticipant = { id: string; name: string | null };
+
 export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
-  ({ fileId, content, highlights, onHighlightCreated, isVtt = false, framed = true, readOnly = false, enableSelectionActions = true, saveContent }, ref) => {
+  ({ fileId, content, highlights, onHighlightCreated, isVtt = false, framed = true, readOnly = false, enableSelectionActions = true, saveContent, onPlaySegment, canPlay = true, vttMeta, participants, onAssignParticipant }, ref) => {
     const textRootRef = useRef<HTMLDivElement>(null);
     const [flashRange, setFlashRange] = useState<{ start: number; end: number } | null>(null);
     const flashTimer = useRef<number | null>(null);
@@ -59,6 +71,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     // Multi-level undo/redo stacks for committed edits (blur or deletion)
     const undoStackRef = useRef<string[]>([]);
     const redoStackRef = useRef<string[]>([]);
+    const lastPlayClickRef = useRef<number>(0);
 
     const performUndo = useCallback(async () => {
       if (undoStackRef.current.length === 0) return;
@@ -289,7 +302,37 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
     };
 
     // VTT statement renderer: subtle timestamp, distinct speaker, speech on new line
-    const renderVttBlock = (block: { start: number; end: number }) => {
+    const hmsToMsLocal = (hms: string): number | null => {
+      const m = hms.trim().match(/^(\d+):(\d{1,2}):(\d{1,2})$/);
+      if (!m) return null;
+      const h = parseInt(m[1], 10);
+      const mm = parseInt(m[2], 10);
+      const ss = parseInt(m[3], 10);
+      if (Number.isNaN(h) || Number.isNaN(mm) || Number.isNaN(ss)) return null;
+      return ((h * 3600) + (mm * 60) + ss) * 1000;
+    };
+
+    const findMetaForTimes = (idx: number, startMs: number | null, endMs: number | null) => {
+      let meta = vttMeta && vttMeta[idx] ? vttMeta[idx] : undefined;
+      if (!meta && vttMeta && startMs != null) {
+        // Fuzzy match by time if indexes don't align (e.g., finalized file reflow)
+        const TOL_START = 1200; // ms tolerance on start
+        const TOL_END = 1500; // slightly looser tolerance on end
+        const candidates = vttMeta
+          .filter(m => (m.startMs != null && Math.abs((m.startMs ?? startMs) - startMs) <= TOL_START)
+            && (endMs == null || m.endMs == null || Math.abs((m.endMs ?? endMs) - endMs) <= TOL_END))
+          .map(m => {
+            const ds = Math.abs((m.startMs ?? startMs) - startMs);
+            const de = (endMs != null && m.endMs != null) ? Math.abs(m.endMs - endMs) : 0;
+            return { m, score: ds + de };
+          })
+          .sort((a, b) => a.score - b.score);
+        meta = candidates.length > 0 ? candidates[0].m : undefined;
+      }
+      return meta;
+    };
+
+    const renderVttBlock = (block: { start: number; end: number }, idx: number) => {
       const bStart = block.start;
       const bEnd = block.end;
       const full = text.substring(bStart, bEnd);
@@ -326,11 +369,28 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
             // Add ARIA label for speaker segments to aid screen readers
             const isSpeakerSeg = speaker && from >= speakerStart && to <= speakerEnd;
             if (isSpeakerSeg) {
-              out.push(
-                <span key={key} className={cls} aria-label={`Speaker: ${speaker}`}>
-                  {full.substring(from, to)}
-                </span>
-              );
+              const meta = vttMeta && vttMeta[idx] ? vttMeta[idx] : undefined;
+              const segId = meta?.segmentId;
+              const labelText = full.substring(from, to);
+              if (labelText.trim().length === 0) {
+                out.push(<span key={key} className={cls} aria-label={`Speaker: ${speaker}`}></span>);
+              } else if (readOnly && segId && participants && participants.length > 0 && onAssignParticipant) {
+                out.push(
+                  <AssignPopover
+                    key={`spk-fb-pop-${bStart}-${from}-${to}`}
+                    label={labelText}
+                    className={cls}
+                    participants={participants}
+                    onSelect={(pid) => onAssignParticipant(segId, pid)}
+                  />
+                );
+              } else {
+                out.push(
+                  <span key={key} className={cls} aria-label={`Speaker: ${speaker}`}>
+                    {labelText}
+                  </span>
+                );
+              }
             } else {
               out.push(<span key={key} className={cls}>{full.substring(from, to)}</span>);
             }
@@ -391,7 +451,10 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           }
           return out;
         };
-        return renderBlockWithHighlights(bStart, bEnd, wrapFallback, wrapFallbackHighlighted);
+        // Render with optional leading play button if we can infer a timestamp at the start (fallback lacks strict ts)
+        const parts = renderBlockWithHighlights(bStart, bEnd, wrapFallback, wrapFallbackHighlighted);
+        // For fallback, we don't know exact times; skip play control
+        return parts;
       }
 
       // Normalize fields depending on which pattern matched
@@ -404,7 +467,19 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       if (bracket) {
         ts = bracket[1] || '';
         tsEnd = bracket[0].length; // include the entire bracket as timestamp region
-        speechStart = bracket[0].length;
+        // Try to parse optional speaker label right after bracketed timestamp: "Speaker: "
+        const afterTs = full.slice(tsEnd);
+        const sp = afterTs.match(/^\s*(.+?):\s*/);
+        if (sp) {
+          speaker = sp[1] || '';
+          const leading = (sp[0].length - (speaker.length + 1)) // includes spaces + colon
+          const leadingSpaces = Math.max(0, leading - 1); // account for colon
+          speakerStart = tsEnd + leadingSpaces;
+          speakerEnd = speakerStart + speaker.length + 2; // ": "
+          speechStart = tsEnd + sp[0].length;
+        } else {
+          speechStart = tsEnd;
+        }
       } else if (m) {
         ts = m[1] || '';
         speaker = m[2] || '';
@@ -414,6 +489,35 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         speechStart = m ? m[0].length : 0;
       }
 
+      // Derive ms for playback if available
+      // Prefer meta times if provided, else parse from text, else fuzzy-match
+      const parsedStart = bracket ? hmsToMsLocal(bracket[1]) : (ts ? hmsToMsLocal(ts) : null);
+      const parsedEnd = bracket ? hmsToMsLocal(bracket[2]) : null;
+      const meta = findMetaForTimes(idx, parsedStart, parsedEnd);
+      const startMs = meta?.startMs ?? parsedStart;
+      const endMs = meta?.endMs ?? parsedEnd;
+
+      const playControl = (
+        <button
+          key={`play-${bStart}`}
+          type="button"
+          className="inline-flex items-center justify-center w-6 h-6 mr-2 align-top border-2 border-black rounded-md bg-white hover:bg-neutral-50"
+          aria-label="Play segment"
+          title="Play segment"
+          onMouseDown={(e) => e.preventDefault()}
+          disabled={!canPlay || startMs == null}
+          onClick={(e) => {
+            e.stopPropagation();
+            const now = Date.now();
+            if (now - lastPlayClickRef.current < 150) return; // simple debounce for rapid clicks
+            lastPlayClickRef.current = now;
+            if (onPlaySegment) onPlaySegment(startMs, endMs);
+          }}
+        >
+          <Play className="w-3 h-3" />
+        </button>
+      );
+
       const wrap = (_chunkText: string, absStart: number, absEnd: number): JSX.Element[] => {
         const relStart = absStart - bStart;
         const relEnd = absEnd - bStart;
@@ -422,6 +526,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           if (to <= from) return;
           out.push(<span key={key} className={cls}>{full.substring(from, to)}</span>);
         };
+        // Do not render play here; we attach it after speaker label if available (or after timestamp if no speaker)
         const boundaries = [relStart];
         if (tsEnd > relStart && tsEnd < relEnd) boundaries.push(tsEnd);
         if (speakerStart >= 0) {
@@ -436,7 +541,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           const e = boundaries[i + 1];
           let cls = 'text-sm text-neutral-800';
           if (s < tsEnd) cls = 'text-[11px] text-neutral-400 mr-2 align-top';
-          else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-0.5 align-top';
+          else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'inline-flex items-center text-[12px] font-medium text-neutral-800 mr-1 align-top border border-black rounded-full px-1.5 py-0.5';
           else if (s >= speechStart) cls = 'text-sm leading-snug text-neutral-800'; // inline speech compact
           if (s < tsEnd) {
             // timestamp segment
@@ -446,12 +551,34 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
                 {full.substring(s, e)}
               </time>
             );
+            // Do not render a left-of-line play control; play stays next to speaker only
           } else if (speaker && s >= speakerStart && e <= speakerEnd) {
-            out.push(
-              <span key={`spk-${bStart}-${s}-${e}`} className={cls} aria-label={`Speaker: ${speaker}`}>
-                {full.substring(s, e)}
-              </span>
-            );
+            const segId = meta?.segmentId;
+            const labelText = full.substring(s, e);
+            if (labelText.trim().length === 0) {
+              // Safety: don't render empty pill or play button if label is empty
+              pushSeg(s, e, cls, `seg-empty-${bStart}-${s}-${e}`);
+            } else if (readOnly && segId && participants && participants.length > 0 && onAssignParticipant) {
+              // Interactive pill with popover
+              out.push(
+                <AssignPopover
+                  key={`spk-pop-${bStart}-${s}-${e}`}
+                  label={labelText}
+                  className={cls}
+                  participants={participants}
+                  onSelect={(pid) => onAssignParticipant(segId, pid)}
+                />
+              );
+              // Append play control right after speaker label when available
+              out.push(<React.Fragment key={`playafter-${bStart}-${s}-${e}`}>{playControl}</React.Fragment>);
+            } else {
+              out.push(
+                <span key={`spk-${bStart}-${s}-${e}`} className={cls} aria-label={`Speaker: ${speaker}`}>
+                  {labelText}
+                </span>
+              );
+              out.push(<React.Fragment key={`playafter2-${bStart}-${s}-${e}`}>{playControl}</React.Fragment>);
+            }
           } else {
             pushSeg(s, e, cls, `seg-${bStart}-${s}-${e}`);
           }
@@ -510,7 +637,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           const e = boundaries[i + 1];
           let cls = 'text-sm text-neutral-800';
           if (s < tsEnd) cls = 'text-[11px] text-neutral-400 mr-2 align-top';
-          else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'text-sm font-semibold text-neutral-800 mr-0.5 align-top';
+          else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'inline-flex items-center text-[12px] font-medium text-neutral-800 mr-1 align-top border border-black rounded-full px-1.5 py-0.5';
           else if (s >= speechStart) cls = 'text-sm leading-snug text-neutral-800';
           pushSeg(s, e, cls, `seg-h-${bStart}-${s}-${e}`);
         }
@@ -658,13 +785,13 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         ref={textRootRef}
         role="document"
         aria-label="Transcript"
-        className="max-w-none leading-snug select-text"
+        className="max-w-none leading-snug select-text break-words"
         onMouseUp={() => {/* selection tracking handled in hook's selectionchange listener */ }}
         onContextMenu={(e) => e.preventDefault()}
       >
         {blocks.map((b, i) => (
           <div key={`blockwrap-${i}-${b.start}`} className="relative group">
-            {isVtt && (!editingRange || i < editingRange.start || i > editingRange.end) && (
+            {isVtt && !readOnly && (!editingRange || i < editingRange.start || i > editingRange.end) && (
               <button
                 type="button"
                 className="absolute -left-10 top-1 opacity-0 group-hover:opacity-100 transition-opacity text-neutral-700 hover:text-red-700 bg-white border-2 border-black rounded-md px-2 py-1 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-black"
@@ -727,7 +854,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
               {isVtt
                 ? (editingRange && i >= editingRange.start && i <= editingRange.end
                   ? text.substring(b.start, b.end)
-                  : renderVttBlock({ start: b.start, end: b.end }))
+                  : renderVttBlock({ start: b.start, end: b.end }, i))
                 : renderGenericBlock({ start: b.start, end: b.end })}
             </div>
           </div>
@@ -788,3 +915,47 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
 );
 
 TextViewer.displayName = 'TextViewer';
+
+// Lightweight participant assignment popover used in read-only transcript mode
+function AssignPopover({ label, className, participants, onSelect }: { label: string; className: string; participants: MinimalParticipant[]; onSelect: (participantId: string | null) => void | Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const handleSelect = async (pid: string | null) => {
+    // Close first for snappy UX, then perform assignment
+    setOpen(false);
+    try { await onSelect(pid); } catch { /* ignore */ }
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" className={className} aria-label={`Participant ${label}. Click to reassign`} aria-expanded={open}>
+          {label}
+        </button>
+      </PopoverTrigger>
+      {open && (
+        <PopoverContent align="start" className="p-0 w-56">
+          <Command>
+            <CommandInput placeholder="Search and assign" />
+            <CommandEmpty>No participants.</CommandEmpty>
+            <CommandGroup heading="Participants">
+              {participants.map(p => (
+                <CommandItem
+                  key={p.id}
+                  value={p.name || ''}
+                  onSelect={() => {
+                    // Prevent immediate text selection race; close then assign
+                    handleSelect(p.id);
+                  }}
+                >
+                  {p.name || 'Unnamed'}
+                </CommandItem>
+              ))}
+              <CommandItem value="unassign" onSelect={() => handleSelect(null)}>
+                <span className="inline-flex items-center gap-1"><Plus className="w-3 h-3" /> Unassign</span>
+              </CommandItem>
+            </CommandGroup>
+          </Command>
+        </PopoverContent>
+      )}
+    </Popover>
+  );
+}

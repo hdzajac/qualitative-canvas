@@ -64,6 +64,7 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onSto
         queryKey: ['finalized', m.id],
         queryFn: () => getFinalizedTranscript(m.id),
         enabled: m.status === 'done',
+        retry: false,
         refetchOnWindowFocus: false,
     });
     // Lightweight seg count to gate Finalize/Reset buttons (avoid fetching full list per row)
