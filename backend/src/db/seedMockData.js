@@ -2,8 +2,11 @@
 // Run manually or import from an initialization step if needed.
 import { v4 as uuidv4 } from 'uuid';
 import pool from './pool.js';
+import { runMigrations } from './migrate.js';
 
 export async function seedMockData() {
+  // Ensure schema exists before seeding (fixes CI seeds on fresh DBs)
+  await runMigrations(pool);
   // Check if baseline marker project exists
   const markerName = 'Baseline Project';
   const existing = await pool.query('SELECT id FROM projects WHERE name = $1', [markerName]);
