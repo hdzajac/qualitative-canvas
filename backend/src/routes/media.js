@@ -29,14 +29,53 @@ export default function mediaRoutes(pool) {
     const item = await mediaService.get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Not found' });
     const fs = await import('fs');
-    const stream = fs.createReadStream(item.storagePath);
-    stream.on('error', (e) => {
-      console.error('Download stream error', e);
-      res.status(500).end();
-    });
-    res.setHeader('Content-Type', item.mimeType || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${item.originalFilename}"`);
-    stream.pipe(res);
+    // Support HTTP Range for efficient seeking in audio/video
+    try {
+      const stat = fs.statSync(item.storagePath);
+      const total = stat.size;
+      const range = req.headers.range;
+      if (range) {
+        // Format: bytes=start-end
+        const m = /^bytes=(\d*)-(\d*)$/.exec(range);
+        let start = 0;
+        let end = total - 1;
+        if (m) {
+          if (m[1]) start = Math.max(0, parseInt(m[1], 10));
+          if (m[2]) end = Math.min(total - 1, parseInt(m[2], 10));
+        }
+        if (Number.isNaN(start) || start < 0) start = 0;
+        if (Number.isNaN(end) || end < start) end = Math.min(start + 1024 * 1024 - 1, total - 1); // 1MB minimum chunk
+        const chunkSize = (end - start) + 1;
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Length', chunkSize);
+        res.setHeader('Content-Type', item.mimeType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `inline; filename="${item.originalFilename}"`);
+        const stream = fs.createReadStream(item.storagePath, { start, end });
+        stream.on('error', (e) => {
+          console.error('Download partial stream error', e);
+          if (!res.headersSent) res.status(500);
+          res.end();
+        });
+        stream.pipe(res);
+      } else {
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Length', total);
+        res.setHeader('Content-Type', item.mimeType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `inline; filename="${item.originalFilename}"`);
+        const stream = fs.createReadStream(item.storagePath);
+        stream.on('error', (e) => {
+          console.error('Download stream error', e);
+          if (!res.headersSent) res.status(500);
+          res.end();
+        });
+        stream.pipe(res);
+      }
+    } catch (e) {
+      console.error('Download stat error', e);
+      res.status(500).json({ error: 'File error' });
+    }
   }));
 
   router.post('/', upload.single('file'), asyncHandler(async (req, res) => {

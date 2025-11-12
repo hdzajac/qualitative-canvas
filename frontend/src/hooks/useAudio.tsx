@@ -28,7 +28,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         if (typeof window === 'undefined') return;
         const el = new Audio();
         el.preload = 'auto';
-        el.crossOrigin = 'anonymous';
+        // Avoid requiring CORS unless needed; allow same-origin or proxy URLs to play.
         audioRef.current = el;
         const onLoaded = () => { setIsReady(true); setDurationMs(Number.isFinite(el.duration) ? Math.round(el.duration * 1000) : null); };
         const onPlay = () => setIsPlaying(true);
@@ -36,12 +36,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         const onTime = () => {
             const t = Math.round(el.currentTime * 1000);
             setCurrentTimeMs(t);
-            const end = segmentEndRef.current;
-            if (end != null && t >= end) {
-                // Auto-pause at segment boundary
-                segmentEndRef.current = null;
-                el.pause();
-            }
         };
         const onEnded = () => { setIsPlaying(false); segmentEndRef.current = null; };
         el.addEventListener('loadedmetadata', onLoaded);
@@ -85,9 +79,15 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     const playSegment = useCallback((startMs: number, endMs?: number | null) => {
         const el = audioRef.current; if (!el) return;
         if (!Number.isFinite(startMs)) return;
-        segmentEndRef.current = endMs ?? null;
-        el.currentTime = Math.max(0, startMs) / 1000;
-        void el.play();
+        segmentEndRef.current = null; // still ignore end auto-stop
+        const targetTime = Math.max(0, startMs) / 1000;
+        // If currentTime differs more than 0.25s, force seek (helps with quick successive clicks)
+        if (Math.abs(el.currentTime - targetTime) > 0.25) {
+            el.currentTime = targetTime;
+        }
+        // Attempt play; if promise rejects (autoplay policy), catch silently
+        const p = el.play();
+        if (p && typeof p.catch === 'function') p.catch(() => { });
     }, []);
 
     const value = useMemo<AudioContextValue>(() => ({

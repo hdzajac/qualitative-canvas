@@ -44,6 +44,9 @@ interface TextViewerProps {
   currentTimeMs?: number | null;
   // Auto-stop at segment end when playing (optional flag)
   activeSegmentAutoStop?: boolean;
+  // Auto-scroll controls
+  autoScrollEnabled?: boolean;
+  autoScrollMode?: 'center' | 'pin';
   // Optional VTT metadata (one per block in order) for read-only transcript interactions
   vttMeta?: Array<{ segmentId: string; startMs?: number; endMs?: number; participantId?: string | null; participantName?: string | null }>;
   // Optional participant assignment support
@@ -54,7 +57,7 @@ interface TextViewerProps {
 type MinimalParticipant = { id: string; name: string | null };
 
 export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
-  ({ fileId, content, highlights, onHighlightCreated, isVtt = false, framed = true, readOnly = false, enableSelectionActions = true, saveContent, onPlaySegment, canPlay = true, currentTimeMs, activeSegmentAutoStop = false, vttMeta, participants, onAssignParticipant }, ref) => {
+  ({ fileId, content, highlights, onHighlightCreated, isVtt = false, framed = true, readOnly = false, enableSelectionActions = true, saveContent, onPlaySegment, canPlay = true, currentTimeMs, activeSegmentAutoStop = false, autoScrollEnabled = true, autoScrollMode = 'pin', vttMeta, participants, onAssignParticipant }, ref) => {
     const textRootRef = useRef<HTMLDivElement>(null);
     const [flashRange, setFlashRange] = useState<{ start: number; end: number } | null>(null);
     const flashTimer = useRef<number | null>(null);
@@ -155,6 +158,48 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       }
       return blocks.length - 1;
     }, [blocks]);
+
+    // Compute active segment index based on currentTimeMs and vttMeta (scroll and highlight support)
+    const activeIndex = useMemo(() => {
+      if (!isVtt || !vttMeta || currentTimeMs == null) return -1;
+      for (let i = 0; i < Math.min(vttMeta.length, blocks.length); i++) {
+        const m = vttMeta[i];
+        if (!m) continue;
+        const s = m.startMs;
+        const e = m.endMs;
+        if (s != null && e != null && currentTimeMs >= s && currentTimeMs < e) return i;
+      }
+      return -1;
+    }, [isVtt, vttMeta, currentTimeMs, blocks.length]);
+
+    // Scroll the active block into view when it changes (small enhancement)
+    const lastActiveRef = useRef<number>(-1);
+    useEffect(() => {
+      if (activeIndex < 0 || activeIndex === lastActiveRef.current) return;
+      lastActiveRef.current = activeIndex;
+      if (!autoScrollEnabled) return;
+      if (!textRootRef.current) return;
+      const blockEl = textRootRef.current.querySelector(`[data-block-idx="${activeIndex}"]`) as HTMLElement | null;
+      if (!blockEl) return;
+      // Prefer speech anchor inside block for more stable vertical positioning
+      const anchor = blockEl.querySelector('[data-speech-anchor="1"]') as HTMLElement | null;
+      const target = anchor || blockEl;
+      const rect = target.getBoundingClientRect();
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      // Only scroll if target is mostly out of view (less than 30% visible)
+      const visiblePx = Math.min(vh, Math.max(0, vh - Math.max(0, rect.top < 0 ? -rect.top : 0) - Math.max(0, rect.bottom > vh ? rect.bottom - vh : 0)));
+      const ratio = rect.height > 0 ? visiblePx / rect.height : 1;
+      if (ratio >= 0.3) return;
+      try {
+        if (autoScrollMode === 'center') {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+          // Gentle pinning: keep target between 30% and 60% from top
+          const topTarget = Math.max(0, window.scrollY + rect.top + (rect.height * 0.45) - (vh * 0.45));
+          window.scrollTo({ top: topTarget, behavior: 'smooth' });
+        }
+      } catch { /* ignore */ }
+    }, [activeIndex, autoScrollEnabled, autoScrollMode]);
 
     const startEditSelectedBlock = useCallback(() => {
       if (!selectedTextRef.current || !isVtt || readOnly) return;
@@ -527,9 +572,16 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         const relStart = absStart - bStart;
         const relEnd = absEnd - bStart;
         const out: JSX.Element[] = [];
-        const pushSeg = (from: number, to: number, cls: string, key: string) => {
+        let speechAnchorInserted = false;
+        const pushText = (from: number, to: number, cls: string, key: string, isSpeechStart: boolean) => {
           if (to <= from) return;
-          out.push(<span key={key} className={cls}>{full.substring(from, to)}</span>);
+          const content = full.substring(from, to);
+          if (isSpeechStart && !speechAnchorInserted) {
+            speechAnchorInserted = true;
+            out.push(<span key={key} className={cls} data-speech-anchor="1">{content}</span>);
+          } else {
+            out.push(<span key={key} className={cls}>{content}</span>);
+          }
         };
         // Do not render play here; we attach it after speaker label if available (or after timestamp if no speaker)
         const boundaries = [relStart];
@@ -562,7 +614,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
             const labelText = full.substring(s, e);
             if (labelText.trim().length === 0) {
               // Safety: don't render empty pill or play button if label is empty
-              pushSeg(s, e, cls, `seg-empty-${bStart}-${s}-${e}`);
+              pushText(s, e, cls, `seg-empty-${bStart}-${s}-${e}`, false);
             } else if (readOnly && segId && participants && participants.length > 0 && onAssignParticipant) {
               // Interactive pill with popover
               out.push(
@@ -585,7 +637,8 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
               out.push(<React.Fragment key={`playafter2-${bStart}-${s}-${e}`}>{playControl}</React.Fragment>);
             }
           } else {
-            pushSeg(s, e, cls, `seg-${bStart}-${s}-${e}`);
+            const isSpeechStart = s >= speechStart && !speechAnchorInserted;
+            pushText(s, e, cls, `seg-${bStart}-${s}-${e}`, isSpeechStart);
           }
         }
         return out;
@@ -597,12 +650,13 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         const isFlashing = flashRange && !(absEnd <= flashRange.start || absStart >= flashRange.end);
         const bg = isFlashing ? 'bg-yellow-200' : 'bg-primary/20 hover:bg-primary/30';
         const out: JSX.Element[] = [];
+        let speechAnchorInsertedH = false;
         const pushSeg = (from: number, to: number, cls: string, key: string) => {
           if (to <= from) return;
           if (from < tsEnd) {
             const label = bracket ? `From ${bracket[1]} to ${bracket[2]}` : (ts ? `At ${ts}` : 'Timestamp');
             out.push(
-              <time key={`time-h-${bStart}-${from}-${to}`} className={`${cls} ${bg}`} aria-label={label}>
+              <time key={`time-h-${bStart}-${from}-${to}`} className={cls} aria-label={label}>
                 {full.substring(from, to)}
               </time>
             );
@@ -610,18 +664,21 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           }
           if (speaker && from >= speakerStart && to <= speakerEnd) {
             out.push(
-              <span key={`spk-h-${bStart}-${from}-${to}`} className={`${cls} ${bg}`} aria-label={`Speaker: ${speaker}`}>
+              <span key={`spk-h-${bStart}-${from}-${to}`} className={cls} aria-label={`Speaker: ${speaker}`}>
                 {full.substring(from, to)}
               </span>
             );
             return;
           }
+          const isSpeechStart = from >= speechStart && !speechAnchorInsertedH;
+          if (isSpeechStart) speechAnchorInsertedH = true;
           out.push(
             <mark
               key={key}
               className={`${cls} ${bg}`}
               role="mark"
               aria-label={h?.codeName ? `Code: ${h.codeName}` : 'Highlight'}
+              {...(isSpeechStart ? { 'data-speech-anchor': '1' } : {})}
             >
               {full.substring(from, to)}
             </mark>

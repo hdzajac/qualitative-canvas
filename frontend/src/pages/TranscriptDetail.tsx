@@ -207,6 +207,8 @@ export default function TranscriptDetail() {
 
 function InnerTranscriptViewer({ mediaId, audioUrl, built, finalizedFile, segments, participants, id, canPlay, qc }: { mediaId: string; audioUrl: string | null; built: { content: string; meta: Array<{ segmentId: string; startMs?: number; endMs?: number; participantId?: string | null; participantName?: string | null }> }; finalizedFile: { id: string; content: string } | undefined; segments: TranscriptSegment[]; participants: Participant[]; id: string; canPlay: boolean; qc: ReturnType<typeof useQueryClient> }) {
     const { setSrc, currentTimeMs, playSegment } = useAudio();
+    const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+    const [autoScrollMode, setAutoScrollMode] = useState<'center' | 'pin'>('pin');
     // Load or clear source based on availability
     useEffect(() => { setSrc(audioUrl); }, [audioUrl, setSrc]);
     return (
@@ -239,13 +241,20 @@ function InnerTranscriptViewer({ mediaId, audioUrl, built, finalizedFile, segmen
                 }}
                 canPlay={canPlay}
                 currentTimeMs={currentTimeMs}
-                onPlaySegment={(startMs, endMs) => {
-                    if (startMs == null) return; // stop case not needed; provider auto-pauses at end boundary
-                    playSegment(startMs, endMs ?? null);
+                autoScrollEnabled={autoScrollEnabled}
+                autoScrollMode={autoScrollMode}
+                onPlaySegment={(startMs, _endMs) => {
+                    if (startMs == null) return;
+                    playSegment(startMs, null);
                 }}
             />
             {audioUrl && (
-                <AudioBar />
+                <AudioBar
+                    autoScrollEnabled={autoScrollEnabled}
+                    autoScrollMode={autoScrollMode}
+                    onToggleAutoScroll={() => setAutoScrollEnabled(v => !v)}
+                    onCycleAutoScrollMode={() => setAutoScrollMode(m => (m === 'pin' ? 'center' : 'pin'))}
+                />
             )}
         </div>
     );
