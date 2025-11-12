@@ -138,6 +138,31 @@ docker compose --profile full stop frontend backend
 
 Persisted data remains in `db_data_dev`; switching modes doesn’t affect it.
 
+## Makefile shortcuts
+A Makefile is provided for common flows. These targets wrap Docker Compose and the prebuilt images override.
+
+Targets:
+- `make pull-images` – pull prebuilt images from GHCR (frontend, backend, worker).
+- `make up-images` – start stack using prebuilt images (no local builds). Equivalent to:
+  - `docker compose -f docker-compose.yml -f docker-compose.images.yml up -d`
+- `make down-images` – stop the stack started with prebuilt images.
+- `make up` – start stack with local builds (uses `docker compose up -d --build`).
+- `make down` – stop the locally built stack.
+- `make logs` – tail logs for all services (Ctrl+C to stop).
+
+Quick usage:
+```sh
+make pull-images
+make up-images
+# later
+make logs
+make down-images
+```
+
+Notes:
+- Prebuilt images compose override lives at `docker-compose.images.yml` and bakes safe defaults so a local `.env` isn’t required.
+- You can still override ports or tokens at runtime (e.g., `BACKEND_HOST_PORT=5005 make up-images`).
+
 ## Adding More Environments Later
 
 When you introduce staging/production:
