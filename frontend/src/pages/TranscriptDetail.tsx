@@ -336,13 +336,6 @@ function ParticipantPanel({
                         <Button size="sm" disabled={!merging.source || !merging.target || merging.source === merging.target || merging.isMerging} onClick={merging.onMerge}>{merging.isMerging ? '…' : 'Merge'}</Button>
                     </div>
                 </div>
-                <div className="pt-2 border-t border-neutral-200 text-xs text-neutral-600">
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-1">
-                        {counts.map(c => (
-                            <div key={c.participantId ?? 'none'} className="truncate"><span className="font-medium">{c.name || 'Unassigned'}:</span> {c.count}</div>
-                        ))}
-                    </div>
-                </div>
             </div>
         </div>
     );
