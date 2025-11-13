@@ -1,7 +1,7 @@
 import { useRef, useMemo, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { getFile, getHighlights, getProjects, getMedia, listSegments, listParticipants, updateSegment, getMediaDownloadUrl, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants } from '@/services/api';
+import { getFile, getHighlights, getProjects, getMedia, listSegments, listParticipants, updateSegment, deleteSegment, getMediaDownloadUrl, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants } from '@/services/api';
 import type { Highlight, TranscriptSegment, Participant } from '@/types';
 import { useOptimisticMutation } from '@/hooks/useOptimisticMutation';
 import { DocumentViewer, type DocumentViewerHandle } from '@/components/DocumentViewer';
@@ -10,6 +10,7 @@ import { AudioProvider, useAudio } from '@/hooks/useAudio';
 import AudioBar from '@/components/AudioBar';
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 // Component for document files (text)
 function DocumentView({ fileId }: { fileId: string }) {
@@ -281,10 +282,114 @@ function TranscriptWithAudio({
     const { src, setSrc, currentTimeMs, playSegment } = useAudio();
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
     const [autoScrollMode, setAutoScrollMode] = useState<'center' | 'pin'>('pin');
+    const [deletedSegmentIds, setDeletedSegmentIds] = useState<Set<string>>(new Set());
+    const deleteQueueRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
         setSrc(audioUrl);
     }, [audioUrl, setSrc]);
+
+    // Cleanup: Actually delete segments when component unmounts or when user performs another action
+    useEffect(() => {
+        const deleteQueue = deleteQueueRef.current;
+        return () => {
+            // On unmount, delete all queued segments
+            if (deleteQueue.size > 0) {
+                Promise.all(
+                    Array.from(deleteQueue).map(segmentId =>
+                        deleteSegment(mediaId, segmentId).catch(console.error)
+                    )
+                ).then(() => {
+                    qc.invalidateQueries({ queryKey: ['segments', mediaId] });
+                    qc.invalidateQueries({ queryKey: ['participantCounts', mediaId] });
+                });
+            }
+        };
+    }, [mediaId, qc]);
+
+    // Handle Cmd+Z / Ctrl+Z to undo last deletion
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Check for Cmd+Z (Mac) or Ctrl+Z (Windows/Linux)
+            if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+                // If there are deleted segments, undo the last one
+                if (deletedSegmentIds.size > 0) {
+                    e.preventDefault();
+                    // Get the last deleted segment ID
+                    const lastDeletedId = Array.from(deletedSegmentIds).pop();
+                    if (lastDeletedId) {
+                        // Remove from deleted set (show in UI again)
+                        setDeletedSegmentIds(prev => {
+                            const next = new Set(prev);
+                            next.delete(lastDeletedId);
+                            return next;
+                        });
+                        // Remove from delete queue
+                        deleteQueueRef.current.delete(lastDeletedId);
+                        toast.success('Deletion undone');
+                    }
+                }
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [deletedSegmentIds]);
+
+    const handleDeleteSegment = (segmentId: string) => {
+        // Add to deleted set (hide from UI)
+        setDeletedSegmentIds(prev => new Set(prev).add(segmentId));
+        // Add to delete queue
+        deleteQueueRef.current.add(segmentId);
+
+        // Show toast with undo
+        toast.success('Segment deleted', {
+            action: {
+                label: 'Undo',
+                onClick: () => {
+                    // Remove from deleted set (show in UI again)
+                    setDeletedSegmentIds(prev => {
+                        const next = new Set(prev);
+                        next.delete(segmentId);
+                        return next;
+                    });
+                    // Remove from delete queue
+                    deleteQueueRef.current.delete(segmentId);
+                },
+            },
+        });
+    };
+
+    // When user edits text, flush delete queue
+    const handleUpdateSegmentText = async (segmentId: string, newText: string) => {
+        // Flush delete queue first
+        if (deleteQueueRef.current.size > 0) {
+            await Promise.all(
+                Array.from(deleteQueueRef.current).map(id =>
+                    deleteSegment(mediaId, id).catch(console.error)
+                )
+            );
+            deleteQueueRef.current.clear();
+            setDeletedSegmentIds(new Set());
+        }
+
+        // Then perform the update
+        await qc.cancelQueries({ queryKey: ['segments', mediaId] });
+        const prev = qc.getQueryData<TranscriptSegment[]>(['segments', mediaId]);
+        if (prev) {
+            qc.setQueryData<TranscriptSegment[]>(['segments', mediaId],
+                prev.map(s => s.id === segmentId ? { ...s, text: newText } : s)
+            );
+        }
+        try {
+            await updateSegment(mediaId, segmentId, { text: newText });
+        } catch (error) {
+            qc.setQueryData<TranscriptSegment[]>(['segments', mediaId], prev);
+            throw error;
+        } finally {
+            qc.invalidateQueries({ queryKey: ['segments', mediaId] });
+        }
+    };
 
     return (
         <div className="space-y-3">
@@ -324,25 +429,9 @@ function TranscriptWithAudio({
                         qc.invalidateQueries({ queryKey: ['participantCounts', mediaId] });
                     }
                 }}
-                onUpdateSegmentText={async (segmentId, newText) => {
-                    // Optimistic update
-                    await qc.cancelQueries({ queryKey: ['segments', mediaId] });
-                    const prev = qc.getQueryData<TranscriptSegment[]>(['segments', mediaId]);
-                    if (prev) {
-                        qc.setQueryData<TranscriptSegment[]>(['segments', mediaId],
-                            prev.map(s => s.id === segmentId ? { ...s, text: newText } : s)
-                        );
-                    }
-                    try {
-                        await updateSegment(mediaId, segmentId, { text: newText });
-                    } catch (error) {
-                        // Revert on error
-                        qc.setQueryData<TranscriptSegment[]>(['segments', mediaId], prev);
-                        throw error;
-                    } finally {
-                        qc.invalidateQueries({ queryKey: ['segments', mediaId] });
-                    }
-                }}
+                onUpdateSegmentText={handleUpdateSegmentText}
+                onDeleteSegment={handleDeleteSegment}
+                deletedSegmentIds={deletedSegmentIds}
                 autoScrollEnabled={autoScrollEnabled}
                 autoScrollMode={autoScrollMode}
             />

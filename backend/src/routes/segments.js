@@ -99,5 +99,16 @@ export default function segmentsRoutes(pool) {
     }
   }));
 
+  // Delete a single segment
+  router.delete('/:segmentId', asyncHandler(async (req, res) => {
+    const { mediaId, segmentId } = req.params;
+    const seg = await getSegment(pool, segmentId);
+    if (!seg || seg.mediaFileId !== mediaId) {
+      return res.status(404).json({ error: 'Segment not found' });
+    }
+    await pool.query('DELETE FROM transcript_segments WHERE id = $1', [segmentId]);
+    res.json({ ok: true });
+  }));
+
   return router;
 }

@@ -21,6 +21,8 @@ export interface TranscriptViewerProps {
     participants?: Array<{ id: string; name: string | null }>;
     onAssignParticipant?: (segmentId: string, participantId: string | null) => void;
     onUpdateSegmentText?: (segmentId: string, newText: string) => void;
+    onDeleteSegment?: (segmentId: string) => void;
+    deletedSegmentIds?: Set<string>;
     autoScrollEnabled?: boolean;
     autoScrollMode?: 'center' | 'pin';
 }
@@ -39,6 +41,8 @@ export function TranscriptViewer({
     participants,
     onAssignParticipant,
     onUpdateSegmentText,
+    onDeleteSegment,
+    deletedSegmentIds,
     autoScrollEnabled = true,
     autoScrollMode = 'pin',
 }: TranscriptViewerProps) {
@@ -88,7 +92,7 @@ export function TranscriptViewer({
     const content = (
         <div
             ref={containerRef}
-            className="space-y-1 max-h-[70vh] overflow-y-auto"
+            className="space-y-1 max-h-[70vh] overflow-y-auto -ml-12 pl-12"
             role="document"
             aria-label="Transcript"
         >
@@ -105,12 +109,14 @@ export function TranscriptViewer({
                         participantId={segment.participantId}
                         participantName={segment.participantName}
                         isActive={segment.id === activeSegmentId}
+                        isMarkedForDeletion={deletedSegmentIds?.has(segment.id)}
                         canPlay={canPlay}
                         readOnly={readOnly}
                         onPlaySegment={onPlaySegment}
                         participants={participants}
                         onAssignParticipant={onAssignParticipant}
                         onUpdateText={onUpdateSegmentText}
+                        onDeleteSegment={onDeleteSegment}
                     />
                 ))
             )}

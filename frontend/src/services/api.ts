@@ -189,6 +189,9 @@ export const listSegments = (mediaId: string): Promise<TranscriptSegment[]> =>
 export const updateSegment = (mediaId: string, segmentId: string, payload: { text?: string; participantId?: string | null }): Promise<TranscriptSegment> =>
   http<TranscriptSegment>(`/media/${mediaId}/segments/${segmentId}`, { method: 'PUT', body: JSON.stringify(payload) });
 
+export const deleteSegment = (mediaId: string, segmentId: string): Promise<{ ok: boolean }> =>
+  http<{ ok: boolean }>(`/media/${mediaId}/segments/${segmentId}`, { method: 'DELETE' });
+
 export const getSegmentCount = (mediaId: string): Promise<{ count: number }> =>
   http<{ count: number }>(`/media/${mediaId}/segments/count`);
 

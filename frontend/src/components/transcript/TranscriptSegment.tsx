@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Play, Undo2 } from 'lucide-react';
+import { Play, Undo2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command';
@@ -14,10 +14,12 @@ export interface TranscriptSegmentProps {
     isActive: boolean;
     canPlay?: boolean;
     readOnly?: boolean;
+    isMarkedForDeletion?: boolean;
     onPlaySegment?: (startMs: number, endMs: number) => void;
     participants?: Array<{ id: string; name: string | null }>;
     onAssignParticipant?: (segmentId: string, participantId: string | null) => void;
     onUpdateText?: (segmentId: string, newText: string) => void;
+    onDeleteSegment?: (segmentId: string) => void;
 }
 
 function formatTime(ms: number): string {
@@ -44,10 +46,12 @@ export function TranscriptSegment({
     isActive,
     canPlay = true,
     readOnly = false,
+    isMarkedForDeletion = false,
     onPlaySegment,
     participants,
     onAssignParticipant,
     onUpdateText,
+    onDeleteSegment,
 }: TranscriptSegmentProps) {
     const [popoverOpen, setPopoverOpen] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -146,8 +150,29 @@ export function TranscriptSegment({
 
     const hasChanges = editedText !== originalTextRef.current;
 
+    // Don't render if marked for deletion
+    if (isMarkedForDeletion) {
+        return null;
+    }
+
     return (
         <div className="relative group py-2" data-segment-id={id}>
+            {/* Delete button - shows on hover */}
+            {!readOnly && onDeleteSegment && (
+                <button
+                    type="button"
+                    className="absolute -left-10 top-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity text-neutral-700 hover:text-red-700 bg-white border-2 border-black rounded-md px-2 py-1 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                    aria-label="Delete segment (Cmd+Z to undo)"
+                    title="Delete segment (Cmd+Z to undo)"
+                    onClick={() => onDeleteSegment(id)}
+                >
+                    <span className="flex items-center gap-1">
+                        <Trash2 className="w-4 h-4" />
+                        <span className="text-[10px] font-medium text-neutral-500">⌘Z</span>
+                    </span>
+                </button>
+            )}
+            
             {/* Timestamp */}
             <div className="flex items-start gap-2 mb-1">
                 <time className="text-[11px] text-neutral-400" aria-label={`From ${formatTime(startMs)} to ${formatTime(endMs)}`}>
