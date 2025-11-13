@@ -66,9 +66,18 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
 
     // Codes rail removed: no external panel
 
-    // Local text to allow editing
+    // Local text state for editing - only sync from prop when it's a confirmed external change
     const [text, setText] = useState(content);
-    useEffect(() => { setText(content); }, [content]);
+    const contentRef = useRef(content);
+
+    useEffect(() => {
+      // Only update local state if content changed externally (not from our own saves)
+      // This prevents overwriting user edits during typing
+      if (content !== contentRef.current && content !== text) {
+        setText(content);
+        contentRef.current = content;
+      }
+    }, [content, text]);
 
     // VTT-only editing: range of blocks [start,end]
     const [editingRange, setEditingRange] = useState<{ start: number; end: number } | null>(null);
@@ -90,6 +99,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         // push current into redo stack
         redoStackRef.current.push(current);
         lastSavedContentRef.current = prev;
+        contentRef.current = prev; // Track that we've persisted this version
         setText(prev);
         setEditingRange(null);
       } catch (err) {
@@ -110,6 +120,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         // push current into undo stack
         undoStackRef.current.push(current);
         lastSavedContentRef.current = next;
+        contentRef.current = next; // Track that we've persisted this version
         setText(next);
         setEditingRange(null);
       } catch (err) {
@@ -742,6 +753,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
               await updateFile(fileId, { content: next });
             }
             lastSavedContentRef.current = next;
+            contentRef.current = next; // Track that we've persisted this version
           } catch (err) {
             console.error(err);
             toast.error('Failed to save');
