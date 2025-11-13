@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listMedia, uploadMedia, createTranscriptionJob, listSegments, getLatestJobForMedia, deleteMedia as deleteMediaApi, getFinalizedTranscript, finalizeTranscript, getSegmentCount, resetTranscription, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, assignParticipantToSegments } from '@/services/api';
+import { listMedia, uploadMedia, createTranscriptionJob, listSegments, deleteMedia as deleteMediaApi, getFinalizedTranscript, finalizeTranscript, getSegmentCount, resetTranscription, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, assignParticipantToSegments } from '@/services/api';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
+import { useJobPolling } from '@/hooks/useJobPolling';
 import { Button } from '@/components/ui/button';
 import { useMemo, useState } from 'react';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
@@ -20,9 +21,9 @@ function formatEta(seconds?: number) {
 
 import type { MediaFile, TranscriptionJob, Participant } from '@/types';
 
-interface MediaRowProps { m: MediaFile; expanded: string | null; onToggleExpand: (id: string) => void; onTranscribe: (id: string) => void; shouldPoll: boolean; disabled?: boolean; onStopPolling: (id: string) => void; transcribingId?: string | null }
+interface MediaRowProps { m: MediaFile; expanded: string | null; onToggleExpand: (id: string) => void; onTranscribe: (id: string) => void; disabled?: boolean; transcribingId?: string | null }
 
-function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onStopPolling, transcribingId }: MediaRowProps) {
+function MediaRow({ m, expanded, onToggleExpand, onTranscribe, transcribingId }: MediaRowProps) {
     const qc = useQueryClient();
     const deleteMut = useMutation({
         mutationFn: ({ id, force }: { id: string; force?: boolean }) => deleteMediaApi(id, { force }),
@@ -52,13 +53,8 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onSto
             </Button>
         );
     };
-    // Poll latest job progress every 5s if processing
-    const { data: job } = useQuery({
-        queryKey: ['latestJob', m.id],
-        queryFn: () => getLatestJobForMedia(m.id),
-        enabled: m.status === 'processing' && shouldPoll,
-        refetchInterval: m.status === 'processing' && shouldPoll ? 5000 : false,
-    });
+    // Poll latest job progress using centralized hook
+    const { job } = useJobPolling(m.id, m.status);
     // Fetch finalized mapping if media is done
     const { data: finalized } = useQuery({
         queryKey: ['finalized', m.id],
@@ -98,10 +94,6 @@ function MediaRow({ m, expanded, onToggleExpand, onTranscribe, shouldPoll, onSto
         progressDisplay = finalized ? 'done (finalized)' : 'done';
     }
 
-    // Stop polling once job is done or error
-    if (m.status !== 'processing' && shouldPoll) {
-        onStopPolling(m.id);
-    }
     const navigate = useNavigate();
     return (
         <TableRow>
@@ -201,7 +193,6 @@ export default function Transcripts() {
     const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
     const projectName = projects.find(p => p.id === selectedProjectId)?.name || 'Project';
     const [expanded, setExpanded] = useState<string | null>(null);
-    const [pollingIds, setPollingIds] = useState<Set<string>>(() => new Set());
     const [transcribingId, setTranscribingId] = useState<string | null>(null);
     const segQuery = useQuery({
         queryKey: ['segments', expanded],
@@ -267,12 +258,6 @@ export default function Transcripts() {
             return { prev };
         },
         onSuccess: (job) => {
-            // Track that this media should poll for progress now that a job exists
-            setPollingIds(prev => {
-                const next = new Set(prev);
-                next.add(job.mediaFileId);
-                return next;
-            });
             // Ensure detail view reflects processing immediately
             qc.setQueryData<MediaFile | undefined>(['mediaItem', job.mediaFileId], (prev) => prev ? { ...prev, status: 'processing' as const } : prev);
             qc.invalidateQueries({ queryKey: ['media', selectedProjectId] });
@@ -333,8 +318,6 @@ export default function Transcripts() {
                                     expanded={expanded}
                                     onToggleExpand={(id) => setExpanded(expanded === id ? null : id)}
                                     onTranscribe={(id) => transcribeMut.mutate({ id })}
-                                    shouldPoll={pollingIds.has(m.id)}
-                                    onStopPolling={(id) => setPollingIds(prev => { const next = new Set(prev); next.delete(id); return next; })}
                                     transcribingId={transcribingId}
                                 />
                             ))}
