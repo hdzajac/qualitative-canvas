@@ -202,6 +202,7 @@ function InnerTranscriptViewer({ mediaId, audioUrl, built, finalizedFile, segmen
     const [autoScrollMode, setAutoScrollMode] = useState<'center' | 'pin'>('pin');
 
     // Load or clear audio source when URL changes
+    // setSrc will queue the operation if audio element isn't ready yet
     useEffect(() => {
         setSrc(audioUrl);
     }, [audioUrl, setSrc]);

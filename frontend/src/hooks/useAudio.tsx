@@ -34,6 +34,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     const [durationMs, setDurationMs] = useState<number | null>(null);
     const [currentTimeMs, setCurrentTimeMs] = useState<number | null>(null);
 
+    // Queue for pending setSrc calls before audio element is ready
+    const pendingSrcRef = useRef<string | null | undefined>(undefined);
+
     // Pending operation to execute when audio becomes ready
     const pendingOperationRef = useRef<{
         type: 'PLAY_SEGMENT' | 'SEEK' | 'PLAY';
@@ -56,6 +59,24 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         el.preload = 'auto';
         audioRef.current = el;
         if (DEBUG) console.log('[audio] Audio element created');
+
+        // Process any pending setSrc call
+        if (pendingSrcRef.current !== undefined) {
+            const url = pendingSrcRef.current;
+            pendingSrcRef.current = undefined;
+            if (DEBUG) console.log('[audio] Processing pending setSrc', { url });
+            setSrcState(url);
+
+            // Apply the src
+            if (url) {
+                el.src = url;
+                try {
+                    el.load();
+                } catch (e) {
+                    console.error('[audio] load() failed', e);
+                }
+            }
+        }
 
         // Event: Metadata loaded (duration available)
         const onLoadedMetadata = () => {
@@ -177,12 +198,15 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         const el = audioRef.current;
         if (DEBUG) console.log('[audio] setSrc', { url, hasElement: !!el });
 
-        setSrcState(url);
-
+        // If audio element isn't ready yet, queue this operation
         if (!el) {
-            console.warn('[audio] setSrc called before audio element ready');
+            if (DEBUG) console.log('[audio] Queueing setSrc until element is ready');
+            pendingSrcRef.current = url;
+            setSrcState(url); // Update state immediately for UI
             return;
         }
+
+        setSrcState(url);
 
         // Reset state
         setIsReady(false);
