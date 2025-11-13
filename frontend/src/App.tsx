@@ -18,6 +18,7 @@ import { getProjects } from "@/services/api";
 import { useSelectedProject } from "./hooks/useSelectedProject";
 import { Button } from "@/components/ui/button";
 import { useEffect, useMemo } from "react";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 function GuardHome() {
   const navigate = useNavigate();
@@ -94,16 +95,16 @@ const App = () => (
         <TopBar />
         <Routes>
           <Route path="/" element={<GuardHome />} />
-          <Route path="/projects" element={<Projects />} />
+          <Route path="/projects" element={<ErrorBoundary><Projects /></ErrorBoundary>} />
           <Route element={<RequireProject />}>
-            <Route path="/documents" element={<Documents />} />
-            <Route path="/documents/:id" element={<DocumentDetail />} />
-            <Route path="/codes" element={<CodesPage />} />
-            <Route path="/themes" element={<Themes />} />
-            <Route path="/insights" element={<Insights />} />
-            <Route path="/canvas" element={<CanvasPage />} />
-            <Route path="/transcripts" element={<Transcripts />} />
-            <Route path="/transcripts/:id" element={<TranscriptDetail />} />
+            <Route path="/documents" element={<ErrorBoundary><Documents /></ErrorBoundary>} />
+            <Route path="/documents/:id" element={<ErrorBoundary><DocumentDetail /></ErrorBoundary>} />
+            <Route path="/codes" element={<ErrorBoundary><CodesPage /></ErrorBoundary>} />
+            <Route path="/themes" element={<ErrorBoundary><Themes /></ErrorBoundary>} />
+            <Route path="/insights" element={<ErrorBoundary><Insights /></ErrorBoundary>} />
+            <Route path="/canvas" element={<ErrorBoundary><CanvasPage /></ErrorBoundary>} />
+            <Route path="/transcripts" element={<ErrorBoundary><Transcripts /></ErrorBoundary>} />
+            <Route path="/transcripts/:id" element={<ErrorBoundary><TranscriptDetail /></ErrorBoundary>} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

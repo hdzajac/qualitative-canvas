@@ -12,6 +12,7 @@ import { Progress } from '@/components/ui/progress';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { getProjects } from '@/services/api';
 import { useJobPolling } from '@/hooks/useJobPolling';
+import { useOptimisticMutation } from '@/hooks/useOptimisticMutation';
 
 function formatEta(seconds?: number) {
     if (seconds == null || seconds < 0) return '';
@@ -42,27 +43,18 @@ export default function TranscriptDetail() {
         mutationFn: () => createParticipant(id!, newPart),
         onSuccess: () => { setNewPart({ name: '' }); qc.invalidateQueries({ queryKey: ['participants', id] }); },
     });
-    const updatePartMut = useMutation({
-        mutationFn: ({ partId, name }: { partId: string; name: string }) => updateParticipant(id!, partId, { name }),
-        onMutate: async ({ partId, name }) => {
-            await qc.cancelQueries({ queryKey: ['participants', id] });
-            await qc.cancelQueries({ queryKey: ['segments', id] });
-            const prevParts = qc.getQueryData<Participant[]>(['participants', id]);
-            const prevSegs = qc.getQueryData<TranscriptSegment[]>(['segments', id]);
-            if (prevParts) {
-                qc.setQueryData<Participant[]>(['participants', id], (old) => (old || []).map((p) => p.id === partId ? { ...p, name } : p));
-            }
-            if (prevSegs) {
-                qc.setQueryData<TranscriptSegment[]>(['segments', id], (old) => (old || []).map((s) => s.participantId === partId ? { ...s, participantName: name } : s));
-            }
-            return { prevParts, prevSegs };
+    const updatePartMut = useOptimisticMutation<Participant[], Error, { partId: string; name: string }>({
+        queryKey: ['participants', id],
+        mutationFn: async ({ partId, name }) => {
+            await updateParticipant(id!, partId, { name });
+            // Return the updated list for type safety
+            return qc.getQueryData<Participant[]>(['participants', id]) ?? [];
         },
-        onError: (_err, _vars, ctx) => {
-            if (ctx?.prevParts) qc.setQueryData(['participants', id], ctx.prevParts);
-            if (ctx?.prevSegs) qc.setQueryData(['segments', id], ctx.prevSegs);
+        optimisticUpdate: (oldParts, { partId, name }) => {
+            return oldParts?.map((p) => p.id === partId ? { ...p, name } : p) ?? [];
         },
-        onSettled: () => {
-            qc.invalidateQueries({ queryKey: ['participants', id] });
+        onSuccess: () => {
+            // Also update related queries
             qc.invalidateQueries({ queryKey: ['participantCounts', id] });
             qc.invalidateQueries({ queryKey: ['segments', id] });
         },
