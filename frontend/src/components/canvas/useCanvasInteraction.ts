@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import type { NodeView, NodeKind } from './CanvasTypes';
 import type { Theme, Insight } from '@/types';
-import { hitTestNode, isInOpenIcon, isInConnectHandle } from './CanvasGeometry';
+import { hitTestNode, isInOpenIcon, isInConnectHandle } from './CanvasUtils';
 import { drawNode, drawOrthogonal, drawGrid } from './CanvasDrawing';
 
 export type ResizeCorner = 'se' | 'sw' | 'ne' | 'nw';
@@ -409,7 +409,7 @@ export function useCanvasInteraction({
       });
       ctx.restore();
       nodes.forEach((n) =>
-        drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll)
+        drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel)
       );
       ctx.restore();
       // draw marquee in screen space
@@ -492,7 +492,7 @@ export function useCanvasInteraction({
             ? n.kind === 'code' || n.kind === 'theme'
             : false);
         const isConnectTarget = Boolean(connectTargetRef.current && connectTargetRef.current.id === n.id);
-        drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll, {
+        drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, undefined, {
           showHandle,
           highlightAsTarget: isConnectTarget,
         });

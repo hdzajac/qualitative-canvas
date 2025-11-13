@@ -8,7 +8,7 @@ import { useSelectedProject } from '../hooks/useSelectedProject';
 import { NodeKind, Tool, NodeView, DEFAULTS, ResizeCorner, /* add subtype imports */ } from './canvas/CanvasTypes';
 // Add explicit subtype imports for type narrowing
 import type { CodeNodeView, ThemeNodeView, InsightNodeView, AnnotationNodeView } from './canvas/CanvasTypes';
-import { clamp, toggleInArray, union, hitTestNode, intersects, measureWrappedLines } from './canvas/CanvasUtils';
+import { clamp, toggleInArray, union, hitTestNode, intersects, measureWrappedLines, isInOpenIcon, isInConnectHandle } from './canvas/CanvasUtils';
 import { drawGrid, drawOrthogonal, roundRect, drawNode } from './canvas/CanvasDrawing';
 import { selectionBBox as computeSelectionBBox, placeRightOf as computePlaceRightOf } from './canvas/CanvasGeometry';
 import CanvasToolbarLeft from './canvas/CanvasToolbarLeft';
@@ -523,28 +523,39 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   // Redraw whenever draw dependencies change (covers zoom/offset updates)
   useEffect(() => { draw(); }, [draw]);
 
+  // Attach wheel event listener with { passive: false } to allow preventDefault
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (dragState.current) {
+        e.preventDefault();
+        return;
+      }
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      if (!rect) return;
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const worldBefore = screenToWorld(mx, my);
+      const delta = -e.deltaY;
+      const factor = Math.exp(delta * 0.001);
+      const newZoom = clamp(zoom * factor, 0.2, 2.5);
+      setZoom(newZoom);
+      const newOffsetX = mx - worldBefore.x * newZoom;
+      const newOffsetY = my - worldBefore.y * newZoom;
+      setOffset({ x: newOffsetX, y: newOffsetY });
+    };
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screenToWorld, zoom, setZoom, setOffset]);
+
   // Helpers to position new nodes
   const viewportCenterWorld = useCallback(() => screenToWorld(size.w / 2, size.h / 2), [screenToWorld, size.w, size.h]);
   const placeRightOf = useCallback((bbox: { maxX: number; cy: number }, w: number, h: number) => computePlaceRightOf(bbox, w, h), []);
-
-  // onWheel handler bound to current state
-  const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    if (dragState.current) {
-      // Ignore wheel when a drag gesture is active (connect, move, marquee, etc.)
-      e.preventDefault();
-      return;
-    }
-    e.preventDefault();
-    const rect = canvasRef.current?.getBoundingClientRect(); if (!rect) return;
-    const mx = e.clientX - rect.left; const my = e.clientY - rect.top;
-    const worldBefore = screenToWorld(mx, my);
-    const delta = -e.deltaY; const factor = Math.exp(delta * 0.001);
-    const newZoom = clamp(zoom * factor, 0.2, 2.5); setZoom(newZoom);
-    const newOffsetX = mx - worldBefore.x * newZoom; const newOffsetY = my - worldBefore.y * newZoom;
-    setOffset({ x: newOffsetX, y: newOffsetY });
-    // draw will be triggered by the [draw] effect
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screenToWorld, zoom, setZoom, setOffset]);
 
   // Canvas interaction management (mouse/keyboard handlers, drag state)
   const interaction = useCanvasInteraction({
@@ -583,18 +594,6 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
   // Create a ref wrapper for dragState to maintain compatibility with existing code
   const hoveredEdgeRef = { current: hoveredEdge };
-
-  // Helpers to detect hovering edge and connection handle
-  function isInOpenIcon(n: NodeView, wx: number, wy: number) {
-    return wx >= n.x + n.w - 28 && wx <= n.x + n.w - 8 && wy >= n.y + 6 && wy <= n.y + 20;
-  }
-  function isInConnectHandle(n: NodeView, wx: number, wy: number, z: number) {
-    if (!(n.kind === 'code' || n.kind === 'theme')) return false;
-    const cx = n.x + n.w - 8; const cy = n.y + n.h / 2;
-    // Constant ~10px radius in screen space => world radius scales with zoom
-    const r = Math.max(6, 10 / Math.max(0.0001, z));
-    return (wx - cx) * (wx - cx) + (wy - cy) * (wy - cy) <= r * r;
-  }
 
   // Edge model for hit-testing: store screen-space polyline of each edge
   type EdgeHit = { kind: 'code-theme' | 'theme-insight'; fromId: string; toId: string };
@@ -726,7 +725,6 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseLeave}
-        onWheel={onWheel}
         style={{ cursor: resolvedCursor }}
       />
 

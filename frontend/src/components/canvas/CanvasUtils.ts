@@ -87,3 +87,18 @@ export function measureWrappedLines(text: string, maxWidth: number, font: string
   }
   return Math.max(1, lines);
 }
+
+// Detect if world coordinates are inside the open icon area of a node
+export function isInOpenIcon(n: { x: number; y: number; w: number }, wx: number, wy: number) {
+  return wx >= n.x + n.w - 28 && wx <= n.x + n.w - 8 && wy >= n.y + 6 && wy <= n.y + 20;
+}
+
+// Detect if world coordinates are inside the connect handle of a node
+export function isInConnectHandle(n: { kind: string; x: number; y: number; w: number; h: number }, wx: number, wy: number, z: number) {
+  if (!(n.kind === 'code' || n.kind === 'theme')) return false;
+  const cx = n.x + n.w - 8;
+  const cy = n.y + n.h / 2;
+  // Constant ~10px radius in screen space => world radius scales with zoom
+  const r = Math.max(6, 10 / Math.max(0.0001, z));
+  return (wx - cx) * (wx - cx) + (wy - cy) * (wy - cy) <= r * r;
+}
