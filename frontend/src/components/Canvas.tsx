@@ -18,6 +18,7 @@ import CanvasSizeControls from './canvas/CanvasSizeControls';
 import AnnotationSticky from './canvas/AnnotationSticky';
 import { CanvasHelpPanel } from './canvas/CanvasHelpPanel';
 import { CanvasEntityPanel } from './canvas/CanvasEntityPanel';
+import { useCanvasViewport } from './canvas/useCanvasViewport';
 
 interface CanvasProps {
   highlights: Highlight[];
@@ -41,14 +42,23 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     measureCtxRef.current = c.getContext('2d');
   }, []);
 
-  // Viewport transform
-  const [zoom, setZoom] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 }); // screen-space offset
-  const firstFitDone = useRef(false);
-
   // Tools and interaction
   const [tool, setTool] = useState<Tool>('select');
-  const [isSpacePanning, setIsSpacePanning] = useState(false);
+
+  const [projectId] = useSelectedProject();
+
+  // Build node views from data; keep local state so we can move nodes immediately
+  const [nodes, setNodes] = useState<NodeView[]>([]);
+  const nodesRef = useRef<NodeView[]>([]);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+
+  // Viewport management (zoom, offset, panning)
+  const viewport = useCanvasViewport({
+    canvasSize: size,
+    nodes,
+    projectId,
+  });
+  const { zoom, offset, setZoom, setOffset, isSpacePanning, setIsSpacePanning, worldToScreen, screenToWorld, fitToContent } = viewport;
   const isPanning = tool === 'hand' || isSpacePanning;
 
   // Selection
@@ -59,8 +69,6 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   const selectedThemeIdsRef = useRef<string[]>([]);
   useEffect(() => { selectedCodeIdsRef.current = selectedCodeIds; }, [selectedCodeIds]);
   useEffect(() => { selectedThemeIdsRef.current = selectedThemeIds; }, [selectedThemeIds]);
-
-  const [projectId] = useSelectedProject();
 
   // Annotation drafts and focus state (rendered as HTML textfields)
   const [annotationDrafts, setAnnotationDrafts] = useState<Record<string, string>>({});
@@ -108,41 +116,13 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [zoom, onUpdate]);
+  }, [zoom, onUpdate, setNodes]);
 
-  // Build node views from data; keep local state so we can move nodes immediately
-  const [nodes, setNodes] = useState<NodeView[]>([]);
-  const nodesRef = useRef<NodeView[]>([]);
-  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   const nodeIndexByKey = useMemo(() => {
     const m = new Map<string, number>();
     nodes.forEach((n, i) => m.set(`${n.kind}:${n.id}`, i));
     return m;
   }, [nodes]);
-
-  // Fit to content helper
-  const fitToContent = useCallback(() => {
-    if (!nodes.length || !size.w || !size.h) return;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const n of nodes) {
-      minX = Math.min(minX, n.x);
-      minY = Math.min(minY, n.y);
-      maxX = Math.max(maxX, n.x + n.w);
-      maxY = Math.max(maxY, n.y + n.h);
-    }
-    if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) return;
-    const pad = 40;
-    const worldW = Math.max(1, maxX - minX);
-    const worldH = Math.max(1, maxY - minY);
-    const scaleX = (size.w - pad * 2) / worldW;
-    const scaleY = (size.h - pad * 2) / worldH;
-    const newZoom = clamp(Math.min(scaleX, scaleY), 0.2, 2.5);
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    const newOffset = { x: size.w / 2 - cx * newZoom, y: size.h / 2 - cy * newZoom };
-    setZoom(newZoom);
-    setOffset(newOffset);
-  }, [nodes, size.w, size.h]);
 
   useEffect(() => {
     const newNodes: NodeView[] = [];
@@ -273,15 +253,6 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       return next;
     });
   }, [annotations]);
-
-  // Auto-fit lifecycle: reset on project change, then fit once when ready
-  useEffect(() => { firstFitDone.current = false; }, [projectId]);
-  useEffect(() => {
-    if (!firstFitDone.current && nodes.length > 0 && size.w > 0 && size.h > 0) {
-      fitToContent();
-      firstFitDone.current = true;
-    }
-  }, [nodes.length, size.w, size.h, fitToContent]);
 
   // Resize handling with DPR scaling
   useEffect(() => {
@@ -578,16 +549,6 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   // Compute contextual popup visibility
   const showPopup = selectedCodeIds.length >= 2 || selectedThemeIds.length >= 1;
 
-  // Helper transforms first
-  const worldToScreen = useCallback(
-    (wx: number, wy: number) => ({ x: wx * zoom + offset.x, y: wy * zoom + offset.y }),
-    [zoom, offset.x, offset.y]
-  );
-  const screenToWorld = useCallback(
-    (sx: number, sy: number) => ({ x: (sx - offset.x) / zoom, y: (sy - offset.y) / zoom }),
-    [zoom, offset.x, offset.y]
-  );
-
   // Helpers to position new nodes
   const viewportCenterWorld = useCallback(() => screenToWorld(size.w / 2, size.h / 2), [screenToWorld, size.w, size.h]);
   const selectionBBox = useCallback((kinds: NodeKind[]) => {
@@ -612,7 +573,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     const newOffsetX = mx - worldBefore.x * newZoom; const newOffsetY = my - worldBefore.y * newZoom;
     setOffset({ x: newOffsetX, y: newOffsetY });
     // draw will be triggered by the [draw] effect
-  }, [screenToWorld, zoom]);
+  }, [screenToWorld, zoom, setZoom, setOffset]);
 
   // Helpers to detect hovering edge and connection handle
   function isInOpenIcon(n: NodeView, wx: number, wy: number) {
