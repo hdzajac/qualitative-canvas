@@ -20,6 +20,7 @@ import { CanvasHelpPanel } from './canvas/CanvasHelpPanel';
 import { CanvasEntityPanel } from './canvas/CanvasEntityPanel';
 import { useCanvasViewport } from './canvas/useCanvasViewport';
 import { useCanvasSelection } from './canvas/useCanvasSelection';
+import { useCanvasNodes } from './canvas/useCanvasNodes';
 
 interface CanvasProps {
   highlights: Highlight[];
@@ -48,10 +49,9 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
   const [projectId] = useSelectedProject();
 
-  // Build node views from data; keep local state so we can move nodes immediately
-  const [nodes, setNodes] = useState<NodeView[]>([]);
-  const nodesRef = useRef<NodeView[]>([]);
-  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  // Node management (building and syncing with data props)
+  const canvasNodes = useCanvasNodes({ highlights, themes, insights, annotations });
+  const { nodes, nodesRef, setNodes, nodeIndexByKey } = canvasNodes;
 
   // Viewport management (zoom, offset, panning)
   const viewport = useCanvasViewport({
@@ -122,80 +122,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [zoom, onUpdate, setNodes]);
-
-  const nodeIndexByKey = useMemo(() => {
-    const m = new Map<string, number>();
-    nodes.forEach((n, i) => m.set(`${n.kind}:${n.id}`, i));
-    return m;
-  }, [nodes]);
-
-  useEffect(() => {
-    const newNodes: NodeView[] = [];
-
-    // Code nodes
-    highlights.forEach((h, idx) => {
-      newNodes.push({
-        id: h.id,
-        kind: 'code',
-        x: h.position?.x ?? 100 + (idx % 5) * 260,
-        y: h.position?.y ?? 100 + Math.floor(idx / 5) * 180,
-        w: (h.size?.w) ?? DEFAULTS.code.w,
-        h: (h.size?.h) ?? DEFAULTS.code.h,
-        highlight: h,
-      });
-    });
-
-    // Theme nodes
-    themes.forEach((t, idx) => {
-      newNodes.push({
-        id: t.id,
-        kind: 'theme',
-        x: t.position?.x ?? 100 + (idx % 4) * 320,
-        y: t.position?.y ?? 420,
-        w: (t.size?.w) ?? DEFAULTS.theme.w,
-        h: (t.size?.h) ?? DEFAULTS.theme.h,
-        theme: t,
-      });
-    });
-
-    // Insight nodes
-    insights.forEach((i, idx) => {
-      newNodes.push({
-        id: i.id,
-        kind: 'insight',
-        x: i.position?.x ?? 100 + (idx % 3) * 380,
-        y: i.position?.y ?? 760,
-        w: (i.size?.w) ?? DEFAULTS.insight.w,
-        h: (i.size?.h) ?? DEFAULTS.insight.h,
-        insight: i,
-      });
-    });
-
-    // Annotation nodes
-    annotations.forEach((a, idx) => {
-      newNodes.push({
-        id: a.id,
-        kind: 'annotation',
-        x: a.position?.x ?? 60 + (idx % 6) * 190,
-        y: a.position?.y ?? 60,
-        w: (a.size?.w) ?? DEFAULTS.annotation.w,
-        h: (a.size?.h) ?? DEFAULTS.annotation.h,
-        annotation: a,
-      });
-    });
-
-    setNodes((prev) => {
-      // Try to keep user-adjusted positions if already in state
-      type Key = `${NodeKind}:${string}`;
-      const prevMap = new Map<Key, NodeView>(prev.map((p) => [`${p.kind}:${p.id}` as Key, p]));
-      return newNodes.map((n) => {
-        const key = `${n.kind}:${n.id}` as Key;
-        const prevN = prevMap.get(key);
-        return prevN ? { ...n, x: prevN.x, y: prevN.y, w: prevN.w, h: prevN.h } : n;
-      });
-    });
-  }, [highlights, themes, insights, annotations]);
+  }, [zoom, onUpdate, setNodes, nodesRef]);
 
   // Dragging
   const dragState = useRef<
