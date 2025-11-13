@@ -21,6 +21,7 @@ import { CanvasEntityPanel } from './canvas/CanvasEntityPanel';
 import { useCanvasViewport } from './canvas/useCanvasViewport';
 import { useCanvasSelection } from './canvas/useCanvasSelection';
 import { useCanvasNodes } from './canvas/useCanvasNodes';
+import { useCanvasInteraction } from './canvas/useCanvasInteraction';
 
 interface CanvasProps {
   highlights: Highlight[];
@@ -124,52 +125,6 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     };
   }, [zoom, onUpdate, setNodes, nodesRef]);
 
-  // Dragging
-  const dragState = useRef<
-    | {
-      mode: 'node';
-      nodeIdx: number;
-      startWorld: { x: number; y: number };
-      startNode: { x: number; y: number };
-      moved: boolean;
-      group: Array<{ idx: number; startX: number; startY: number }>;
-    }
-    | {
-      mode: 'pan';
-      startOffset: { x: number; y: number };
-      startClient: { x: number; y: number };
-    }
-    | {
-      mode: 'select';
-      startClient: { x: number; y: number };
-      rect: { x: number; y: number; w: number; h: number };
-    }
-    | {
-      mode: 'resize';
-      nodeIdx: number;
-      corner: ResizeCorner;
-      startWorld: { x: number; y: number };
-      startRect: { x: number; y: number; w: number; h: number };
-      moved: boolean;
-    }
-    | {
-      mode: 'connect';
-      fromKind: NodeKind;
-      fromId: string;
-      start: { x: number; y: number };
-      last: { x: number; y: number };
-      anchor: { x: number; y: number };
-    }
-    | null
-  >(null);
-
-  // Cursor hint when hovering (supports special X delete cursor when over edge)
-  const [hoverCursor, setHoverCursor] = useState<string>('default');
-  // Track hovered edge for highlighting
-  type EdgeHit = { kind: 'code-theme' | 'theme-insight'; fromId: string; toId: string };
-  const hoveredEdgeRef = useRef<EdgeHit | null>(null);
-  const [hoveredEdgeVersion, setHoveredEdgeVersion] = useState(0);
-
   // Help overlay state
   const [showHelp, setShowHelp] = useState(false);
 
@@ -214,7 +169,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   }, [size.w, size.h]);
 
   // Deletion helper for selected items
-  async function deleteSelection() {
+  const deleteSelection = useCallback(async () => {
     const codes = selectedCodeIdsRef.current.slice();
     const themes = selectedThemeIdsRef.current.slice();
     if (codes.length === 0 && themes.length === 0) return;
@@ -237,7 +192,96 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     } catch {
       toast.error('Delete failed');
     }
-  }
+  }, [selectedCodeIdsRef, selectedThemeIdsRef, setNodes, setSelectedCodeIds, setSelectedThemeIds, onUpdate]);
+
+  // Popup editing for all kinds
+  const [openEntity, setOpenEntity] = useState<{ kind: NodeKind; id: string } | null>(null);
+  const openPopupFor = useCallback((n: NodeView) => { setOpenEntity({ kind: n.kind, id: n.id }); }, []);
+  const openEntityRef = useRef<typeof openEntity>(null);
+  useEffect(() => { openEntityRef.current = openEntity; }, [openEntity]);
+
+  // Callback for when node is clicked (for annotations or open icon)
+  const handleNodeClick = useCallback((n: NodeView) => {
+    if (n.kind === 'annotation') {
+      setEditingAnnotation({ id: n.id });
+    } else {
+      openPopupFor(n);
+    }
+  }, [openPopupFor]);
+
+  // Callback for edge deletion
+  const handleEdgeDelete = useCallback((edge: { kind: 'code-theme' | 'theme-insight'; fromId: string; toId: string }) => {
+    const confirmMsg = edge.kind === 'code-theme' ? 'Remove code from theme?' : 'Remove theme from insight?';
+    if (confirm(confirmMsg)) {
+      (async () => {
+        try {
+          if (edge.kind === 'code-theme') {
+            const t = themes.find(tt => tt.id === edge.toId);
+            if (!t) return;
+            const newIds = t.highlightIds.filter((id: string) => id !== edge.fromId);
+            await updateTheme(t.id, { highlightIds: newIds });
+          } else {
+            const iobj = insights.find(ii => ii.id === edge.toId);
+            if (!iobj) return;
+            const newIds = iobj.themeIds.filter((id: string) => id !== edge.fromId);
+            await updateInsight(iobj.id, { themeIds: newIds });
+          }
+          toast.success('Connection removed');
+          onUpdate();
+        } catch {
+          toast.error('Failed to update');
+        }
+      })();
+    }
+  }, [themes, insights, onUpdate]);
+
+  // Callback for connection completion
+  const handleConnectComplete = useCallback(async (fromKind: NodeKind, fromId: string, targetId: string, targetKind: NodeKind) => {
+    try {
+      if (fromKind === 'code' && targetKind === 'theme') {
+        const t = themes.find(tt => tt.id === targetId);
+        if (t) {
+          const newIds = Array.from(new Set([...(t.highlightIds || []), fromId]));
+          await updateTheme(t.id, { highlightIds: newIds });
+          toast.success('Code added to theme');
+          onUpdate();
+        }
+      } else if (fromKind === 'theme' && targetKind === 'insight') {
+        const iobj = insights.find(ii => ii.id === targetId);
+        if (iobj) {
+          const newIds = Array.from(new Set([...(iobj.themeIds || []), fromId]));
+          await updateInsight(iobj.id, { themeIds: newIds });
+          toast.success('Theme added to insight');
+          onUpdate();
+        }
+      }
+    } catch {
+      toast.error('Failed to connect');
+    }
+  }, [themes, insights, onUpdate]);
+
+  // Callback for node move completion
+  const handleNodeMoveComplete = useCallback(async (movedNodes: NodeView[]) => {
+    try {
+      await Promise.all(movedNodes.map(async (n) => {
+        if (n.kind === 'code' && n.highlight) return updateHighlight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
+        if (n.kind === 'theme' && n.theme) return updateTheme(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
+        if (n.kind === 'insight' && n.insight) return updateInsight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
+        if (n.kind === 'annotation' && n.annotation) return updateAnnotation(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
+      }));
+      onUpdate();
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to save');
+    }
+  }, [onUpdate]);
+
+  // Callback for marquee selection
+  const handleMarqueeSelect = useCallback((codes: string[], ths: string[], additive: boolean) => {
+    setSelectedCodeIds((prev) => (additive ? union(prev, codes) : codes));
+    setSelectedThemeIds((prev) => (additive ? union(prev, ths) : ths));
+    // draw() will be called automatically by the draw effect
+  }, [setSelectedCodeIds, setSelectedThemeIds]);
 
   // Keyboard for tools, space-panning, delete selection, and quick-create Theme/Insight
   useEffect(() => {
@@ -469,7 +513,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
     ctx.restore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size.w, size.h, offset.x, offset.y, zoom, nodes, selectedCodeIds, selectedThemeIds, getBottomRightLabel, hoveredEdgeVersion]);
+  }, [size.w, size.h, offset.x, offset.y, zoom, nodes, selectedCodeIds, selectedThemeIds, getBottomRightLabel]);
 
   // Track hover target to control handle visibility
   const hoverInfo = useRef<null | { kind: 'node'; id: string }>(null);
@@ -499,7 +543,46 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     const newOffsetX = mx - worldBefore.x * newZoom; const newOffsetY = my - worldBefore.y * newZoom;
     setOffset({ x: newOffsetX, y: newOffsetY });
     // draw will be triggered by the [draw] effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screenToWorld, zoom, setZoom, setOffset]);
+
+  // Canvas interaction management (mouse/keyboard handlers, drag state)
+  const interaction = useCanvasInteraction({
+    nodes,
+    themes,
+    insights,
+    selectedCodeIds,
+    selectedThemeIds,
+    isPanning,
+    zoom,
+    offset,
+    size,
+    canvasRef,
+    dprRef,
+    screenToWorld,
+    setOffset,
+    setNodes,
+    setSelectedCodeIds,
+    setSelectedThemeIds,
+    clearSelection,
+    draw,
+    getFontSize: (n: NodeView) => {
+      const style: CardStyle | undefined = n.kind === 'code' ? n.highlight?.style : n.kind === 'theme' ? n.theme?.style : n.kind === 'insight' ? n.insight?.style : n.annotation?.style;
+      return style?.fontSize ?? fontSize;
+    },
+    getBottomRightLabel,
+    getLabelScroll: (_nodeId: string, _kind: NodeKind) => 0,
+    onNodeClick: handleNodeClick,
+    onEdgeDelete: handleEdgeDelete,
+    onConnectComplete: handleConnectComplete,
+    onNodeMoveComplete: handleNodeMoveComplete,
+    onMarqueeSelect: handleMarqueeSelect,
+    deleteSelection,
+  });
+  const { dragState, hoverCursor, hoveredEdge, hoveredEdgeVersion, onMouseDown, onMouseMove, onMouseLeave, onMouseUp, onWheel: interactionOnWheel } = interaction;
+
+  // Create a ref wrapper for dragState to maintain compatibility with existing code
+  const hoveredEdgeRef = { current: hoveredEdge };
 
   // Helpers to detect hovering edge and connection handle
   function isInOpenIcon(n: NodeView, wx: number, wy: number) {
@@ -514,6 +597,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   }
 
   // Edge model for hit-testing: store screen-space polyline of each edge
+  type EdgeHit = { kind: 'code-theme' | 'theme-insight'; fromId: string; toId: string };
   function hitTestEdge(wx: number, wy: number): EdgeHit | null {
     // Consider edges from codes->themes and themes->insights
     // Simple tolerance to an orthogonal polyline: check distance to segments
@@ -554,386 +638,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     return null;
   }
 
-  const onMouseDown: React.MouseEventHandler<HTMLCanvasElement> = (e) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
-    const world = screenToWorld(sx, sy);
-
-    if (isPanning) { dragState.current = { mode: 'pan', startOffset: { ...offset }, startClient: { x: sx, y: sy } }; return; }
-
-    const idx = hitTestNode(world.x, world.y, nodes);
-    if (idx !== -1) {
-      const n = nodes[idx];
-      // Annotation: enter inline edit immediately on click (unless clicking the open icon)
-      if (n.kind === 'annotation') {
-        if (isInOpenIcon(n, world.x, world.y)) { openPopupFor(n); return; }
-        setEditingAnnotation({ id: n.id });
-        return;
-      }
-      if (isInOpenIcon(n, world.x, world.y)) { openPopupFor(n); return; }
-      // Start connect gesture if hitting handle (do not change selection or viewport)
-      if (isInConnectHandle(n, world.x, world.y, zoom)) {
-        if (n.kind === 'code' || n.kind === 'theme') {
-          e.preventDefault(); e.stopPropagation();
-          const ax = n.x + n.w - 8; const ay = n.y + n.h / 2;
-          dragState.current = { mode: 'connect', fromKind: n.kind, fromId: n.id, start: world, last: world, anchor: { x: ax, y: ay } };
-          setHoverCursor('crosshair');
-          return;
-        }
-      }
-
-      // Determine updated selection based on click
-      const alreadySelected = (n.kind === 'code' && selectedCodeIds.includes(n.id)) || (n.kind === 'theme' && selectedThemeIds.includes(n.id));
-      let nextCodes = selectedCodeIds.slice();
-      let nextThemes = selectedThemeIds.slice();
-      if (n.kind === 'code') {
-        if (e.shiftKey) {
-          nextCodes = toggleInArray(nextCodes, n.id, false);
-        } else if (!alreadySelected) {
-          nextCodes = [n.id];
-          nextThemes = [];
-        }
-      } else if (n.kind === 'theme') {
-        if (e.shiftKey) {
-          nextThemes = toggleInArray(nextThemes, n.id, false);
-        } else if (!alreadySelected) {
-          nextThemes = [n.id];
-          nextCodes = [];
-        }
-      }
-      // Apply selection state
-      setSelectedCodeIds(nextCodes);
-      setSelectedThemeIds(nextThemes);
-
-      // Build drag group from the updated selection
-      const groupIdxs: number[] = [];
-      for (let i = 0; i < nodes.length; i++) {
-        const nn = nodes[i];
-        if ((nn.kind === 'code' && nextCodes.includes(nn.id)) || (nn.kind === 'theme' && nextThemes.includes(nn.id))) {
-          groupIdxs.push(i);
-        }
-      }
-      if (!groupIdxs.includes(idx)) groupIdxs.push(idx);
-      const group = groupIdxs.map(i => ({ idx: i, startX: nodes[i].x, startY: nodes[i].y }));
-
-      dragState.current = { mode: 'node', nodeIdx: idx, startWorld: world, startNode: { x: n.x, y: n.y }, moved: false, group };
-    } else {
-      // Edge click? If close to an edge, prompt deletion
-      const edge = hitTestEdge(world.x, world.y);
-      if (edge) {
-        const confirmMsg = edge.kind === 'code-theme' ? 'Remove code from theme?' : 'Remove theme from insight?';
-        if (confirm(confirmMsg)) {
-          (async () => {
-            try {
-              if (edge.kind === 'code-theme') {
-                const t = themes.find(tt => tt.id === edge.toId);
-                if (!t) return;
-                const newIds = t.highlightIds.filter((id: string) => id !== edge.fromId);
-                await updateTheme(t.id, { highlightIds: newIds });
-              } else {
-                const iobj = insights.find(ii => ii.id === edge.toId);
-                if (!iobj) return;
-                const newIds = iobj.themeIds.filter((id: string) => id !== edge.fromId);
-                await updateInsight(iobj.id, { themeIds: newIds });
-              }
-              toast.success('Connection removed');
-              onUpdate();
-            } catch {
-              toast.error('Failed to update');
-            }
-          })();
-        }
-        return;
-      }
-      dragState.current = { mode: 'select', startClient: { x: sx, y: sy }, rect: { x: sx, y: sy, w: 0, h: 0 } };
-      if (!e.shiftKey) { clearSelection(); }
-    }
-  };
-
-  const onMouseMove: React.MouseEventHandler<HTMLCanvasElement> = (e) => {
-    if (!dragState.current) {
-      // hover cursor logic when idle
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const sx = e.clientX - rect.left;
-      const sy = e.clientY - rect.top;
-      const world = screenToWorld(sx, sy);
-      if (isPanning) { setHoverCursor('grab'); return; }
-      const idx = hitTestNode(world.x, world.y, nodes);
-      if (idx !== -1) {
-        const n = nodes[idx];
-        hoverInfo.current = { kind: 'node', id: n.id };
-        if (isInOpenIcon(n, world.x, world.y)) { setHoverCursor('pointer'); draw(); return; }
-        if (isInConnectHandle(n, world.x, world.y, zoom)) { setHoverCursor('crosshair'); draw(); return; }
-        // If previously hovering an edge, clear it
-        if (hoveredEdgeRef.current) { hoveredEdgeRef.current = null; setHoveredEdgeVersion(v => v + 1); }
-        setHoverCursor('move');
-        draw();
-      } else {
-        hoverInfo.current = null;
-        // edge hover?
-        const edge = hitTestEdge(world.x, world.y);
-        if (edge) {
-          hoveredEdgeRef.current = edge;
-          setHoveredEdgeVersion(v => v + 1);
-          setHoverCursor('x-delete');
-        } else {
-          if (hoveredEdgeRef.current) { hoveredEdgeRef.current = null; setHoveredEdgeVersion(v => v + 1); }
-          setHoverCursor('default');
-        }
-        draw();
-      }
-      return;
-    }
-
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
-
-    if (dragState.current.mode === 'pan') {
-      const dx = sx - dragState.current.startClient.x;
-      const dy = sy - dragState.current.startClient.y;
-      setOffset({ x: dragState.current.startOffset.x + dx, y: dragState.current.startOffset.y + dy });
-      draw();
-      setHoverCursor('grabbing');
-    } else if (dragState.current.mode === 'node') {
-      const world = screenToWorld(sx, sy);
-      const dx = world.x - dragState.current.startWorld.x;
-      const dy = world.y - dragState.current.startWorld.y;
-      const dsNode = dragState.current; // mode is 'node' here
-      setNodes((prev) => {
-        const copy = prev.slice();
-        // Move all nodes in the group together
-        dsNode.group.forEach(g => {
-          if (g.idx >= 0 && g.idx < copy.length) {
-            copy[g.idx] = { ...copy[g.idx], x: g.startX + dx, y: g.startY + dy };
-          }
-        });
-        return copy;
-      });
-      dragState.current.moved = true;
-      draw();
-      setHoverCursor('grabbing');
-    } else if (dragState.current.mode === 'select') {
-      const r = dragState.current.rect;
-      r.w = sx - dragState.current.startClient.x;
-      r.h = sy - dragState.current.startClient.y;
-      // draw selection rectangle overlay
-      const canvas = canvasRef.current; if (!canvas) return;
-      const ctx = canvas.getContext('2d'); if (!ctx) return;
-      const dpr = dprRef.current;
-      ctx.save();
-      ctx.scale(dpr, dpr);
-      // redraw scene
-      ctx.clearRect(0, 0, size.w, size.h);
-      drawGrid(ctx, size.w, size.h, 16, '#e5e7eb');
-      ctx.translate(offset.x, offset.y); ctx.scale(zoom, zoom);
-      const byKey = new Map(nodes.map((n) => [`${n.kind}:${n.id}`, n] as const));
-      ctx.save(); ctx.strokeStyle = '#b1b1b7'; ctx.lineWidth = 1;
-      themes.forEach((t) => { t.highlightIds.forEach((hid: string) => { const a = byKey.get(`code:${hid}`); const b = byKey.get(`theme:${t.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
-      insights.forEach((i) => { i.themeIds.forEach((tid: string) => { const a = byKey.get(`theme:${tid}`); const b = byKey.get(`insight:${i.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
-      ctx.restore();
-      nodes.forEach((n) => drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll));
-      ctx.restore();
-      // draw marquee in screen space
-      const x = Math.min(dragState.current.startClient.x, sx);
-      const y = Math.min(dragState.current.startClient.y, sy);
-      const w = Math.abs(dragState.current.startClient.x - sx);
-      const h = Math.abs(dragState.current.startClient.y - sy);
-      const ctx2 = canvas.getContext('2d'); if (!ctx2) return;
-      ctx2.save();
-      ctx2.scale(dpr, dpr);
-      ctx2.strokeStyle = '#111827';
-      ctx2.setLineDash([5, 5]);
-      ctx2.lineWidth = 1.5;
-      ctx2.strokeRect(x, y, w, h);
-      ctx2.restore();
-    } else if (dragState.current.mode === 'connect') {
-      const world = screenToWorld(sx, sy);
-      dragState.current.last = world;
-
-      // Update hovered connect target indicator
-      const fromKind = dragState.current.fromKind; // 'code' | 'theme'
-      const idx = hitTestNode(world.x, world.y, nodes);
-      const prevTarget = connectTargetRef.current?.id;
-      let nextTarget: null | { id: string; kind: 'theme' | 'insight' } = null;
-      if (idx !== -1) {
-        const tgt = nodes[idx];
-        const ok = (fromKind === 'code' && tgt.kind === 'theme') || (fromKind === 'theme' && tgt.kind === 'insight');
-        if (ok) nextTarget = { id: tgt.id, kind: tgt.kind } as { id: string; kind: 'theme' | 'insight' };
-      }
-      connectTargetRef.current = nextTarget;
-
-      const canvas = canvasRef.current; if (!canvas) return;
-      const ctx = canvas.getContext('2d'); if (!ctx) return;
-      const dpr = dprRef.current;
-      // Reset transform and clear entire canvas in device pixels
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.restore();
-      // Draw base scene once (it manages its own DPR scaling)
-      // But we want to highlight a target; easiest is to manually draw similar to draw() with highlight flag
-      ctx.save();
-      ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, size.w, size.h);
-      drawGrid(ctx, size.w, size.h, 16, '#e5e7eb');
-      ctx.translate(offset.x, offset.y);
-      ctx.scale(zoom, zoom);
-      // Edges
-      const byKey = new Map(nodes.map((n) => [`${n.kind}:${n.id}`, n] as const));
-      ctx.save(); ctx.strokeStyle = '#b1b1b7'; ctx.lineWidth = 1;
-      themes.forEach((t) => { t.highlightIds.forEach((hid: string) => { const a = byKey.get(`code:${hid}`); const b = byKey.get(`theme:${t.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
-      insights.forEach((i) => { i.themeIds.forEach((tid: string) => { const a = byKey.get(`theme:${tid}`); const b = byKey.get(`insight:${i.id}`); if (!a || !b) return; drawOrthogonal(ctx, a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y); }); });
-      ctx.restore();
-      // Nodes with potential highlight
-      nodes.forEach((n) => {
-        const isConnectingFromThis = (dragState.current && dragState.current.mode === 'connect' && dragState.current.fromId === n.id);
-        const showHandle = isConnectingFromThis || ((hoverInfo.current && hoverInfo.current.kind === 'node' && hoverInfo.current.id === n.id) ? (n.kind === 'code' || n.kind === 'theme') : false);
-        const isConnectTarget = Boolean(connectTargetRef.current && connectTargetRef.current.id === n.id);
-        drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll, { showHandle, highlightAsTarget: isConnectTarget });
-      });
-      ctx.restore();
-
-      // Draw overlay wire using same world transform
-      ctx.save();
-      ctx.scale(dpr, dpr);
-      ctx.translate(offset.x, offset.y);
-      ctx.scale(zoom, zoom);
-      ctx.strokeStyle = '#111827';
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1.5;
-      const dsConn = dragState.current; // narrowed to 'connect'
-      if (dsConn && dsConn.mode === 'connect') {
-        const ax = dsConn.anchor.x; const ay = dsConn.anchor.y;
-        const bx = world.x; const by = world.y;
-        drawOrthogonal(ctx, ax, ay, bx, by);
-      }
-      ctx.restore();
-      setHoverCursor('crosshair');
-    }
-  };
-
-  const onMouseLeave: React.MouseEventHandler<HTMLCanvasElement> = () => {
-    setHoverCursor('default');
-    if (hoveredEdgeRef.current) { hoveredEdgeRef.current = null; setHoveredEdgeVersion(v => v + 1); }
-    // clear any transient connect target highlight
-    connectTargetRef.current = null;
-    draw();
-  };
-
-  const onMouseUp: React.MouseEventHandler<HTMLCanvasElement> = async (e) => {
-    const ds = dragState.current; dragState.current = null; setHoverCursor('default');
-    if (hoveredEdgeRef.current) { hoveredEdgeRef.current = null; setHoveredEdgeVersion(v => v + 1); }
-    // reset potential target highlight
-    connectTargetRef.current = null;
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
-
-    // Text tool: create annotation at click
-    if (tool === 'text') {
-      const world = screenToWorld(sx, sy);
-      try {
-        const created = await createAnnotation({ content: 'New text', position: { x: world.x, y: world.y }, projectId, size: DEFAULTS.annotation, style: { fontSize } });
-        // Optimistically add a node so the textfield appears immediately
-        setNodes(prev => ([
-          ...prev,
-          { id: created.id, kind: 'annotation', x: world.x, y: world.y, w: DEFAULTS.annotation.w, h: DEFAULTS.annotation.h, annotation: created },
-        ]));
-        // Initialize as empty draft and focus for immediate typing
-        setAnnotationDrafts(prev => ({ ...prev, [created.id]: '' }));
-        setEditingAnnotation({ id: created.id });
-        toast.success('Text added');
-        onUpdate();
-      } catch {
-        toast.error('Failed to add text');
-      }
-      return;
-    }
-
-    if (!ds) return;
-
-    // Finish connect: if released over a valid target, update model
-    if (ds.mode === 'connect') {
-      const world = screenToWorld(sx, sy);
-      const idx = hitTestNode(world.x, world.y, nodes);
-      if (idx !== -1) {
-        const target = nodes[idx];
-        try {
-          if (ds.fromKind === 'code' && target.kind === 'theme') {
-            const t = themes.find(tt => tt.id === target.id);
-            if (t) {
-              const newIds = Array.from(new Set([...(t.highlightIds || []), ds.fromId]));
-              await updateTheme(t.id, { highlightIds: newIds });
-              toast.success('Code added to theme');
-              onUpdate();
-            }
-          } else if (ds.fromKind === 'theme' && target.kind === 'insight') {
-            const iobj = insights.find(ii => ii.id === target.id);
-            if (iobj) {
-              const newIds = Array.from(new Set([...(iobj.themeIds || []), ds.fromId]));
-              await updateInsight(iobj.id, { themeIds: newIds });
-              toast.success('Theme added to insight');
-              onUpdate();
-            }
-          }
-        } catch {
-          toast.error('Failed to connect');
-        }
-      }
-      return;
-    }
-
-    // Persist node move
-    if (ds.mode === 'node' && ds.moved) {
-      // Persist all nodes that were part of the drag group
-      const uniqueIdxs = Array.from(new Set(ds.group.map(g => g.idx)));
-      try {
-        await Promise.all(uniqueIdxs.map(async (i) => {
-          const n = nodes[i];
-          if (!n) return;
-          if (n.kind === 'code' && n.highlight) return updateHighlight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
-          if (n.kind === 'theme' && n.theme) return updateTheme(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
-          if (n.kind === 'insight' && n.insight) return updateInsight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
-          if (n.kind === 'annotation' && n.annotation) return updateAnnotation(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
-        }));
-        onUpdate();
-      } catch (err) { console.error(err); toast.error('Failed to save'); }
-    }
-
-    // Finish marquee selection
-    if (ds.mode === 'select') {
-      const x1 = Math.min(ds.startClient.x, sx);
-      const y1 = Math.min(ds.startClient.y, sy);
-      const x2 = Math.max(ds.startClient.x, sx);
-      const y2 = Math.max(ds.startClient.y, sy);
-      const w1 = screenToWorld(x1, y1);
-      const w2 = screenToWorld(x2, y2);
-      const rectW = { x: Math.min(w1.x, w2.x), y: Math.min(w1.y, w2.y), w: Math.abs(w1.x - w2.x), h: Math.abs(w1.y - w2.y) };
-      const codes: string[] = [];
-      const ths: string[] = [];
-      nodes.forEach((n) => {
-        if (intersects(rectW, { x: n.x, y: n.y, w: n.w, h: n.h })) {
-          if (n.kind === 'code') codes.push(n.id);
-          if (n.kind === 'theme') ths.push(n.id);
-        }
-      });
-      setSelectedCodeIds((prev) => (e.shiftKey ? union(prev, codes) : codes));
-      setSelectedThemeIds((prev) => (e.shiftKey ? union(prev, ths) : ths));
-      draw();
-    }
-  };
-
-  // Popup editing for all kinds
-  const [openEntity, setOpenEntity] = useState<{ kind: NodeKind; id: string } | null>(null);
-  function openPopupFor(n: NodeView) { setOpenEntity({ kind: n.kind, id: n.id }); }
-  const openEntityRef = useRef<typeof openEntity>(null);
-  useEffect(() => { openEntityRef.current = openEntity; }, [openEntity]);
+  // Note: Mouse event handlers (onMouseDown, onMouseMove, onMouseLeave, onMouseUp) are now provided by useCanvasInteraction hook
 
   const [fontSize, setFontSize] = useState(12);
   useEffect(() => { /* no-op; value applied when drawing via getFontSize */ }, [fontSize]);
