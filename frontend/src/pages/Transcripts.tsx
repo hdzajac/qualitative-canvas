@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listMedia, uploadMedia, createTranscriptionJob, listSegments, deleteMedia as deleteMediaApi, getFinalizedTranscript, finalizeTranscript, getSegmentCount, resetTranscription, listParticipants, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, assignParticipantToSegments } from '@/services/api';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { useJobPolling } from '@/hooks/useJobPolling';
+import { useOptimisticMutation } from '@/hooks/useOptimisticMutation';
 import { Button } from '@/components/ui/button';
 import { useMemo, useState } from 'react';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
@@ -245,22 +246,20 @@ export default function Transcripts() {
         onSettled: () => { segQuery.refetch(); countsQuery.refetch(); }
     });
 
-    const transcribeMut = useMutation({
-        mutationFn: ({ id }: { id: string }) => createTranscriptionJob(id, {}),
-        onMutate: async ({ id }) => {
+    const transcribeMut = useOptimisticMutation<MediaFile[], Error, { id: string }>({
+        queryKey: ['media', selectedProjectId],
+        mutationFn: async ({ id }) => {
             setTranscribingId(id);
-            // Optimistically mark media as processing
-            await qc.cancelQueries({ queryKey: ['media', selectedProjectId] });
-            const prev = qc.getQueryData<MediaFile[]>(['media', selectedProjectId]);
-            if (prev) {
-                qc.setQueryData<MediaFile[]>(['media', selectedProjectId], prev.map(m => m.id === id ? { ...m, status: 'processing' as const } : m));
-            }
-            return { prev };
+            const job = await createTranscriptionJob(id, {});
+            // Also update detail view cache
+            qc.setQueryData<MediaFile | undefined>(['mediaItem', job.mediaFileId], (prev) =>
+                prev ? { ...prev, status: 'processing' as const } : prev
+            );
+            // Return updated media list
+            return qc.getQueryData<MediaFile[]>(['media', selectedProjectId]) ?? [];
         },
-        onSuccess: (job) => {
-            // Ensure detail view reflects processing immediately
-            qc.setQueryData<MediaFile | undefined>(['mediaItem', job.mediaFileId], (prev) => prev ? { ...prev, status: 'processing' as const } : prev);
-            qc.invalidateQueries({ queryKey: ['media', selectedProjectId] });
+        optimisticUpdate: (oldMedia, { id }) => {
+            return oldMedia?.map(m => m.id === id ? { ...m, status: 'processing' as const } : m) ?? [];
         },
         onSettled: () => setTranscribingId(null),
     });
