@@ -19,6 +19,7 @@ import AnnotationSticky from './canvas/AnnotationSticky';
 import { CanvasHelpPanel } from './canvas/CanvasHelpPanel';
 import { CanvasEntityPanel } from './canvas/CanvasEntityPanel';
 import { useCanvasViewport } from './canvas/useCanvasViewport';
+import { useCanvasSelection } from './canvas/useCanvasSelection';
 
 interface CanvasProps {
   highlights: Highlight[];
@@ -61,14 +62,19 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   const { zoom, offset, setZoom, setOffset, isSpacePanning, setIsSpacePanning, worldToScreen, screenToWorld, fitToContent } = viewport;
   const isPanning = tool === 'hand' || isSpacePanning;
 
-  // Selection
-  const [selectedCodeIds, setSelectedCodeIds] = useState<string[]>([]);
-  const [selectedThemeIds, setSelectedThemeIds] = useState<string[]>([]);
-  // Refs to access latest selection in global key handlers
-  const selectedCodeIdsRef = useRef<string[]>([]);
-  const selectedThemeIdsRef = useRef<string[]>([]);
-  useEffect(() => { selectedCodeIdsRef.current = selectedCodeIds; }, [selectedCodeIds]);
-  useEffect(() => { selectedThemeIdsRef.current = selectedThemeIds; }, [selectedThemeIds]);
+  // Selection management
+  const selection = useCanvasSelection({ nodes });
+  const {
+    selectedCodeIds,
+    selectedThemeIds,
+    selectedCodeIdsRef,
+    selectedThemeIdsRef,
+    setSelectedCodeIds,
+    setSelectedThemeIds,
+    clearSelection,
+    showContextPopup: showPopup,
+    selectionBBox,
+  } = selection;
 
   // Annotation drafts and focus state (rendered as HTML textfields)
   const [annotationDrafts, setAnnotationDrafts] = useState<Record<string, string>>({});
@@ -546,15 +552,8 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   // Redraw whenever draw dependencies change (covers zoom/offset updates)
   useEffect(() => { draw(); }, [draw]);
 
-  // Compute contextual popup visibility
-  const showPopup = selectedCodeIds.length >= 2 || selectedThemeIds.length >= 1;
-
   // Helpers to position new nodes
   const viewportCenterWorld = useCallback(() => screenToWorld(size.w / 2, size.h / 2), [screenToWorld, size.w, size.h]);
-  const selectionBBox = useCallback((kinds: NodeKind[]) => {
-    return computeSelectionBBox(nodes, selectedCodeIds, selectedThemeIds, kinds);
-  }, [nodes, selectedCodeIds, selectedThemeIds]);
-
   const placeRightOf = useCallback((bbox: { maxX: number; cy: number }, w: number, h: number) => computePlaceRightOf(bbox, w, h), []);
 
   // onWheel handler bound to current state
@@ -722,7 +721,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         return;
       }
       dragState.current = { mode: 'select', startClient: { x: sx, y: sy }, rect: { x: sx, y: sy, w: 0, h: 0 } };
-      if (!e.shiftKey) { setSelectedCodeIds([]); setSelectedThemeIds([]); }
+      if (!e.shiftKey) { clearSelection(); }
     }
   };
 
