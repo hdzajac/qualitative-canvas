@@ -557,7 +557,33 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
       const startMs = meta?.startMs ?? parsedStart;
       const endMs = meta?.endMs ?? parsedEnd;
 
+      // Debug: Log meta matching
+      if (currentTimeMs != null && parsedStart != null && meta) {
+        console.log('[TextViewer] Meta match for idx', idx, {
+          parsedStart,
+          parsedEnd,
+          'meta.startMs': meta.startMs,
+          'meta.endMs': meta.endMs,
+          finalStartMs: startMs,
+          finalEndMs: endMs
+        });
+      }
+
       const isActive = currentTimeMs != null && startMs != null && endMs != null && currentTimeMs >= startMs && currentTimeMs < endMs;
+
+      // Debug logging for ALL segments being checked
+      if (currentTimeMs != null && startMs != null && endMs != null) {
+        console.log('[TextViewer] Checking segment:', {
+          idx,
+          currentTimeMs,
+          startMs,
+          endMs,
+          isActive,
+          bracket: bracket ? `[${bracket[1]} - ${bracket[2]}]` : null,
+          blockText: full.substring(0, Math.min(50, full.length))
+        });
+      }
+
       const playControl = (
         <button
           key={`play-${bStart}`}
@@ -584,6 +610,19 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         const relEnd = absEnd - bStart;
         const out: JSX.Element[] = [];
         let speechAnchorInserted = false;
+
+        // Debug: Log when wrap() is called for active segment
+        if (isActive) {
+          console.log('[TextViewer wrap()] Called for ACTIVE segment:', {
+            idx,
+            absStart,
+            absEnd,
+            relStart,
+            relEnd,
+            bStart,
+            isActive
+          });
+        }
         const pushText = (from: number, to: number, cls: string, key: string, isSpeechStart: boolean) => {
           if (to <= from) return;
           const content = full.substring(from, to);
@@ -608,9 +647,29 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           const s = boundaries[i];
           const e = boundaries[i + 1];
           let cls = 'text-sm text-neutral-800';
+          // Determine if this specific segment is the speech portion
+          const isSpeechSegment = s >= speechStart;
+
+          // Debug logging for active segments in wrap()
+          if (isActive && isSpeechSegment) {
+            console.log('[TextViewer wrap()] Applying highlight:', {
+              s, e, speechStart, tsEnd, speakerStart, speakerEnd,
+              text: full.substring(s, e),
+              isSpeechSegment,
+              isActive
+            });
+          }
+
           if (s < tsEnd) cls = 'text-[11px] text-neutral-400 mr-2 align-top';
           else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'inline-flex items-center text-[12px] font-medium text-neutral-800 mr-1 align-top border border-black rounded-full px-1.5 py-0.5';
-          else if (s >= speechStart) cls = `text-sm leading-snug text-neutral-800 ${isActive ? 'bg-indigo-50' : ''}`; // active bg only on speech
+          else if (isSpeechSegment) {
+            cls = `text-sm leading-snug text-neutral-800 ${isActive ? 'bg-indigo-50' : ''}`;
+            if (isActive) {
+              console.log('[TextViewer wrap()] Setting class with bg-indigo-50:', {
+                s, e, speechStart, cls, textContent: full.substring(s, e)
+              });
+            }
+          }
           if (s < tsEnd) {
             // timestamp segment
             const label = bracket ? `From ${bracket[1]} to ${bracket[2]}` : (ts ? `At ${ts}` : 'Timestamp');
@@ -709,9 +768,22 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           const s = boundaries[i];
           const e = boundaries[i + 1];
           let cls = 'text-sm text-neutral-800';
+          // Determine if this specific segment is the speech portion
+          const isSpeechSegment = s >= speechStart;
+
+          // Debug logging for active segments in wrapHighlighted()
+          if (isActive && isSpeechSegment) {
+            console.log('[TextViewer wrapHighlighted()] Applying highlight:', {
+              s, e, speechStart, tsEnd, speakerStart, speakerEnd,
+              text: full.substring(s, e),
+              isSpeechSegment,
+              isActive
+            });
+          }
+
           if (s < tsEnd) cls = 'text-[11px] text-neutral-400 mr-2 align-top';
           else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'inline-flex items-center text-[12px] font-medium text-neutral-800 mr-1 align-top border border-black rounded-full px-1.5 py-0.5';
-          else if (s >= speechStart) cls = `text-sm leading-snug text-neutral-800 ${isActive ? 'bg-indigo-50' : ''}`; // active bg only on speech
+          else if (isSpeechSegment) cls = `text-sm leading-snug text-neutral-800 ${isActive ? 'bg-indigo-50' : ''}`; // active bg only on speech
           pushSeg(s, e, cls, `seg-h-${bStart}-${s}-${e}`);
         }
         return out;

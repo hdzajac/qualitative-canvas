@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { DocumentViewer } from '@/components/DocumentViewer';
 import { AudioProvider, useAudio } from '@/hooks/useAudio';
 import AudioBar from '@/components/AudioBar';
+import { TranscriptViewer } from '@/components/transcript/TranscriptViewer';
 import { Progress } from '@/components/ui/progress';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { getProjects } from '@/services/api';
@@ -208,16 +209,22 @@ function InnerTranscriptViewer({ mediaId, audioUrl, built, finalizedFile, segmen
     }, [audioUrl, setSrc]);
     return (
         <div className="space-y-3">
-            <DocumentViewer
-                fileId={finalizedFile?.id || `media-${id}-virtual`}
-                content={finalizedFile?.content || built.content}
-                highlights={[]}
-                onHighlightCreated={() => { /* no-op in transcript view */ }}
-                isVtt={true}
-                framed={false}
+            <TranscriptViewer
+                segments={segments.map(s => ({
+                    id: s.id,
+                    startMs: s.startMs,
+                    endMs: s.endMs,
+                    text: s.text,
+                    participantId: s.participantId,
+                    participantName: s.participantName,
+                }))}
+                currentTimeMs={currentTimeMs}
+                canPlay={canPlay}
                 readOnly={true}
-                enableSelectionActions={false}
-                vttMeta={segments.length > 0 ? built.meta : undefined}
+                framed={false}
+                onPlaySegment={(startMs, _endMs) => {
+                    playSegment(startMs, null);
+                }}
                 participants={participants.map(p => ({ id: p.id, name: p.name }))}
                 onAssignParticipant={async (segmentId, participantId) => {
                     // optimistic update of segments list
@@ -234,15 +241,8 @@ function InnerTranscriptViewer({ mediaId, audioUrl, built, finalizedFile, segmen
                         qc.invalidateQueries({ queryKey: ['participantCounts', id] });
                     }
                 }}
-                canPlay={canPlay}
-                currentTimeMs={currentTimeMs}
                 autoScrollEnabled={autoScrollEnabled}
                 autoScrollMode={autoScrollMode}
-                onPlaySegment={(startMs, _endMs) => {
-                    if (startMs == null) return;
-                    // Play the segment immediately (audio should already be loaded)
-                    playSegment(startMs, null);
-                }}
             />
             {audioUrl && (
                 <AudioBar
