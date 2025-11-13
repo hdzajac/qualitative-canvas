@@ -12,10 +12,17 @@ class MockAudio implements Partial<HTMLAudioElement> {
     duration = Number.NaN; // becomes available after loadedmetadata
     paused = true;
     error: MediaError | null = null;
+    crossOrigin: string | null = null;
     // Simulate media readyState
     // 0: HAVE_NOTHING, 1: HAVE_METADATA, 2: HAVE_CURRENT_DATA, 3: HAVE_FUTURE_DATA, 4: HAVE_ENOUGH_DATA
     readyState = 0;
     get currentSrc() { return this.src; }
+    // Mock seekable ranges
+    seekable = {
+        length: 1,
+        start: () => 0,
+        end: () => this.duration || 0
+    } as TimeRanges;
     private listeners: Record<string, Set<EventListener>> = {};
 
     addEventListener(type: string, listener: EventListener) {
@@ -70,6 +77,7 @@ function renderWithProvider() {
     document.body.appendChild(container);
     const root = ReactDOM.createRoot(container);
     root.render(<AudioProvider><Harness /></AudioProvider>);
+    (container as unknown as { _reactRoot?: typeof root })._reactRoot = root;
     return { root, container };
 }
 
@@ -107,6 +115,12 @@ describe('useAudio playback', () => {
         // Play a segment at 5s
         api.playSegment(5000, null);
 
+        // Wait for setTimeout (10ms) to execute
+        await new Promise(resolve => setTimeout(resolve, 20));
+
+        // Dispatch seeked event to trigger play
+        el.dispatch('seeked');
+
         expect(el.currentTime).toBeCloseTo(5, 6);
         expect((globalThis.__audioCalls || []).map(c => c.op)).toContain('play');
         cleanup(container);
@@ -115,16 +129,22 @@ describe('useAudio playback', () => {
     it('queues start and plays at canplay when not ready', async () => {
         const { container } = renderWithProvider();
         const api = await waitForApi();
-        // Call playSegment before the audio element even exists
-        api.playSegment(7000, null);
-        // Now wait for audio and proceed
         await waitForAudio();
-        let el = getMockAudioInstance();
-        // Now set src and fire events
+
+        // Set src and dispatch loadedmetadata
         api.setSrc('test2.mp3');
-        el = getMockAudioInstance();
-        el.dispatch('loadedmetadata');
+        const el = getMockAudioInstance();
+        el.dispatch('loadedmetadata'); // Sets readyState to 1
+
+        // readyState is now 1 (HAVE_METADATA) - not enough to play (need >= 3)
+        // Call playSegment - should queue because readyState < 3
+        api.playSegment(7000, null);
+
+        // Now make it ready to play by dispatching canplay
+        // This will set readyState to 4 AND execute the queued operation
         el.dispatch('canplay');
+
+        // The canplay handler executes pending operations synchronously
 
         const plays = (globalThis.__audioCalls || []).filter(c => c.op === 'play');
         expect(plays.length).toBeGreaterThan(0);
@@ -163,5 +183,14 @@ function getMockAudioInstance(): MockAudio {
 }
 
 function cleanup(container: HTMLElement) {
+    // Unmount React tree first
+    const root = (container as unknown as { _reactRoot?: ReturnType<typeof ReactDOM.createRoot> })._reactRoot;
+    if (root) {
+        root.unmount();
+    }
     container.remove();
+    // Clear globals
+    globalThis.__lastAudio = undefined;
+    globalThis.__audioApi = undefined;
+    globalThis.__audioCalls = [];
 }

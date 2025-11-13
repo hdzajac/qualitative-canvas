@@ -40,7 +40,13 @@ export function buildApp() {
 
   // CORS
   const corsOrigin = process.env.FRONTEND_ORIGIN || process.env.CORS_ORIGIN;
-  app.use(cors(corsOrigin ? { origin: corsOrigin, credentials: true } : {}));
+  app.use(cors(corsOrigin ? {
+    origin: corsOrigin,
+    credentials: true,
+    exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length']
+  } : {
+    exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length']
+  }));
 
   // Rate limit
   const limiter = rateLimit({ windowMs: 60_000, max: 600 });

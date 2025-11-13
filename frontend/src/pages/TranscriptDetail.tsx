@@ -240,10 +240,7 @@ function InnerTranscriptViewer({ mediaId, audioUrl, built, finalizedFile, segmen
                 autoScrollMode={autoScrollMode}
                 onPlaySegment={(startMs, _endMs) => {
                     if (startMs == null) return;
-                    // Ensure the audio source is set before attempting to play a segment.
-                    if (!src && audioUrl) {
-                        setSrc(audioUrl);
-                    }
+                    // Play the segment immediately (audio should already be loaded)
                     playSegment(startMs, null);
                 }}
             />

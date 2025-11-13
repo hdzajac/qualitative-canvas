@@ -48,6 +48,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     // Track if we're currently processing an operation to prevent loops
     const isProcessingRef = useRef(false);
 
+    // Track if we're currently seeking to prevent concurrent seeks
+    const isSeekingRef = useRef(false);
+
     /**
      * Initialize audio element and attach event listeners
      */
@@ -57,6 +60,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
 
         const el = new Audio();
         el.preload = 'auto';
+        el.crossOrigin = 'anonymous'; // Enable CORS for range requests
         audioRef.current = el;
         if (DEBUG) console.log('[audio] Audio element created');
 
@@ -212,7 +216,12 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         setIsReady(false);
         setDurationMs(null);
         setCurrentTimeMs(null);
-        pendingOperationRef.current = null;
+        // Preserve PLAY_SEGMENT operations when loading new audio
+        // This allows queuing a play-from-position before the audio is loaded
+        const pendingPlaySegment = pendingOperationRef.current?.type === 'PLAY_SEGMENT'
+            ? pendingOperationRef.current
+            : null;
+        pendingOperationRef.current = pendingPlaySegment;
         isProcessingRef.current = false;
 
         if (url) {
@@ -334,8 +343,15 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
             return;
         }
 
-        if (!el || !el.src) {
-            console.warn('[audio] Cannot play segment: no element or no src');
+        if (!el) {
+            console.warn('[audio] Cannot play segment: no element');
+            return;
+        }
+
+        // If no src yet, just queue the operation - the caller should set src after
+        if (!el.src) {
+            if (DEBUG) console.log('[audio] No src yet, queueing play segment operation');
+            pendingOperationRef.current = { type: 'PLAY_SEGMENT', startMs };
             return;
         }
 
@@ -345,16 +361,55 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         const HAVE_FUTURE_DATA = 3;
         if (el.readyState >= HAVE_FUTURE_DATA) {
             try {
-                el.currentTime = targetSec;
-                const p = el.play();
-                if (p) {
-                    p.then(() => {
-                        if (DEBUG) console.log('[audio] Segment play succeeded');
-                    }).catch((e) => {
-                        console.warn('[audio] Segment play failed, queueing for retry:', e);
-                        pendingOperationRef.current = { type: 'PLAY_SEGMENT', startMs };
-                    });
+                // Check if already seeking - if so, queue this operation
+                if (isSeekingRef.current) {
+                    if (DEBUG) console.log('[audio] Already seeking, queueing play segment operation');
+                    pendingOperationRef.current = { type: 'PLAY_SEGMENT', startMs };
+                    return;
                 }
+
+                isSeekingRef.current = true;
+
+                // Pause first to ensure clean seek
+                const wasPlaying = !el.paused;
+                if (wasPlaying) {
+                    el.pause();
+                }
+
+                // Use seeked event to play after seek completes
+                const onSeeked = () => {
+                    el.removeEventListener('seeked', onSeeked);
+                    isSeekingRef.current = false;
+                    const p = el.play();
+                    if (p) {
+                        p.catch((e) => {
+                            console.warn('[audio] Segment play failed:', e);
+                        });
+                    }
+                };
+
+                el.addEventListener('seeked', onSeeked);
+
+                // Use setTimeout to ensure pause has taken effect
+                setTimeout(() => {
+                    // Check if targetSec is within seekable range
+                    if (el.seekable.length > 0) {
+                        const seekStart = el.seekable.start(0);
+                        const seekEnd = el.seekable.end(0);
+
+                        if (targetSec < seekStart || targetSec > seekEnd) {
+                            console.warn('[audio] Target', targetSec, 'outside seekable range', seekStart, '-', seekEnd);
+                            // Clamp to seekable range
+                            const clampedSec = Math.max(seekStart, Math.min(seekEnd, targetSec));
+                            el.currentTime = clampedSec;
+                        } else {
+                            el.currentTime = targetSec;
+                        }
+                    } else {
+                        console.warn('[audio] No seekable ranges available!');
+                        el.currentTime = targetSec;
+                    }
+                }, 10);
             } catch (e) {
                 console.error('[audio] playSegment failed:', e);
             }
