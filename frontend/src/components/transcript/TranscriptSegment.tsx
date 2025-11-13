@@ -1,4 +1,5 @@
-import { Play } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Play, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command';
@@ -16,6 +17,7 @@ export interface TranscriptSegmentProps {
     onPlaySegment?: (startMs: number, endMs: number) => void;
     participants?: Array<{ id: string; name: string | null }>;
     onAssignParticipant?: (segmentId: string, participantId: string | null) => void;
+    onUpdateText?: (segmentId: string, newText: string) => void;
 }
 
 function formatTime(ms: number): string {
@@ -45,14 +47,104 @@ export function TranscriptSegment({
     onPlaySegment,
     participants,
     onAssignParticipant,
+    onUpdateText,
 }: TranscriptSegmentProps) {
+    const [popoverOpen, setPopoverOpen] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editedText, setEditedText] = useState(text);
+    const [isSaving, setIsSaving] = useState(false);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const originalTextRef = useRef(text);
     const timeRange = `${formatTime(startMs)} - ${formatTime(endMs)}`;
+
+    // Update original text when prop changes (from optimistic update)
+    useEffect(() => {
+        if (!isEditing) {
+            originalTextRef.current = text;
+            setEditedText(text);
+        }
+    }, [text, isEditing]);
+
+    // Auto-resize textarea and focus when editing starts
+    useEffect(() => {
+        if (isEditing && textareaRef.current) {
+            textareaRef.current.focus();
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+        }
+    }, [isEditing]);
 
     const handlePlay = () => {
         if (onPlaySegment) {
             onPlaySegment(startMs, endMs);
         }
     };
+
+    const handleAssignParticipant = (participantId: string | null) => {
+        if (onAssignParticipant) {
+            onAssignParticipant(id, participantId);
+            setPopoverOpen(false); // Close the popover after selection
+        }
+    };
+
+    const handleTextClick = () => {
+        if (!readOnly && onUpdateText) {
+            setIsEditing(true);
+        }
+    };
+
+    const handleTextChange = (newText: string) => {
+        setEditedText(newText);
+
+        // Auto-resize textarea
+        if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+        }
+
+        // Clear existing timeout
+        if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current);
+        }
+
+        // Auto-save after 1 second of inactivity
+        if (onUpdateText && newText !== originalTextRef.current) {
+            setIsSaving(true);
+            saveTimeoutRef.current = setTimeout(() => {
+                onUpdateText(id, newText);
+                originalTextRef.current = newText;
+                setIsSaving(false);
+            }, 1000);
+        }
+    };
+
+    const handleBlur = () => {
+        // Save immediately on blur if there are pending changes
+        if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current);
+            if (onUpdateText && editedText !== originalTextRef.current) {
+                onUpdateText(id, editedText);
+                originalTextRef.current = editedText;
+            }
+            setIsSaving(false);
+        }
+        setIsEditing(false);
+    };
+
+    const handleRevert = () => {
+        if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current);
+        }
+        setEditedText(originalTextRef.current);
+        if (onUpdateText && editedText !== originalTextRef.current) {
+            onUpdateText(id, originalTextRef.current);
+        }
+        setIsSaving(false);
+        setIsEditing(false);
+    };
+
+    const hasChanges = editedText !== originalTextRef.current;
 
     return (
         <div className="relative group py-2" data-segment-id={id}>
@@ -79,7 +171,7 @@ export function TranscriptSegment({
                 {participantName && (
                     <>
                         {readOnly && participants && participants.length > 0 && onAssignParticipant ? (
-                            <Popover>
+                            <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
                                 <PopoverTrigger asChild>
                                     <button
                                         type="button"
@@ -94,7 +186,7 @@ export function TranscriptSegment({
                                         <CommandEmpty>No participants found.</CommandEmpty>
                                         <CommandGroup>
                                             <CommandItem
-                                                onSelect={() => onAssignParticipant(id, null)}
+                                                onSelect={() => handleAssignParticipant(null)}
                                                 className="cursor-pointer"
                                             >
                                                 (none)
@@ -102,7 +194,7 @@ export function TranscriptSegment({
                                             {participants.map((p) => (
                                                 <CommandItem
                                                     key={p.id}
-                                                    onSelect={() => onAssignParticipant(id, p.id)}
+                                                    onSelect={() => handleAssignParticipant(p.id)}
                                                     className="cursor-pointer"
                                                 >
                                                     {p.name || 'Unnamed'}
@@ -121,13 +213,45 @@ export function TranscriptSegment({
                 )}
             </div>
 
-            {/* Text content - highlighted when active */}
-            <p
-                className={`text-sm leading-snug text-neutral-800 transition-colors ${isActive ? 'bg-indigo-50' : ''
-                    }`}
-            >
-                {text}
-            </p>
+            {/* Text content - highlighted when active, editable when clicked */}
+            <div className="relative">
+                {isEditing ? (
+                    <div className="space-y-1">
+                        <textarea
+                            ref={textareaRef}
+                            value={editedText}
+                            onChange={(e) => handleTextChange(e.target.value)}
+                            onBlur={handleBlur}
+                            className={`w-full text-sm leading-snug text-neutral-800 border-2 border-indigo-500 rounded px-2 py-1 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 ${isActive ? 'bg-indigo-50' : 'bg-white'
+                                }`}
+                            rows={1}
+                        />
+                        <div className="flex items-center gap-2 text-xs">
+                            {isSaving && <span className="text-neutral-500">Saving...</span>}
+                            {!isSaving && hasChanges && <span className="text-neutral-500">Saved</span>}
+                            {hasChanges && (
+                                <button
+                                    type="button"
+                                    onClick={handleRevert}
+                                    className="inline-flex items-center gap-1 text-neutral-600 hover:text-neutral-800"
+                                    title="Revert changes"
+                                >
+                                    <Undo2 className="w-3 h-3" />
+                                    Revert
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                ) : (
+                    <p
+                        onClick={handleTextClick}
+                        className={`text-sm leading-snug text-neutral-800 transition-colors ${isActive ? 'bg-indigo-50' : ''
+                            } ${!readOnly && onUpdateText ? 'cursor-text hover:bg-neutral-50 rounded px-1 -mx-1' : ''}`}
+                    >
+                        {editedText}
+                    </p>
+                )}
+            </div>
         </div>
     );
 }

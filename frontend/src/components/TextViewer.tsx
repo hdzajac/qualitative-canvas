@@ -696,15 +696,19 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
                   onSelect={(pid) => onAssignParticipant(segId, pid)}
                 />
               );
-              // Append play control right after speaker label when available
-              out.push(<React.Fragment key={`playafter-${bStart}-${s}-${e}`}>{playControl}</React.Fragment>);
+              // Append play control right after speaker label when available (only if onPlaySegment is provided)
+              if (onPlaySegment) {
+                out.push(<React.Fragment key={`playafter-${bStart}-${s}-${e}`}>{playControl}</React.Fragment>);
+              }
             } else {
               out.push(
                 <span key={`spk-${bStart}-${s}-${e}`} className={cls} aria-label={`Speaker: ${speaker}`}>
                   {labelText}
                 </span>
               );
-              out.push(<React.Fragment key={`playafter2-${bStart}-${s}-${e}`}>{playControl}</React.Fragment>);
+              if (onPlaySegment) {
+                out.push(<React.Fragment key={`playafter2-${bStart}-${s}-${e}`}>{playControl}</React.Fragment>);
+              }
             }
           } else {
             const isSpeechStart = s >= speechStart && !speechAnchorInserted;

@@ -10,8 +10,6 @@ import Documents from "./pages/Documents";
 import DocumentDetail from "./pages/DocumentDetail";
 import CanvasPage from "./pages/CanvasPage";
 import Themes from "./pages/Themes";
-import Transcripts from "./pages/Transcripts";
-import TranscriptDetail from "./pages/TranscriptDetail";
 import Insights from "./pages/Insights";
 import CodesPage from "./pages/Codes";
 import { getProjects } from "@/services/api";
@@ -77,7 +75,6 @@ function TopBar() {
         <Link className={active('/themes')} to="/themes">Themes</Link>
         <Link className={active('/insights')} to="/insights">Insights</Link>
         <Link className={active('/canvas')} to="/canvas">Canvas</Link>
-        <Link className={active('/transcripts')} to="/transcripts">Transcripts</Link>
       </nav>
       <div className="ml-auto">
         <ProjectBadge />
@@ -103,8 +100,6 @@ const App = () => (
             <Route path="/themes" element={<ErrorBoundary><Themes /></ErrorBoundary>} />
             <Route path="/insights" element={<ErrorBoundary><Insights /></ErrorBoundary>} />
             <Route path="/canvas" element={<ErrorBoundary><CanvasPage /></ErrorBoundary>} />
-            <Route path="/transcripts" element={<ErrorBoundary><Transcripts /></ErrorBoundary>} />
-            <Route path="/transcripts/:id" element={<ErrorBoundary><TranscriptDetail /></ErrorBoundary>} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

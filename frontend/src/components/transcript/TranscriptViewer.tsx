@@ -20,6 +20,7 @@ export interface TranscriptViewerProps {
     onPlaySegment?: (startMs: number, endMs: number) => void;
     participants?: Array<{ id: string; name: string | null }>;
     onAssignParticipant?: (segmentId: string, participantId: string | null) => void;
+    onUpdateSegmentText?: (segmentId: string, newText: string) => void;
     autoScrollEnabled?: boolean;
     autoScrollMode?: 'center' | 'pin';
 }
@@ -37,6 +38,7 @@ export function TranscriptViewer({
     onPlaySegment,
     participants,
     onAssignParticipant,
+    onUpdateSegmentText,
     autoScrollEnabled = true,
     autoScrollMode = 'pin',
 }: TranscriptViewerProps) {
@@ -108,6 +110,7 @@ export function TranscriptViewer({
                         onPlaySegment={onPlaySegment}
                         participants={participants}
                         onAssignParticipant={onAssignParticipant}
+                        onUpdateText={onUpdateSegmentText}
                     />
                 ))
             )}

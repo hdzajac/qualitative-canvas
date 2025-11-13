@@ -1,24 +1,169 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getFiles, deleteFile, getProjects } from '@/services/api';
-import type { UploadedFile } from '@/types';
-import { FileUpload } from '@/components/FileUpload';
+import { getFiles, deleteFile, getProjects, listMedia, deleteMedia, createTranscriptionJob, uploadMedia } from '@/services/api';
+import type { UploadedFile, MediaFile } from '@/types';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Progress } from '@/components/ui/progress';
+import { useJobPolling } from '@/hooks/useJobPolling';
+import { FileUpload } from '@/components/FileUpload';
+import { MediaUpload } from '@/components/MediaUpload';
+import { FileText, Music } from 'lucide-react';
+import { useOptimisticMutation } from '@/hooks/useOptimisticMutation';
 
-export default function Documents() {
+type DocumentItem = (UploadedFile & { type: 'document' }) | (MediaFile & { type: 'media' });
+
+function formatEta(seconds?: number) {
+  if (seconds == null || seconds < 0) return '';
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+  const m = Math.floor((seconds / 60) % 60).toString().padStart(2, '0');
+  const h = Math.floor(seconds / 3600);
+  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
+}
+
+function DocumentRow({ item }: { item: DocumentItem }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [projectId] = useSelectedProject();
-  const { data: files } = useQuery({ queryKey: ['files', projectId], queryFn: () => getFiles(projectId), enabled: !!projectId });
-  const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
-  const projectName = projects.find(p => p.id === projectId)?.name || 'Project';
 
-  const remove = useMutation({
+  const deleteDocMut = useMutation({
     mutationFn: (id: string) => deleteFile(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['files'] }),
   });
+
+  const deleteMediaMut = useMutation({
+    mutationFn: ({ id, force }: { id: string; force?: boolean }) => deleteMedia(id, { force }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['media'] }),
+  });
+
+  // Always call hooks - conditionally use the result
+  const { job } = useJobPolling(
+    item.type === 'media' ? item.id : '',
+    item.type === 'media' ? item.status : 'done'
+  );
+
+  if (item.type === 'document') {
+    return (
+      <TableRow
+        className="cursor-pointer hover:bg-indigo-50"
+        onClick={() => navigate(`/documents/${item.id}`)}
+      >
+        <TableCell>
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4 text-neutral-600" />
+            <span className="font-medium">{item.filename}</span>
+          </div>
+        </TableCell>
+        <TableCell className="text-xs text-neutral-600">
+          {new Date(item.createdAt).toLocaleString()}
+        </TableCell>
+        <TableCell>
+          <span className="text-xs text-neutral-600">Document</span>
+        </TableCell>
+        <TableCell>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm('Delete this document? This cannot be undone.')) {
+                deleteDocMut.mutate(item.id);
+              }
+            }}
+          >
+            Delete
+          </Button>
+        </TableCell>
+      </TableRow>
+    );
+  }
+
+  // Media/Audio file
+  let statusDisplay: string = item.status;
+  let pct: number | undefined;
+
+  if (item.status === 'processing') {
+    const processedMs = job?.processedMs;
+    const totalMs = job?.totalMs;
+    const etaSeconds = job?.etaSeconds;
+
+    if (processedMs != null && totalMs != null && totalMs > 0) {
+      pct = Math.min(100, Math.round((processedMs / totalMs) * 100));
+      statusDisplay = `Transcribing ${pct}%`;
+      if (etaSeconds != null && etaSeconds >= 0) {
+        statusDisplay += ` (ETA ${formatEta(etaSeconds)})`;
+      }
+    } else {
+      statusDisplay = 'Transcribing…';
+    }
+  } else if (item.status === 'done') {
+    statusDisplay = 'Ready';
+  } else if (item.status === 'uploaded') {
+    statusDisplay = 'Waiting';
+  }
+
+  return (
+    <TableRow
+      className="cursor-pointer hover:bg-indigo-50"
+      onClick={() => {
+        if (item.status === 'done') {
+          navigate(`/documents/${item.id}`);
+        }
+      }}
+    >
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <Music className="w-4 h-4 text-neutral-600" />
+          <span className="font-medium">{item.originalFilename}</span>
+        </div>
+      </TableCell>
+      <TableCell className="text-xs text-neutral-600">
+        {new Date(item.createdAt).toLocaleString()}
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-col gap-1">
+          {item.status === 'processing' && pct != null && (
+            <Progress value={pct} className="w-32" />
+          )}
+          <span className="text-xs text-neutral-600">{statusDisplay}</span>
+        </div>
+      </TableCell>
+      <TableCell>
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={(e) => {
+            e.stopPropagation();
+            const isProcessing = item.status === 'processing';
+            const msg = isProcessing
+              ? 'This audio is currently being transcribed. Force delete?'
+              : 'Delete this audio file and its transcript? This cannot be undone.';
+            if (confirm(msg)) {
+              deleteMediaMut.mutate({ id: item.id, force: isProcessing });
+            }
+          }}
+        >
+          Delete
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+export default function Documents() {
+  const qc = useQueryClient();
+  const [projectId] = useSelectedProject();
+  const { data: files } = useQuery({ queryKey: ['files', projectId], queryFn: () => getFiles(projectId), enabled: !!projectId });
+  const { data: media } = useQuery({ queryKey: ['media', projectId], queryFn: () => listMedia(projectId), enabled: !!projectId });
+  const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
+  const projectName = projects.find(p => p.id === projectId)?.name || 'Project';
+
+  // Combine and sort all documents
+  const allDocs: DocumentItem[] = [
+    ...(files || []).map(f => ({ ...f, type: 'document' as const })),
+    ...(media || []).map(m => ({ ...m, type: 'media' as const })),
+  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   return (
     <div className="container mx-auto p-6 space-y-4">
@@ -44,35 +189,49 @@ export default function Documents() {
 
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-extrabold uppercase tracking-wide">Documents</h1>
-        <div className="ml-auto">
-          <FileUpload renderAs="button" projectId={projectId} onFileUploaded={() => qc.invalidateQueries({ queryKey: ['files'] })} />
+        <div className="ml-auto flex gap-2">
+          <FileUpload
+            renderAs="button"
+            projectId={projectId}
+            onFileUploaded={() => qc.invalidateQueries({ queryKey: ['files'] })}
+          />
+          <MediaUpload
+            projectId={projectId}
+            onUploaded={() => {
+              qc.invalidateQueries({ queryKey: ['media'] });
+            }}
+          />
         </div>
       </div>
 
       {projectId ? (
-        <div className="divide-y-2 divide-black border-2 border-black bg-white">
-          {files?.map((f: UploadedFile) => (
-            <div
-              key={f.id}
-              className="p-2 flex items-center gap-2 cursor-pointer hover:bg-indigo-50"
-              onClick={() => navigate(`/documents/${f.id}`)}
-            >
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold truncate">{f.filename}</div>
-                <div className="text-[11px] text-neutral-500 truncate">{new Date(f.createdAt).toLocaleString()}</div>
-              </div>
-              <Button
-                variant="destructive"
-                className="rounded-none h-8 px-3"
-                onClick={(e) => { e.stopPropagation(); remove.mutate(f.id); }}
-              >
-                Delete
-              </Button>
-            </div>
-          ))}
-          {files && files.length === 0 && (
-            <div className="p-3 text-sm text-neutral-600">No documents yet. Upload a .txt file.</div>
-          )}
+        <div className="border-2 border-black bg-white">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {allDocs.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-sm text-neutral-600 py-8">
+                    No documents yet. Upload a text file or audio file to get started.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                allDocs.map(item => (
+                  <DocumentRow
+                    key={`${item.type}-${item.id}`}
+                    item={item}
+                  />
+                ))
+              )}
+            </TableBody>
+          </Table>
         </div>
       ) : (
         <div className="text-sm text-neutral-600">You must select a project first.</div>
