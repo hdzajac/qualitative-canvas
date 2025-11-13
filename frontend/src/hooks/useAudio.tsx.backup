@@ -1,0 +1,251 @@
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+
+type AudioContextValue = {
+    src: string | null;
+    setSrc: (url: string | null) => void;
+    isReady: boolean;
+    isPlaying: boolean;
+    durationMs: number | null;
+    currentTimeMs: number | null;
+    play: () => void;
+    pause: () => void;
+    seekMs: (ms: number) => void;
+    playSegment: (startMs: number, endMs?: number | null) => void;
+};
+
+const Ctx = createContext<AudioContextValue | null>(null);
+
+const DEBUG = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV);
+
+/**
+ * State machine for audio loading and playback
+ * IDLE -> LOADING -> READY -> PLAYING/PAUSED
+ */
+type AudioState = 'IDLE' | 'LOADING' | 'READY' | 'ERROR';
+
+export function AudioProvider({ children }: { children: React.ReactNode }) {
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const [src, setSrcState] = useState<string | null>(null);
+    const [audioState, setAudioState] = useState<AudioState>('IDLE');
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [durationMs, setDurationMs] = useState<number | null>(null);
+    const [currentTimeMs, setCurrentTimeMs] = useState<number | null>(null);
+    
+    // Pending operations queue - avoids race conditions
+    const pendingOperationRef = useRef<{
+        type: 'PLAY_SEGMENT' | 'SEEK' | 'PLAY';
+        startMs?: number;
+        seekToMs?: number;
+        shouldPlay?: boolean;
+    } | null>(null);
+    
+    // Track if audio element is mounted to avoid operations on unmounted element
+    const isMountedRef = useRef(false);
+    // Lazily create the audio element once on client
+    useEffect(() => {
+        console.log('[audio] AudioProvider mounting, creating audio element');
+        if (typeof window === 'undefined') return;
+        const el = new Audio();
+        el.preload = 'auto';
+        // Avoid requiring CORS unless needed; allow same-origin or proxy URLs to play.
+        audioRef.current = el;
+        console.log('[audio] Audio element created and assigned to ref');
+
+        // If a src was set before the element was ready, apply it now
+        if (pendingSrcRef.current) {
+            console.log('[audio] Applying pending src:', pendingSrcRef.current);
+            el.src = pendingSrcRef.current;
+            try { el.load(); } catch { /* ignore */ }
+            pendingSrcRef.current = null;
+        }
+        const onLoaded = () => {
+            if (DEBUG) console.debug('[audio] loadedmetadata', { duration: el.duration, src: el.currentSrc });
+            setIsReady(true);
+            setDurationMs(Number.isFinite(el.duration) ? Math.round(el.duration * 1000) : null);
+            // If a segment start was queued before metadata was ready, apply it now
+            const queued = pendingStartMsRef.current ?? lastRequestedStartMsRef.current;
+            if (queued != null) {
+                const target = Math.max(0, queued) / 1000;
+                try { el.currentTime = target; } catch { /* ignore */ }
+            }
+        };
+        const onCanPlay = () => {
+            console.log('[audio] canplay event', { currentTime: el.currentTime, queuedStartMs: pendingStartMsRef.current, lastRequested: lastRequestedStartMsRef.current, readyState: el.readyState });
+            if (DEBUG) console.debug('[audio] canplay', { currentTime: el.currentTime, queuedStartMs: pendingStartMsRef.current });
+            // If we queued a start, ensure we seek and play now
+            const queued = pendingStartMsRef.current;
+            if (queued != null) {
+                console.log('[audio] canplay: applying queued start', queued);
+                const target = Math.max(0, queued) / 1000;
+                // Only apply if we're not already at the target (with some tolerance for rounding)
+                const currentSec = el.currentTime;
+                const diff = Math.abs(currentSec - target);
+                if (diff > 0.1) { // More than 100ms difference
+                    try { el.currentTime = target; } catch { /* ignore */ }
+                }
+                // Clear pending before playing to prevent loop
+                pendingStartMsRef.current = null;
+                const p = el.play();
+                if (p && typeof p.catch === 'function') p.catch(() => { });
+            }
+        };
+        const onPlay = () => { if (DEBUG) console.debug('[audio] play'); setIsPlaying(true); };
+        const onPause = () => { if (DEBUG) console.debug('[audio] pause'); setIsPlaying(false); };
+        const onTime = () => {
+            const t = Math.round(el.currentTime * 1000);
+            setCurrentTimeMs(t);
+        };
+        const onError = () => {
+            const err = el.error as MediaError | null;
+            if (DEBUG) console.warn('[audio] error event', { code: err?.code, message: err?.message, src: el.currentSrc });
+        };
+        const onEnded = () => { setIsPlaying(false); segmentEndRef.current = null; };
+        el.addEventListener('loadedmetadata', onLoaded);
+        el.addEventListener('play', onPlay);
+        el.addEventListener('pause', onPause);
+        el.addEventListener('timeupdate', onTime);
+        el.addEventListener('canplay', onCanPlay);
+        el.addEventListener('error', onError);
+        el.addEventListener('ended', onEnded);
+        return () => {
+            el.pause();
+            el.removeEventListener('loadedmetadata', onLoaded);
+            el.removeEventListener('canplay', onCanPlay);
+            el.removeEventListener('play', onPlay);
+            el.removeEventListener('pause', onPause);
+            el.removeEventListener('timeupdate', onTime);
+            el.removeEventListener('error', onError);
+            el.removeEventListener('ended', onEnded);
+            audioRef.current = null;
+        };
+    }, [DEBUG]);
+
+    const setSrc = useCallback((url: string | null) => {
+        setSrcState(url);
+        const el = audioRef.current;
+        console.log('[audio] setSrc called', { url, hasAudioElement: !!el });
+        if (!el) {
+            // Audio element not ready yet - store the URL to apply once it's created
+            console.log('[audio] Audio element not ready, storing pending src:', url);
+            pendingSrcRef.current = url;
+            return;
+        }
+        if (DEBUG) console.debug('[audio] setSrc', { url });
+        setIsReady(false);
+        setDurationMs(null);
+        segmentEndRef.current = null;
+        // Important: don't clear any queued start when we're setting a new, valid src.
+        // If a user clicked a segment before src existed, we want canplay to honor that pending start.
+        if (url) {
+            el.src = url;
+            try { el.load(); } catch { /* ignore */ }
+            // If a start time was queued prior to setting src, prime the seek immediately
+            const queued = pendingStartMsRef.current ?? lastRequestedStartMsRef.current;
+            if (queued != null) {
+                try { el.currentTime = Math.max(0, queued) / 1000; } catch { /* ignore */ }
+            }
+        } else {
+            // When clearing the source entirely, also clear any pending start
+            pendingStartMsRef.current = null;
+            el.removeAttribute('src');
+            try { el.load(); } catch { /* ignore */ }
+        }
+    }, [DEBUG]);
+
+    const play = useCallback(() => {
+        const el = audioRef.current;
+        console.log('[audio] play() called', { hasElement: !!el, src: el?.src, readyState: el?.readyState });
+        if (!el) return;
+        const p = el.play();
+        if (DEBUG) console.debug('[audio] play() called');
+        if (p && typeof p.catch === 'function') p.catch((e: unknown) => {
+            console.error('[audio] play() rejected', e);
+            if (DEBUG) console.warn('[audio] play() rejected', e);
+        });
+    }, [DEBUG]);
+    const pause = useCallback(() => { audioRef.current?.pause(); segmentEndRef.current = null; }, []);
+    const seekMs = useCallback((ms: number) => {
+        const el = audioRef.current;
+        console.log('[audio] seekMs called', { ms, hasElement: !!el, src: el?.src, readyState: el?.readyState });
+        if (!el) return;
+        const wasPlaying = !el.paused;
+        try {
+            el.currentTime = Math.max(0, ms) / 1000;
+            // If it was playing before the seek, keep it playing
+            if (wasPlaying) {
+                const p = el.play();
+                if (p && typeof p.catch === 'function') p.catch(() => { });
+            }
+        } catch (e) {
+            console.warn('[audio] seekMs failed', e);
+        }
+    }, []);
+    const playSegment = useCallback((startMs: number, endMs?: number | null) => {
+        const el = audioRef.current;
+        console.log('[audio] playSegment called', { startMs, endMs, hasElement: !!el, src: el?.src, readyState: el?.readyState });
+        if (!Number.isFinite(startMs)) return;
+        if (DEBUG) console.debug('[audio] playSegment', { startMs, isReady });
+        segmentEndRef.current = null; // still ignore end auto-stop
+        const targetTime = Math.max(0, startMs) / 1000;
+        // Record the desired start so future canplay/loaded handlers can honor it
+        pendingStartMsRef.current = startMs;
+        lastRequestedStartMsRef.current = startMs;
+        if (!el) return; // Will be handled when the element is created and canplay fires
+        // Prefer element readiness over React state to avoid races
+        const HAVE_FUTURE_DATA = 3; // Can play without stalling
+        const HAVE_METADATA = 1;
+        const hasEnoughData = (el as HTMLMediaElement).readyState >= HAVE_FUTURE_DATA;
+        const hasMetadata = (el as HTMLMediaElement).readyState >= HAVE_METADATA;
+
+        if (!hasMetadata) {
+            // No metadata yet, need to load
+            console.log('[audio] No metadata yet, calling load()');
+            try { el.load(); } catch { /* ignore */ }
+            const p = el.play();
+            if (p && typeof p.catch === 'function') p.catch(() => { });
+            return;
+        }
+
+        // Always seek to requested segment start for precision
+        try { el.currentTime = targetTime; } catch { /* ignore */ }
+
+        // Try to play regardless of buffer state
+        console.log('[audio] Attempting to play from', targetTime);
+        const p = el.play();
+        if (p && typeof p.catch === 'function') {
+            p.then(() => {
+                console.log('[audio] play() succeeded');
+                pendingStartMsRef.current = null;
+            }).catch((e) => {
+                console.warn('[audio] play() rejected, keeping pendingStartMsRef for retry', e);
+                // Keep pendingStartMsRef so canplay handler can retry
+            });
+        } else {
+            // Old browser without promise, assume success
+            pendingStartMsRef.current = null;
+        }
+    }, [DEBUG, isReady]);
+
+    const value = useMemo<AudioContextValue>(() => ({
+        src,
+        setSrc,
+        isReady,
+        isPlaying,
+        durationMs,
+        currentTimeMs,
+        play,
+        pause,
+        seekMs,
+        playSegment,
+    }), [src, setSrc, isReady, isPlaying, durationMs, currentTimeMs, play, pause, seekMs, playSegment]);
+
+    return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+// Hook for consuming the audio context
+// eslint-disable-next-line react-refresh/only-export-components
+export function useAudio() {
+    const ctx = useContext(Ctx);
+    if (!ctx) throw new Error('useAudio must be used within AudioProvider');
+    return ctx;
+}

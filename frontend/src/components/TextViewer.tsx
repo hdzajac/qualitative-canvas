@@ -599,7 +599,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           let cls = 'text-sm text-neutral-800';
           if (s < tsEnd) cls = 'text-[11px] text-neutral-400 mr-2 align-top';
           else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'inline-flex items-center text-[12px] font-medium text-neutral-800 mr-1 align-top border border-black rounded-full px-1.5 py-0.5';
-          else if (s >= speechStart) cls = 'text-sm leading-snug text-neutral-800'; // inline speech compact
+          else if (s >= speechStart) cls = `text-sm leading-snug text-neutral-800 ${isActive ? 'bg-indigo-50' : ''}`; // active bg only on speech
           if (s < tsEnd) {
             // timestamp segment
             const label = bracket ? `From ${bracket[1]} to ${bracket[2]}` : (ts ? `At ${ts}` : 'Timestamp');
@@ -700,7 +700,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
           let cls = 'text-sm text-neutral-800';
           if (s < tsEnd) cls = 'text-[11px] text-neutral-400 mr-2 align-top';
           else if (speaker && s >= speakerStart && e <= speakerEnd) cls = 'inline-flex items-center text-[12px] font-medium text-neutral-800 mr-1 align-top border border-black rounded-full px-1.5 py-0.5';
-          else if (s >= speechStart) cls = 'text-sm leading-snug text-neutral-800';
+          else if (s >= speechStart) cls = `text-sm leading-snug text-neutral-800 ${isActive ? 'bg-indigo-50' : ''}`; // active bg only on speech
           pushSeg(s, e, cls, `seg-h-${bStart}-${s}-${e}`);
         }
         return out;
@@ -852,17 +852,9 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
         onContextMenu={(e) => e.preventDefault()}
       >
         {blocks.map((b, i) => {
-          // Active segment highlight (wrapper border/background)
-          let activeCls = '';
-          if (isVtt && vttMeta && currentTimeMs != null && vttMeta[i]) {
-            const sm = vttMeta[i].startMs;
-            const em = vttMeta[i].endMs;
-            if (sm != null && em != null && currentTimeMs >= sm && currentTimeMs < em) {
-              activeCls = 'bg-indigo-50 ring-1 ring-indigo-400';
-            }
-          }
+          // Active segment highlight now applied only to speech spans, not wrapper
           return (
-            <div key={`blockwrap-${i}-${b.start}`} className={`relative group ${activeCls}`}>
+            <div key={`blockwrap-${i}-${b.start}`} className={`relative group`}>
               {isVtt && !readOnly && (!editingRange || i < editingRange.start || i > editingRange.end) && (
                 <button
                   type="button"

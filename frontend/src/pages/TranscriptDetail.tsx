@@ -206,11 +206,14 @@ export default function TranscriptDetail() {
 }
 
 function InnerTranscriptViewer({ mediaId, audioUrl, built, finalizedFile, segments, participants, id, canPlay, qc }: { mediaId: string; audioUrl: string | null; built: { content: string; meta: Array<{ segmentId: string; startMs?: number; endMs?: number; participantId?: string | null; participantName?: string | null }> }; finalizedFile: { id: string; content: string } | undefined; segments: TranscriptSegment[]; participants: Participant[]; id: string; canPlay: boolean; qc: ReturnType<typeof useQueryClient> }) {
-    const { setSrc, currentTimeMs, playSegment } = useAudio();
+    const { src, setSrc, currentTimeMs, playSegment } = useAudio();
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
     const [autoScrollMode, setAutoScrollMode] = useState<'center' | 'pin'>('pin');
-    // Load or clear source based on availability
-    useEffect(() => { setSrc(audioUrl); }, [audioUrl, setSrc]);
+
+    // Load or clear audio source when URL changes
+    useEffect(() => {
+        setSrc(audioUrl);
+    }, [audioUrl, setSrc]);
     return (
         <div className="space-y-3">
             <DocumentViewer
@@ -245,6 +248,10 @@ function InnerTranscriptViewer({ mediaId, audioUrl, built, finalizedFile, segmen
                 autoScrollMode={autoScrollMode}
                 onPlaySegment={(startMs, _endMs) => {
                     if (startMs == null) return;
+                    // Ensure the audio source is set before attempting to play a segment.
+                    if (!src && audioUrl) {
+                        setSrc(audioUrl);
+                    }
                     playSegment(startMs, null);
                 }}
             />
