@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Highlight, Theme, Insight, Annotation, CardStyle, UploadedFile } from '../types';
 import { Button } from './ui/button';
-import { X as CloseIcon, Trash2, HelpCircle } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation, deleteHighlight, deleteTheme, deleteInsight, deleteAnnotation, getFile } from '../services/api';
 import { toast } from 'sonner';
 import { useSelectedProject } from '../hooks/useSelectedProject';
@@ -16,6 +16,8 @@ import CanvasFontToolbar from './canvas/CanvasFontToolbar';
 import CanvasContextPopup from './canvas/CanvasContextPopup';
 import CanvasSizeControls from './canvas/CanvasSizeControls';
 import AnnotationSticky from './canvas/AnnotationSticky';
+import { CanvasHelpPanel } from './canvas/CanvasHelpPanel';
+import { CanvasEntityPanel } from './canvas/CanvasEntityPanel';
 
 interface CanvasProps {
   highlights: Highlight[];
@@ -1087,23 +1089,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     getFile(fid).then((f: UploadedFile) => setFileNames(prev => ({ ...prev, [fid]: f.filename }))).catch(() => { });
   }, [openEntity, nodes, fileNames]);
 
-  // Inline title editing for code in side panel
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [titleDraft, setTitleDraft] = useState('');
 
-  const saveCodeTitle = async (id: string, name: string) => {
-    const val = name.trim();
-    const node = nodes.find(nn => nn.kind === 'code' && nn.id === id);
-    if (!node) return;
-    try {
-      await updateHighlight(id, { codeName: val });
-      setNodes(prev => prev.map(nn => (nn.kind === 'code' && nn.id === id) ? { ...nn, highlight: { ...nn.highlight!, codeName: val } } : nn));
-      onUpdate();
-      toast.success('Saved');
-    } catch {
-      toast.error('Save failed');
-    }
-  };
 
   // Auto-grow height based on wrapped text
   useEffect(() => {
@@ -1261,11 +1247,6 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         );
       })}
 
-      {/* Click-away overlay for side panel document references */}
-      {openEntity && (
-        <div className="absolute inset-0 z-20" onClick={() => setOpenEntity(null)} />
-      )}
-
       {/* Size controls for single selection (width presets + font size per-card) */}
       {(() => {
         const singleCode = selectedCodeIds.length === 1 ? nodes.find(n => n.kind === 'code' && n.id === selectedCodeIds[0]) : undefined;
@@ -1309,186 +1290,23 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         );
       })()}
 
-      {/* Side Panel for open entity */}
-      {openEntity && (
-        <div className="absolute inset-y-0 right-0 z-30 w-[420px] bg-white border-l-4 border-black p-4 flex flex-col" onClick={(e) => e.stopPropagation()}>
-          {/* Header with close and delete only */}
-          <div className="flex items-center justify-between mb-3">
-            <Button size="icon" variant="outline" className="rounded-none" onClick={() => setOpenEntity(null)} aria-label="Close"><CloseIcon className="w-4 h-4" /></Button>
-            <Button size="sm" variant="destructive" className="rounded-none" onClick={async () => {
-              if (!confirm('Delete this item?')) return;
-              try {
-                if (openEntity.kind === 'code') await deleteHighlight(openEntity.id);
-                if (openEntity.kind === 'theme') await deleteTheme(openEntity.id);
-                if (openEntity.kind === 'insight') await deleteInsight(openEntity.id);
-                if (openEntity.kind === 'annotation') await deleteAnnotation(openEntity.id);
-                setOpenEntity(null);
-                onUpdate();
-              } catch { toast.error('Delete failed'); }
-            }}>Delete</Button>
-          </div>
-
-          {(() => {
-            const n = nodes.find(nn => nn.kind === openEntity.kind && nn.id === openEntity.id);
-            if (!n) return null;
-
-            if (n.kind === 'code') {
-              return (
-                <>
-                  {/* Title editable on click */}
-                  <div className="mb-1">
-                    {!editingTitle ? (
-                      <div className="text-xl font-bold break-words cursor-text" onClick={() => { setTitleDraft(n.highlight?.codeName || 'Untitled'); setEditingTitle(true); }}>
-                        {n.highlight?.codeName || 'Untitled'}
-                      </div>
-                    ) : (
-                      <input
-                        className="w-full border-2 border-black px-2 py-1 text-xl font-bold"
-                        autoFocus
-                        value={titleDraft}
-                        onChange={(e) => setTitleDraft(e.target.value)}
-                        onBlur={async () => { await saveCodeTitle(n.id, titleDraft); setEditingTitle(false); }}
-                        onKeyDown={async (e) => {
-                          if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); }
-                          if (e.key === 'Escape') { setEditingTitle(false); }
-                        }}
-                      />
-                    )}
-                  </div>
-                  {/* Document reference */}
-                  {n.highlight?.fileId ? (
-                    <div className="text-sm text-neutral-600 mb-3">
-                      Document: {fileNames[n.highlight.fileId] ?? '...'}
-                    </div>
-                  ) : null}
-                  {/* Body */}
-                  <div className="overflow-auto pr-2">
-                    {(() => {
-                      const body = n.highlight?.text || '';
-                      return body ? <pre className="whitespace-pre-wrap text-sm leading-relaxed">{body}</pre> : <div className="text-sm text-neutral-500">No content.</div>;
-                    })()}
-                  </div>
-                </>
-              );
-            }
-
-            // Other kinds keep simple input editing
-            return (
-              <>
-                <div className="flex items-center gap-2 mb-3">
-                  <input className="border-2 border-black px-2 py-1 flex-1" defaultValue={(() => {
-                    return n.kind === 'theme' ? (n.theme?.name || '') : n.kind === 'insight' ? (n.insight?.name || '') : (n.annotation?.content || '');
-                  })()} onBlur={async (e) => {
-                    const val = e.target.value.trim();
-                    try {
-                      if (n.kind === 'theme') await updateTheme(n.id, { name: val });
-                      if (n.kind === 'insight') await updateInsight(n.id, { name: val });
-                      if (n.kind === 'annotation') await updateAnnotation(n.id, { content: val });
-                      onUpdate();
-                    } catch { toast.error('Save failed'); }
-                  }} />
-                </div>
-                {/* List document filenames for themes and insights */}
-                {(n.kind === 'theme' || n.kind === 'insight') && (
-                  <div className="mb-3 text-sm text-neutral-600">
-                    <div className="font-semibold mb-1">Documents</div>
-                    <ul className="list-disc list-inside space-y-0.5">
-                      {(() => {
-                        const names: string[] = n.kind === 'theme'
-                          ? Array.from(new Set(n.theme!.highlightIds
-                            .map((hid: string) => codeFileNameById.get(hid))
-                            .filter((x: string | undefined): x is string => Boolean(x))))
-                          : Array.from(new Set(n.insight!.themeIds.flatMap((tid: string) => {
-                            const t = themes.find(tt => tt.id === tid);
-                            return t ? t.highlightIds
-                              .map((hid: string) => codeFileNameById.get(hid))
-                              .filter((x: string | undefined): x is string => Boolean(x)) : [];
-                          })));
-                        return names.map((name) => <li key={name}>{name}</li>);
-                      })()}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Underlying items: codes for themes; themes and codes for insights */}
-                {n.kind === 'theme' && (
-                  <div className="mb-3 text-sm text-neutral-800">
-                    <div className="font-semibold mb-1">Codes</div>
-                    <ul className="list-disc list-inside space-y-0.5">
-                      {n.theme!.highlightIds.map((hid: string) => {
-                        const h = highlightById.get(hid);
-                        if (!h) return null;
-                        const doc = h.fileId ? (fileNameById.get(h.fileId) || '') : '';
-                        const label = h.codeName || '(untitled)';
-                        return <li key={hid}><span className="font-medium">{label}</span>{doc ? <span className="text-neutral-500"> — {doc}</span> : null}</li>;
-                      })}
-                    </ul>
-                  </div>
-                )}
-
-                {n.kind === 'insight' && (
-                  <div className="mb-3 text-sm text-neutral-800 space-y-2">
-                    <div className="font-semibold mb-1">Themes</div>
-                    {n.insight!.themeIds.map((tid: string) => {
-                      const t = themeById.get(tid);
-                      if (!t) return null;
-                      return (
-                        <div key={tid} className="ml-1">
-                          <div className="font-medium">• {t.name || '(untitled theme)'}</div>
-                          <ul className="list-disc list-inside space-y-0.5 ml-4 mt-1">
-                            {t.highlightIds.map((hid: string) => {
-                              const h = highlightById.get(hid);
-                              if (!h) return null;
-                              const doc = h.fileId ? (fileNameById.get(h.fileId) || '') : '';
-                              const label = h.codeName || '(untitled)';
-                              return <li key={hid}><span className="font-normal">{label}</span>{doc ? <span className="text-neutral-500"> — {doc}</span> : null}</li>;
-                            })}
-                          </ul>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <div className="overflow-auto pr-2">
-                  {(() => {
-                    const body = n.kind === 'annotation' ? (n.annotation?.content || '') : '';
-                    return body ? <pre className="whitespace-pre-wrap text-sm leading-relaxed">{body}</pre> : <div className="text-sm text-neutral-500">No content.</div>;
-                  })()}
-                </div>
-              </>
-            );
-          })()}
-        </div>
-      )}
+      {/* Entity Panel */}
+      <CanvasEntityPanel
+        entity={openEntity}
+        nodes={nodes}
+        themes={themes}
+        fileNames={fileNames}
+        fileNameById={fileNameById}
+        codeFileNameById={codeFileNameById}
+        highlightById={highlightById}
+        themeById={themeById}
+        onClose={() => setOpenEntity(null)}
+        onUpdate={onUpdate}
+        onNodeUpdate={setNodes}
+      />
 
       {/* Help button & panel */}
-      <div className="absolute left-2 bottom-2 z-40" onClick={(e) => e.stopPropagation()}>
-        <Button size="icon" variant="outline" className="rounded-full shadow" onClick={() => setShowHelp(s => !s)} aria-label="Canvas help">
-          <HelpCircle className="w-5 h-5" />
-        </Button>
-      </div>
-      {showHelp && (
-        <div className="absolute left-2 bottom-14 z-40 w-80 bg-white border-2 border-black p-3 text-sm shadow-lg" onClick={(e) => e.stopPropagation()}>
-          <div className="flex justify-between items-center mb-2">
-            <div className="font-semibold">Canvas Shortcuts & Tips</div>
-            <button className="text-xs underline" onClick={() => setShowHelp(false)}>close</button>
-          </div>
-          <ul className="space-y-1 list-disc list-inside">
-            <li><span className="font-mono">Space</span> hold: pan view</li>
-            <li><span className="font-mono">Wheel</span>: zoom at cursor</li>
-            <li><span className="font-mono">V</span>: select tool</li>
-            <li><span className="font-mono">H</span>: hand (pan) tool</li>
-            <li><span className="font-mono">T</span>: create Theme (if codes selected) else Text tool</li>
-            <li><span className="font-mono">I</span>: create Insight (if themes selected)</li>
-            <li><span className="font-mono">Shift+Click</span>: multi-select</li>
-            <li><span className="font-mono">Delete</span>: delete selected codes/themes</li>
-            <li>Drag small right-side dot to connect (Code→Theme, Theme→Insight)</li>
-            <li>Hover connection: red highlight + X cursor, click removes link</li>
-            <li>Text tool: click canvas to add annotation</li>
-          </ul>
-        </div>
-      )}
+      <CanvasHelpPanel visible={showHelp} onToggle={() => setShowHelp(s => !s)} />
     </div>
   );
 };
