@@ -329,8 +329,6 @@ export default function Transcripts() {
                     </Table>
                 )}
             </div>
-
-            {/* Removed inline segments panel in favor of dedicated TranscriptDetail page */}
         </div>
     );
 }

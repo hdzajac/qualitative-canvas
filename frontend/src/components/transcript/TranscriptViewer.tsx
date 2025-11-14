@@ -285,7 +285,7 @@ export function TranscriptViewer({
                     </div>
                 </div>
                 {rightPanel && (
-                    <div className="w-[240px] flex-shrink-0 sticky top-4 self-start" style={{ maxHeight: 'calc(100vh - 10rem)' }}>
+                    <div className="w-[240px] flex-shrink-0 self-start" style={{ maxHeight: 'calc(100vh - 10rem)' }}>
                         <div className="overflow-y-auto">
                             {rightPanel}
                         </div>
