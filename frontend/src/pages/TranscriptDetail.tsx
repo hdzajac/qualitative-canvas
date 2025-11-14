@@ -334,7 +334,7 @@ function ParticipantPanel({
     const dirty = (p: Participant) => valueFor(p) !== (p.name ?? '');
     const empty = (p: Participant) => valueFor(p).trim().length === 0;
     return (
-        <div className="w-full lg:w-[260px] sticky lg:top-24 overflow-hidden">
+        <div className="w-full lg:w-[260px] lg:top-24 overflow-hidden">
             <div className="font-semibold mb-2">Participants</div>
             <div className="max-h-[68vh] overflow-auto pr-1 space-y-3 text-[13px]">
                 <ul className="space-y-1">

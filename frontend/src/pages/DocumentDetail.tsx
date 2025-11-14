@@ -216,6 +216,19 @@ function MediaView({ mediaId }: { mediaId: string }) {
                                 audioUrl={audioUrl}
                                 segments={segments}
                                 participants={participants}
+                                counts={counts}
+                                newPart={newPart}
+                                onNewPartChange={setNewPart}
+                                onCreateParticipant={() => createPartMut.mutate()}
+                                onUpdateParticipant={(partId, name) => updatePartMut.mutate({ partId, name })}
+                                onDeleteParticipant={(partId) => deletePartMut.mutate(partId)}
+                                mergeSource={mergeSource}
+                                mergeTarget={mergeTarget}
+                                onMergeSourceChange={setMergeSource}
+                                onMergeTargetChange={setMergeTarget}
+                                onMergeParticipants={() => mergeMut.mutate()}
+                                isMergingParticipants={mergeMut.isPending}
+                                isSavingParticipant={updatePartMut.isPending}
                             />
                         </AudioProvider>
                     </div>
@@ -233,12 +246,38 @@ function TranscriptWithAudio({
     mediaId,
     audioUrl,
     segments,
-    participants
+    participants,
+    counts,
+    newPart,
+    onNewPartChange,
+    onCreateParticipant,
+    onUpdateParticipant,
+    onDeleteParticipant,
+    mergeSource,
+    mergeTarget,
+    onMergeSourceChange,
+    onMergeTargetChange,
+    onMergeParticipants,
+    isMergingParticipants,
+    isSavingParticipant,
 }: {
     mediaId: string;
     audioUrl: string | null;
     segments: TranscriptSegment[];
     participants: Participant[];
+    counts: Array<{ participantId: string | null; name: string | null; color: string | null; count: number }>;
+    newPart: { name: string };
+    onNewPartChange: (v: { name: string }) => void;
+    onCreateParticipant: () => void;
+    onUpdateParticipant: (partId: string, name: string) => void;
+    onDeleteParticipant: (partId: string) => void;
+    mergeSource: string;
+    mergeTarget: string;
+    onMergeSourceChange: (v: string) => void;
+    onMergeTargetChange: (v: string) => void;
+    onMergeParticipants: () => void;
+    isMergingParticipants: boolean;
+    isSavingParticipant: boolean;
 }) {
     const qc = useQueryClient();
     const { src, setSrc, currentTimeMs, playSegment } = useAudio();
@@ -543,14 +582,21 @@ function TranscriptWithAudio({
                     <div className="mt-4">
                         <ParticipantPanel
                             participants={participants}
-                            counts={[]}
-                            newPart={{ name: '' }}
-                            onNewPartChange={() => { }}
-                            onCreate={() => { }}
-                            merging={{ source: '', target: '', setSource: () => { }, setTarget: () => { }, onMerge: () => { }, isMerging: false }}
-                            onDelete={() => { }}
-                            onSave={() => { }}
-                            isSaving={false}
+                            counts={counts}
+                            newPart={newPart}
+                            onNewPartChange={onNewPartChange}
+                            onCreate={onCreateParticipant}
+                            merging={{
+                                source: mergeSource,
+                                target: mergeTarget,
+                                setSource: onMergeSourceChange,
+                                setTarget: onMergeTargetChange,
+                                onMerge: onMergeParticipants,
+                                isMerging: isMergingParticipants
+                            }}
+                            onDelete={onDeleteParticipant}
+                            onSave={onUpdateParticipant}
+                            isSaving={isSavingParticipant}
                         />
                     </div>
                 </SheetContent>
@@ -587,7 +633,7 @@ function ParticipantPanel({
     const dirty = (p: Participant) => valueFor(p) !== (p.name ?? '');
     const empty = (p: Participant) => valueFor(p).trim().length === 0;
     return (
-        <div className="w-full lg:w-[260px] sticky lg:top-24 overflow-hidden">
+        <div className="w-full lg:w-[260px] lg:top-24 overflow-hidden">
             <div className="font-semibold mb-2">Participants</div>
             <div className="max-h-[68vh] overflow-auto pr-1 space-y-3 text-[13px]">
                 <ul className="space-y-1">
