@@ -20,5 +20,10 @@ export async function simulateTranscription(job) {
   // Mark job done
   await setJobStatus(pool, job.id, { status: 'done', setCompleted: true });
   await updateMedia(pool, job.mediaFileId, { status: 'done' });
+  
+  // Create file entry for this transcript so it can be coded
+  const { ensureFileEntryForMedia } = await import('../dao/fileEntriesDao.js');
+  await ensureFileEntryForMedia(pool, job.mediaFileId);
+  
   return segments.length;
 }

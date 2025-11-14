@@ -5,7 +5,13 @@ export default function filesService(pool) {
   return {
     list: (filters) => listFiles(pool, filters),
     get: (id) => getFile(pool, id),
-    create: ({ filename, content, projectId }) => createFile(pool, { id: uuidv4(), filename, content, projectId }),
+    async create({ filename, content, projectId }) {
+      const file = await createFile(pool, { id: uuidv4(), filename, content, projectId });
+      // Create file entry for this document so it can be coded
+      const { ensureFileEntryForDocument } = await import('../dao/fileEntriesDao.js');
+      await ensureFileEntryForDocument(pool, file.id);
+      return file;
+    },
     update: (id, patch) => updateFile(pool, id, patch),
     remove: (id) => deleteFile(pool, id),
   };

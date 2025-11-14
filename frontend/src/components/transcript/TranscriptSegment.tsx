@@ -1,4 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
+import SelectionTooltip from '@/components/text/SelectionTooltip';
+import { useSelectionActions, type SelectionRange } from '@/hooks/useSelectionActions';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Play, Undo2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -6,15 +11,18 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '
 
 export interface TranscriptSegmentProps {
     id: string;
+    fileId: string; // The media file ID for coding
     startMs: number;
     endMs: number;
     text: string;
     participantId?: string | null;
     participantName?: string | null;
     isActive: boolean;
+    isHighlighted?: boolean; // Whether this segment has been coded
     canPlay?: boolean;
     readOnly?: boolean;
     isMarkedForDeletion?: boolean;
+    disableSelectionActions?: boolean; // Disable selection tooltip when multi-segment selection is active
     onPlaySegment?: (startMs: number, endMs: number) => void;
     participants?: Array<{ id: string; name: string | null }>;
     onAssignParticipant?: (segmentId: string, participantId: string | null) => void;
@@ -38,15 +46,18 @@ function formatTime(ms: number): string {
  */
 export function TranscriptSegment({
     id,
+    fileId,
     startMs,
     endMs,
     text,
     participantId,
     participantName,
     isActive,
+    isHighlighted = false,
     canPlay = true,
     readOnly = false,
     isMarkedForDeletion = false,
+    disableSelectionActions = false,
     onPlaySegment,
     participants,
     onAssignParticipant,
@@ -61,6 +72,30 @@ export function TranscriptSegment({
     const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const originalTextRef = useRef(text);
     const timeRange = `${formatTime(startMs)} - ${formatTime(endMs)}`;
+
+    // --- Code selection/coding logic ---
+    const textContainerRef = useRef<HTMLDivElement>(null);
+    const [highlightedRanges, setHighlightedRanges] = useState<{ start: number; end: number; codeName: string }[]>([]); // TODO: wire to backend
+    const {
+        selectedText, setSelectedText,
+        selectionRect, setSelectionRect,
+        frozenSelection, setFrozenSelection,
+        sheetOpen, setSheetOpen,
+        codeName, setCodeName,
+        inputRef,
+        openAddCode, handleCreateCode
+    } = useSelectionActions({
+        fileId, // Use the media file ID for coding
+        text: editedText,
+        enabled: !readOnly && !disableSelectionActions, // Disable when multi-segment selection is active
+        isVtt: false,
+        readOnly,
+        enableSelectionActions: !disableSelectionActions, // Disable when multi-segment selection is active
+        textPrefix: participantName ? `${participantName}: ` : '', // Include participant name in the code
+        onHighlightCreated: () => { },
+        startEditSelectedBlock: () => { },
+        getContainer: () => textContainerRef.current,
+    });
 
     // Update original text when prop changes (from optimistic update)
     useEffect(() => {
@@ -172,7 +207,7 @@ export function TranscriptSegment({
                     </span>
                 </button>
             )}
-            
+
             {/* Timestamp */}
             <div className="flex items-start gap-2 mb-1">
                 <time className="text-[11px] text-neutral-400" aria-label={`From ${formatTime(startMs)} to ${formatTime(endMs)}`}>
@@ -195,7 +230,7 @@ export function TranscriptSegment({
                 {/* Participant label with optional assignment */}
                 {participantName && (
                     <>
-                        {readOnly && participants && participants.length > 0 && onAssignParticipant ? (
+                        {!readOnly && participants && participants.length > 0 && onAssignParticipant ? (
                             <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
                                 <PopoverTrigger asChild>
                                     <button
@@ -238,8 +273,8 @@ export function TranscriptSegment({
                 )}
             </div>
 
-            {/* Text content - highlighted when active, editable when clicked */}
-            <div className="relative">
+            {/* Text content - highlighted when active, editable when clicked, selectable for coding */}
+            <div className="relative" ref={textContainerRef}>
                 {isEditing ? (
                     <div className="space-y-1">
                         <textarea
@@ -247,8 +282,7 @@ export function TranscriptSegment({
                             value={editedText}
                             onChange={(e) => handleTextChange(e.target.value)}
                             onBlur={handleBlur}
-                            className={`w-full text-sm leading-snug text-neutral-800 border-2 border-indigo-500 rounded px-2 py-1 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 ${isActive ? 'bg-indigo-50' : 'bg-white'
-                                }`}
+                            className={`w-full text-sm leading-snug text-neutral-800 border-2 border-indigo-500 rounded px-2 py-1 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 ${isActive ? 'bg-indigo-50' : 'bg-white'}`}
                             rows={1}
                         />
                         <div className="flex items-center gap-2 text-xs">
@@ -268,14 +302,56 @@ export function TranscriptSegment({
                         </div>
                     </div>
                 ) : (
-                    <p
+                    <span
                         onClick={handleTextClick}
-                        className={`text-sm leading-snug text-neutral-800 transition-colors ${isActive ? 'bg-indigo-50' : ''
-                            } ${!readOnly && onUpdateText ? 'cursor-text hover:bg-neutral-50 rounded px-1 -mx-1' : ''}`}
+                        className={`text-sm leading-snug text-neutral-800 transition-colors ${isActive ? 'bg-indigo-50' : ''} ${isHighlighted ? 'bg-primary/10 border-l-2 border-primary/40 pl-1' : ''} ${!readOnly && onUpdateText ? 'cursor-text hover:bg-neutral-50 rounded px-1 -mx-1' : ''}`}
+                        style={{ userSelect: !readOnly ? 'text' : undefined }}
                     >
                         {editedText}
-                    </p>
+                    </span>
                 )}
+                {/* Selection tooltip for coding */}
+                {(selectedText || frozenSelection) && selectionRect && !readOnly && (
+                    <SelectionTooltip
+                        rect={selectionRect}
+                        isVtt={false}
+                        onAddCode={openAddCode}
+                    />
+                )}
+                {/* Code creation sheet */}
+                <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) setFrozenSelection(null); }}>
+                    <SheetContent side="right" className="rounded-none border-l-4 border-black sm:max-w-sm">
+                        <SheetHeader>
+                            <SheetTitle className="uppercase tracking-wide">Add Code</SheetTitle>
+                        </SheetHeader>
+                        {(frozenSelection || selectedText) && (
+                            <div className="space-y-3 mt-4">
+                                <div>
+                                    <Label className="text-sm font-medium">Selected Text</Label>
+                                    <p className="text-sm text-muted-foreground italic mt-1">"{(frozenSelection || selectedText)!.text}"</p>
+                                </div>
+                                <div>
+                                    <Label htmlFor="codeName">Code Name</Label>
+                                    <Input
+                                        id="codeName"
+                                        ref={inputRef}
+                                        value={codeName}
+                                        onChange={(e) => setCodeName(e.target.value)}
+                                        placeholder="Enter a code name for this highlight"
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) return handleCreateCode();
+                                            if (e.key === 'Enter') return handleCreateCode();
+                                        }}
+                                    />
+                                </div>
+                                <div className="flex gap-2">
+                                    <Button onClick={handleCreateCode} className="brutal-button">Create Code</Button>
+                                    <Button variant="outline" onClick={() => { setSheetOpen(false); setCodeName(''); setFrozenSelection(null); }}>Cancel</Button>
+                                </div>
+                            </div>
+                        )}
+                    </SheetContent>
+                </Sheet>
             </div>
         </div>
     );

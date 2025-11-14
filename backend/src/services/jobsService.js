@@ -22,7 +22,12 @@ export default function jobsService(pool) {
     },
     async complete(jobId) {
       const job = await setJobStatus(pool, jobId, { status: 'done', setCompleted: true });
-      if (job) await updateMedia(pool, job.mediaFileId, { status: 'done' });
+      if (job) {
+        await updateMedia(pool, job.mediaFileId, { status: 'done' });
+        // Create file entry for this transcript so it can be coded
+        const { ensureFileEntryForMedia } = await import('../dao/fileEntriesDao.js');
+        await ensureFileEntryForMedia(pool, job.mediaFileId);
+      }
       return job;
     },
     async fail(jobId, errorMessage) {

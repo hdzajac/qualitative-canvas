@@ -153,7 +153,7 @@ export default function TranscriptDetail() {
                     </div>
                     <div className="p-3 space-y-3">
                         {/* Center document viewer with transcript content (finalized file if available, otherwise synthetic from segments) */}
-                        <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6 items-start">
+                        <div className="grid grid-cols-1 gap-6 items-start">
                             <div>
                                 {segments.length > 0 || finalizedFile ? (
                                     <AudioProvider>
@@ -210,6 +210,7 @@ function InnerTranscriptViewer({ mediaId, audioUrl, built, finalizedFile, segmen
     return (
         <div className="space-y-3">
             <TranscriptViewer
+                fileId={mediaId}
                 segments={segments.map(s => ({
                     id: s.id,
                     startMs: s.startMs,

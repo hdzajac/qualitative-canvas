@@ -3,6 +3,7 @@ import type { Size, CardStyle } from './core';
 export interface Code { // was Highlight
   id: string;
   fileId: string;
+  fileName?: string; // The name of the document or transcript
   startOffset: number;
   endOffset: number;
   text: string;

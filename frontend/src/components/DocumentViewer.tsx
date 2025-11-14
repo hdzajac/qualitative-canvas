@@ -88,10 +88,10 @@ export const DocumentViewer = forwardRef<DocumentViewerHandle, DocumentViewerPro
             <div className="space-y-4" data-has-side-panels={hasSidePanels}>
                 {headerExtras && <div className="flex items-center justify-between">{headerExtras}</div>}
                 {hasSidePanels ? (
-                    <div className="grid grid-cols-1 lg:grid-cols-[auto_1fr_auto] gap-6 items-start">
+                    <div className="flex gap-6">
                         {leftPanel && <div className="min-w-[220px] space-y-4" aria-label="left-panel">{leftPanel}</div>}
-                        <div>{center}</div>
-                        {rightPanel && <div className="min-w-[200px] space-y-4" aria-label="right-panel">{rightPanel}</div>}
+                        <div className="flex-1">{center}</div>
+                        {rightPanel && <div className="w-[240px] flex-shrink-0" aria-label="right-panel">{rightPanel}</div>}
                     </div>
                 ) : (
                     center

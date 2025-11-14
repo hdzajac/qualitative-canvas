@@ -13,6 +13,7 @@ type UseSelectionActionsOpts = {
   isVtt: boolean;
   readOnly?: boolean;
   enableSelectionActions?: boolean;
+  textPrefix?: string; // Optional prefix to add to the selected text (e.g., participant name)
   onHighlightCreated: () => void;
   startEditSelectedBlock: () => void; // callback to begin VTT block edit
   getContainer: () => HTMLElement | null; // function returning root container for selection calculations
@@ -25,6 +26,7 @@ export const useSelectionActions = ({
   isVtt,
   readOnly = false,
   enableSelectionActions = true,
+  textPrefix = '',
   onHighlightCreated,
   startEditSelectedBlock,
   getContainer,
@@ -71,11 +73,12 @@ export const useSelectionActions = ({
     }
     try {
       const snippet = text.slice(activeSel.start, activeSel.end);
+      const fullSnippet = textPrefix ? textPrefix + snippet : snippet;
       await createHighlight({
         fileId,
         startOffset: activeSel.start,
         endOffset: activeSel.end,
-        text: snippet,
+        text: fullSnippet,
         codeName: codeName.trim(),
         size: DEFAULTS.code,
       });

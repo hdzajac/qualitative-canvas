@@ -1,7 +1,8 @@
 import { useRef, useMemo, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { getFile, getHighlights, getProjects, getMedia, listSegments, listParticipants, updateSegment, deleteSegment, getMediaDownloadUrl, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants } from '@/services/api';
+import { getFile, getHighlights, getProjects, getMedia, listSegments, listParticipants, updateSegment, deleteSegment, getMediaDownloadUrl, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants, deleteHighlight } from '@/services/api';
+import { toast } from 'sonner';
 import type { Highlight, TranscriptSegment, Participant } from '@/types';
 import { useOptimisticMutation } from '@/hooks/useOptimisticMutation';
 import { DocumentViewer, type DocumentViewerHandle } from '@/components/DocumentViewer';
@@ -10,7 +11,7 @@ import { AudioProvider, useAudio } from '@/hooks/useAudio';
 import AudioBar from '@/components/AudioBar';
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 // Component for document files (text)
 function DocumentView({ fileId }: { fileId: string }) {
@@ -23,45 +24,7 @@ function DocumentView({ fileId }: { fileId: string }) {
     const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
 
     const viewerRef = useRef<DocumentViewerHandle>(null);
-    const [panelHeight, setPanelHeight] = useState<number>(0);
-    const [marks, setMarks] = useState<Array<{ id: string; codeName: string; text: string; top: number; startOffset: number; endOffset: number }>>([]);
-    const docHighlights = highlights;
-    const sortedByOffset = useMemo(() => [...docHighlights].sort((a, b) => a.startOffset - b.startOffset), [docHighlights]);
-
-    // Recompute panel height and code positions to align with document
-    useEffect(() => {
-        const update = () => {
-            const viewer = viewerRef.current;
-            if (!viewer) return;
-            const crect = viewer.getContainerRect();
-            if (!crect) return;
-            const containerTop = window.scrollY + crect.top;
-            const height = Math.max(0, Math.round(crect.height));
-            setPanelHeight(height);
-            const next: Array<{ id: string; codeName: string; text: string; top: number; startOffset: number; endOffset: number }> = [];
-            docHighlights.forEach(h => {
-                const topAbs = viewer.getTopForOffset(h.startOffset);
-                if (topAbs == null) return;
-                const topRel = Math.max(0, Math.min(height, Math.round(topAbs - containerTop)));
-                next.push({ id: h.id, codeName: h.codeName || 'Code', text: h.text || '', top: topRel, startOffset: h.startOffset, endOffset: h.endOffset });
-            });
-            next.sort((a, b) => a.top - b.top);
-            setMarks(next);
-        };
-        update();
-        const onScroll = () => update();
-        const onResize = () => update();
-        window.addEventListener('scroll', onScroll, { passive: true });
-        window.addEventListener('resize', onResize);
-        const containerEl = document.getElementById('transcript-container');
-        const ro = containerEl ? new ResizeObserver(() => update()) : null;
-        if (containerEl && ro) ro.observe(containerEl);
-        return () => {
-            window.removeEventListener('scroll', onScroll);
-            window.removeEventListener('resize', onResize);
-            if (ro && containerEl) ro.disconnect();
-        };
-    }, [docHighlights]);
+    const sortedHighlights = useMemo(() => [...highlights].sort((a, b) => a.startOffset - b.startOffset), [highlights]);
 
     if (!file) return <div className="text-sm text-neutral-600">Loading document...</div>;
 
@@ -99,7 +62,7 @@ function DocumentView({ fileId }: { fileId: string }) {
                     ref={viewerRef}
                     fileId={file.id}
                     content={file.content}
-                    highlights={docHighlights}
+                    highlights={highlights}
                     onHighlightCreated={() => refetchHighlights()}
                     isVtt={/\.(vtt|transcript\.txt)$/i.test(file.filename)}
                     framed={false}
@@ -108,17 +71,34 @@ function DocumentView({ fileId }: { fileId: string }) {
                     rightPanel={(
                         <div className="pl-4 border-l-2 border-black">
                             <div className="text-xs font-semibold uppercase text-neutral-600 tracking-wide mb-2">Codes</div>
-                            <div className="space-y-1 relative" style={{ height: panelHeight > 0 ? `${panelHeight}px` : 'auto' }}>
-                                {marks.map(m => (
+                            <div className="space-y-2">
+                                {sortedHighlights.map((h) => (
                                     <div
-                                        key={m.id}
-                                        className="absolute left-0 right-0 text-[11px] leading-tight px-2 py-1 bg-primary/10 border border-primary/30 rounded cursor-pointer hover:bg-primary/20"
-                                        style={{ top: `${m.top}px` }}
-                                        onClick={() => viewerRef.current?.scrollToOffset(m.startOffset)}
-                                        title={m.text}
+                                        key={h.id}
+                                        className="text-[11px] leading-tight px-2 py-1 bg-primary/10 border border-primary/30 rounded cursor-pointer hover:bg-primary/20 group relative"
+                                        onClick={() => viewerRef.current?.scrollToOffset(h.startOffset)}
+                                        title={h.text}
                                     >
-                                        <div className="font-semibold text-primary truncate">{m.codeName}</div>
-                                        <div className="text-neutral-700 truncate">{m.text}</div>
+                                        <div className="font-semibold text-primary truncate pr-6">{h.codeName || 'Code'}</div>
+                                        <div className="text-neutral-700 truncate">{h.text || ''}</div>
+                                        <button
+                                            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-100 rounded"
+                                            onClick={async (e) => {
+                                                e.stopPropagation();
+                                                if (!confirm('Delete this code?')) return;
+                                                try {
+                                                    await deleteHighlight(h.id);
+                                                    refetchHighlights();
+                                                } catch {
+                                                    toast.error('Failed to delete code');
+                                                }
+                                            }}
+                                            title="Delete code"
+                                        >
+                                            <svg className="w-3 h-3 text-neutral-600 hover:text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                        </button>
                                     </div>
                                 ))}
                             </div>
@@ -229,7 +209,7 @@ function MediaView({ mediaId }: { mediaId: string }) {
             <div className="border-2 border-black p-4">
                 <h2 className="text-base md:text-lg font-bold uppercase tracking-wide mb-2">{media.originalFilename}</h2>
                 {media.status === 'done' && segments.length > 0 ? (
-                    <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6 items-start">
+                    <div className="grid grid-cols-1 gap-6 items-start">
                         <AudioProvider>
                             <TranscriptWithAudio
                                 mediaId={mediaId}
@@ -238,24 +218,6 @@ function MediaView({ mediaId }: { mediaId: string }) {
                                 participants={participants}
                             />
                         </AudioProvider>
-                        <ParticipantPanel
-                            participants={participants}
-                            counts={counts}
-                            newPart={newPart}
-                            onNewPartChange={(v) => setNewPart(v)}
-                            onCreate={() => createPartMut.mutate()}
-                            merging={{
-                                source: mergeSource,
-                                target: mergeTarget,
-                                setSource: setMergeSource,
-                                setTarget: setMergeTarget,
-                                onMerge: () => mergeMut.mutate(),
-                                isMerging: mergeMut.isPending
-                            }}
-                            onDelete={(id) => deletePartMut.mutate(id)}
-                            onSave={(id, name) => updatePartMut.mutate({ partId: id, name })}
-                            isSaving={updatePartMut.isPending}
-                        />
                     </div>
                 ) : (
                     <div className="text-sm text-neutral-600">
@@ -391,9 +353,83 @@ function TranscriptWithAudio({
         }
     };
 
+    // Sidepanel state
+    const [participantsPanelOpen, setParticipantsPanelOpen] = useState(false);
+
+    // Fetch real codes/highlights for this transcript (mediaId)
+    const { data: codes = [] } = useQuery({
+        queryKey: ['highlights', mediaId],
+        queryFn: () => getHighlights({ fileId: mediaId }),
+        enabled: !!mediaId
+    });
+
+    const transcriptContainerRef = useRef<HTMLDivElement>(null);
+
+    // Build a map of character offset to segment index
+    const offsetToSegmentMap = useMemo(() => {
+        const map: Array<{ startOffset: number; endOffset: number; segmentId: string; idx: number }> = [];
+        let currentOffset = 0;
+        segments.forEach((seg, idx) => {
+            // Each segment includes participant name prefix if present
+            const prefix = seg.participantName ? `${seg.participantName}: ` : '';
+            const fullText = prefix + seg.text + '\n'; // Add newline between segments
+            const startOffset = currentOffset;
+            const endOffset = currentOffset + fullText.length;
+            map.push({ startOffset, endOffset, segmentId: seg.id, idx });
+            currentOffset = endOffset;
+        });
+        return map;
+    }, [segments]);
+
+    // Sort codes by their position in the transcript (by segment index, then by offset within segment)
+    const sortedCodes = useMemo(() => {
+        return [...codes].sort((a, b) => {
+            // Find which segment each code belongs to
+            const segA = offsetToSegmentMap.find(seg => a.startOffset >= seg.startOffset && a.startOffset < seg.endOffset);
+            const segB = offsetToSegmentMap.find(seg => b.startOffset >= seg.startOffset && b.startOffset < seg.endOffset);
+
+            if (!segA) return 1;  // Put codes without segments at the end
+            if (!segB) return -1;
+
+            // First sort by segment index (order in transcript)
+            if (segA.idx !== segB.idx) {
+                return segA.idx - segB.idx;
+            }
+
+            // If in same segment, sort by offset
+            return a.startOffset - b.startOffset;
+        });
+    }, [codes, offsetToSegmentMap]);
+
+    // Determine which segments have codes (for highlighting)
+    const highlightedSegmentIds = useMemo(() => {
+        const ids = new Set<string>();
+        codes.forEach(code => {
+            // Find which segment(s) this code overlaps with
+            offsetToSegmentMap.forEach(seg => {
+                const codeStart = code.startOffset;
+                const codeEnd = code.endOffset;
+                const segStart = seg.startOffset;
+                const segEnd = seg.endOffset;
+                // Check if code overlaps with this segment
+                if (codeStart < segEnd && codeEnd > segStart) {
+                    ids.add(seg.segmentId);
+                }
+            });
+        });
+        return ids;
+    }, [codes, offsetToSegmentMap]);
+
     return (
-        <div className="space-y-3">
+        <div className="relative space-y-3 pb-24">
+            {/* Top right controls */}
+            <div className="absolute right-0 top-0 flex gap-2 z-20">
+                <button className="brutal-button px-3 py-1 text-xs" onClick={() => setParticipantsPanelOpen(true)}>
+                    Participants
+                </button>
+            </div>
             <TranscriptViewer
+                fileId={mediaId}
                 segments={segments.map(s => ({
                     id: s.id,
                     startMs: s.startMs,
@@ -406,6 +442,61 @@ function TranscriptWithAudio({
                 canPlay={true}
                 readOnly={false}
                 framed={false}
+                containerRef={transcriptContainerRef}
+                highlightedSegments={highlightedSegmentIds}
+                onHighlightCreated={() => {
+                    qc.invalidateQueries({ queryKey: ['highlights', mediaId] });
+                }}
+                rightPanel={(
+                    <div className="pl-4 border-l-2 border-black">
+                        <div className="text-xs font-semibold uppercase text-neutral-600 tracking-wide mb-2">Codes</div>
+                        <div className="space-y-2">
+                            {sortedCodes.map((code) => {
+                                // Find which segment this code belongs to
+                                const startSegmentInfo = offsetToSegmentMap.find(seg =>
+                                    code.startOffset >= seg.startOffset && code.startOffset < seg.endOffset
+                                );
+
+                                return (
+                                    <div
+                                        key={code.id}
+                                        className="text-[11px] leading-tight px-2 py-1 bg-primary/10 border border-primary/30 rounded cursor-pointer hover:bg-primary/20 group relative"
+                                        onClick={() => {
+                                            if (startSegmentInfo) {
+                                                const segElement = document.querySelector(`[data-segment-id="${startSegmentInfo.segmentId}"]`);
+                                                if (segElement) {
+                                                    segElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                }
+                                            }
+                                        }}
+                                        title={code.text}
+                                    >
+                                        <div className="font-semibold text-primary truncate pr-6">{code.codeName || 'Code'}</div>
+                                        <div className="text-neutral-700 truncate">{code.text || ''}</div>
+                                        <button
+                                            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-100 rounded"
+                                            onClick={async (e) => {
+                                                e.stopPropagation();
+                                                if (!confirm('Delete this code?')) return;
+                                                try {
+                                                    await deleteHighlight(code.id);
+                                                    qc.invalidateQueries({ queryKey: ['highlights', mediaId] });
+                                                } catch {
+                                                    toast.error('Failed to delete code');
+                                                }
+                                            }}
+                                            title="Delete code"
+                                        >
+                                            <svg className="w-3 h-3 text-neutral-600 hover:text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
                 onPlaySegment={(startMs, _endMs) => {
                     playSegment(startMs, null);
                 }}
@@ -443,6 +534,27 @@ function TranscriptWithAudio({
                     onCycleAutoScrollMode={() => setAutoScrollMode(m => (m === 'pin' ? 'center' : 'pin'))}
                 />
             )}
+            {/* Participants popup */}
+            <Sheet open={participantsPanelOpen} onOpenChange={setParticipantsPanelOpen}>
+                <SheetContent side="right" className="rounded-none border-l-4 border-black sm:max-w-sm">
+                    <SheetHeader>
+                        <SheetTitle className="uppercase tracking-wide">Participants</SheetTitle>
+                    </SheetHeader>
+                    <div className="mt-4">
+                        <ParticipantPanel
+                            participants={participants}
+                            counts={[]}
+                            newPart={{ name: '' }}
+                            onNewPartChange={() => { }}
+                            onCreate={() => { }}
+                            merging={{ source: '', target: '', setSource: () => { }, setTarget: () => { }, onMerge: () => { }, isMerging: false }}
+                            onDelete={() => { }}
+                            onSave={() => { }}
+                            isSaving={false}
+                        />
+                    </div>
+                </SheetContent>
+            </Sheet>
         </div>
     );
 }

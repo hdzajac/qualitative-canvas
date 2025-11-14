@@ -60,7 +60,7 @@ export default function CodesPage() {
                             <TableCell className="text-sm max-w-[48ch] truncate">{h.text}</TableCell>
                             <TableCell>
                                 <Button size="sm" variant="outline" className="rounded-none h-7 px-2" onClick={() => navigate(`/documents/${h.fileId}`)}>
-                                    {fileNameById[h.fileId] ?? 'Open'}
+                                    {h.fileName || fileNameById[h.fileId] || 'Open'}
                                 </Button>
                             </TableCell>
                             <TableCell className="text-right">

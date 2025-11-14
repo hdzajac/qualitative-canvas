@@ -157,7 +157,7 @@ export const CanvasEntityPanel: React.FC<CanvasEntityPanelProps> = ({
                         {/* Document reference */}
                         {n.highlight?.fileId ? (
                             <div className="text-sm text-neutral-600 mb-3">
-                                Document: {fileNames[n.highlight.fileId] ?? '...'}
+                                Document: {n.highlight.fileName ?? fileNames[n.highlight.fileId] ?? '...'}
                             </div>
                         ) : null}
                         {/* Body */}
