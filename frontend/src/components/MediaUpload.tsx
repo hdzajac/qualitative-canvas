@@ -1,16 +1,17 @@
 import { useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { uploadMedia } from '@/services/api';
+import { uploadMedia, createTranscriptionJob } from '@/services/api';
 import { toast } from 'sonner';
 
 interface MediaUploadProps {
     projectId?: string;
     onUploaded?: () => void;
     label?: string;
+    autoTranscribe?: boolean;
 }
 
-export const MediaUpload = ({ projectId, onUploaded, label = 'Upload audio/video' }: MediaUploadProps) => {
+export const MediaUpload = ({ projectId, onUploaded, label = 'Upload audio/video', autoTranscribe = true }: MediaUploadProps) => {
     const [uploading, setUploading] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -23,8 +24,20 @@ export const MediaUpload = ({ projectId, onUploaded, label = 'Upload audio/video
         }
         setUploading(true);
         try {
-            await uploadMedia(file, projectId);
+            const media = await uploadMedia(file, projectId);
             toast.success('Media uploaded');
+            
+            // Auto-start transcription if enabled
+            if (autoTranscribe && media.id) {
+                try {
+                    await createTranscriptionJob(media.id, {});
+                    toast.success('Transcription started');
+                } catch (transcribeErr) {
+                    console.error('Auto-transcribe failed:', transcribeErr);
+                    toast.error('Uploaded but transcription failed to start');
+                }
+            }
+            
             onUploaded?.();
         } catch (err) {
             console.error(err);
