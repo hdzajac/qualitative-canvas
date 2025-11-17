@@ -35,6 +35,10 @@ const user = process.env.PGUSER || process.env[`PGUSER_${envKey}`];
 const password = process.env.PGPASSWORD || process.env[`PGPASSWORD_${envKey}`];
 let database = process.env.PGDATABASE || process.env[`PGDATABASE_${envKey}`];
 
+// Debug logging for connection parameters
+console.log('[DB Pool] Environment:', dbEnv, '/ Key:', envKey);
+console.log('[DB Pool] Connection params:', { host, port, user, database, hasConnectionString: !!connectionString });
+
 // If in test mode and TEST_DB_NAME is provided, override the database name in connection
 const testDbName = process.env.TEST_DB_NAME || process.env.PGDATABASE_TEST;
 if (dbEnv === 'test' && testDbName) {

@@ -27,6 +27,7 @@ services:
       db:
         condition: service_healthy
     environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/qualitative_canvas
       PGHOST: db
       PGPORT: 5432
       PGDATABASE: qualitative_canvas
