@@ -27,11 +27,11 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_HOST: db
-      DATABASE_PORT: 5432
-      DATABASE_NAME: qualitative_canvas
-      DATABASE_USER: postgres
-      DATABASE_PASSWORD: postgres
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: qualitative_canvas
+      PGUSER: postgres
+      PGPASSWORD: postgres
       PORT: 5002
       NODE_ENV: production
       SESSION_SECRET: default-secret-change-in-production

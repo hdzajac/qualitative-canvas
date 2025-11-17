@@ -29,12 +29,12 @@ services:
       db:
         condition: service_healthy
     environment:
-      # Database
-      DATABASE_HOST: db
-      DATABASE_PORT: 5432
-      DATABASE_NAME: ${POSTGRES_DB:-qualitative_canvas}
-      DATABASE_USER: ${POSTGRES_USER:-postgres}
-      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      # Database (using PostgreSQL standard environment variables)
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-qualitative_canvas}
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-changeme}
       
       # Server
       PORT: 5002
