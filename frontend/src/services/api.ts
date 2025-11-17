@@ -39,9 +39,14 @@ import type { UploadedFile, Highlight, Theme, Insight, Annotation, Project, Medi
  */
 
 // Update: use Vite env for API base URL in Docker or local dev
-const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL)
+// VITE_API_URL should include /api path if needed
+const API_BASE_RAW = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL)
   || (typeof window !== 'undefined' ? `${window.location.origin}` : 'http://localhost:5000');
-const BASE_URL = `${API_BASE.replace(/\/$/, '')}/api`;
+
+// If VITE_API_URL already includes /api, use as-is. Otherwise append it.
+const BASE_URL = API_BASE_RAW.includes('/api') 
+  ? API_BASE_RAW.replace(/\/$/, '')
+  : `${API_BASE_RAW.replace(/\/$/, '')}/api`;
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
