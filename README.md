@@ -1,51 +1,99 @@
 # Qualitative Canvas
 
-Full-stack monorepo with:
-- Frontend: Vite + React + TypeScript (`frontend/`)
-- Backend: Node.js + Express + PostgreSQL (`backend/`)
-- Docker Compose: orchestrates frontend, backend, and Postgres
+Full-stack application for qualitative data analysis:
+- Frontend: Vite + React + TypeScript
+- Backend: Node.js + Express + PostgreSQL
+- Worker: Python transcription service
+- Docker Compose: orchestrates all services
 
-<!-- Legacy header retained from earlier draft removed in cleanup -->
-## Quick start (Local-first Dev + Minimal Compose)
+## Quick Start (Pre-built Images - No Coding Required)
 
-Current streamlined workflow: run the backend and frontend on your host; only Postgres (and optionally the transcription worker) run in Docker.
+**For users who want to run the application without setting up a development environment:**
 
-1. Copy `.env.example` to `.env` (or use the simplified `.env` already present) and ensure it contains a single local `DATABASE_URL`.
-2. Start Postgres + worker:
-  ```sh
-  docker compose up -d db-dev worker
-  ```
-3. Backend:
-  ```sh
-  cd backend
-  npm install
-  npm start  # listens on http://localhost:5002
-  ```
-4. Frontend:
-  ```sh
-  cd frontend
-  npm install
-  npm run dev  # http://localhost:3000
-  ```
-5. App expects API at `VITE_API_URL` (defaults to `http://localhost:5002`).
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
-Data persists in the volume `db_data_dev`. Remove with:
+2. Download or clone this repository:
+   ```sh
+   git clone https://github.com/hdzajac/qualitative-canvas.git
+   cd qualitative-canvas
+   ```
+
+3. Pull and start the pre-built images:
+   ```sh
+   make pull-images
+   make up-images
+   ```
+   Or without Make:
+   ```sh
+   docker compose -f docker-compose.yml -f docker-compose.images.yml pull
+   docker compose -f docker-compose.yml -f docker-compose.images.yml up -d
+   ```
+
+4. Access the application:
+   - **Frontend**: http://localhost:3000
+   - **Backend API**: http://localhost:5001/api
+
+5. View logs (optional):
+   ```sh
+   make logs
+   ```
+
+6. Stop the application:
+   ```sh
+   make down-images
+   ```
+
+Data persists in the Docker volume `db_data_dev`. To completely remove all data:
 ```sh
 docker compose down -v
 ```
+
+**Note**: The pre-built images come with safe defaults. No `.env` file is required, but you can override settings via environment variables if needed.
+
+---
+
+## Developer Setup (Local Development)
+
+**For developers who want to modify the code:**
+
+### Option 1: Local-first Dev (Recommended for Active Development)
+
+Run backend and frontend on your host; only Postgres and worker run in Docker.
+
+1. Copy `.env.example` to `.env` and ensure it contains a `DATABASE_URL`.
+
+2. Start Postgres + worker:
+   ```sh
+   docker compose up -d db-dev worker
+   ```
+
+3. Backend:
+   ```sh
+   cd backend
+   npm install
+   npm start  # listens on http://localhost:5002
+   ```
+
+4. Frontend:
+   ```sh
+   cd frontend
+   npm install
+   npm run dev  # http://localhost:3000
+   ```
+
+### Option 2: Full Docker Stack (Local Builds)
+
+Build and run everything in Docker:
+```sh
+make up
+# or
+docker compose up -d --build
+```
+
 Inspect status:
 ```sh
 docker compose ps
 ```
-
-Change dev DB host port (optional): set `DB_DEV_HOST_PORT` in `.env`, e.g.
-```sh
-echo "DB_DEV_HOST_PORT=5433" >> .env
-docker compose up -d db-dev
-```
-
-Notes:
-- To wipe data entirely: `docker compose down -v`.
 ## Environment Strategy (Simplified)
 
 Single local `.env` contains only what you need:
@@ -211,13 +259,21 @@ When you introduce staging/production:
 - Drag background: Marquee select
 - Delete/Backspace: Delete selected items
 - Mouse wheel/trackpad: Zoom; disabled while dragging
-- “Fit” button: Fit all cards into view
+- "Fit" button: Fit all cards into view
 Canvas text size
-- Use the top toolbar to choose a text size; select a single Code/Theme card to enable “Apply”.
+- Use the top toolbar to choose a text size; select a single Code/Theme card to enable "Apply".
 
 Text & coding
 - C: Add code for current text selection
 - E: Edit selected block(s) — VTT transcripts only
+
+Analysis page
+- Navigate to `/analysis` to view a hierarchical overview of all Insights, Themes, and Codes
+- Color-coded badges match Canvas colors: Codes (blue), Themes (teal/green), Insights (amber/orange)
+- Multi-select with Cmd/Ctrl/Shift+Click to create themes from codes or insights from themes
+- Click "Expand" on any code row to view the full highlight text and source file
+- Drag & drop codes onto themes or themes onto insights to create connections
+- Click outside the table to clear selection
 
 ## Production (Future)
 

@@ -311,7 +311,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
               const bbox = selectionBBox(['code']);
               const defaultW = DEFAULTS.theme.w; const defaultH = DEFAULTS.theme.h;
               const pos = bbox ? placeRightOf(bbox!, defaultW, defaultH) : viewportCenterWorld();
-              await createTheme({ name, highlightIds: codes, size: DEFAULTS.theme, position: pos });
+              await createTheme({ name, highlightIds: codes, projectId, size: DEFAULTS.theme, position: pos });
               toast.success('Theme created');
               setSelectedCodeIds([]);
               onUpdate();
@@ -337,7 +337,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
               const bbox = selectionBBox(['theme']);
               const defaultW = DEFAULTS.insight.w; const defaultH = DEFAULTS.insight.h;
               const pos = bbox ? placeRightOf(bbox!, defaultW, defaultH) : viewportCenterWorld();
-              await createInsight({ name, themeIds: ths, size: DEFAULTS.insight, position: pos });
+              await createInsight({ name, themeIds: ths, projectId, size: DEFAULTS.insight, position: pos });
               toast.success('Insight created');
               setSelectedThemeIds([]);
               onUpdate();
@@ -753,7 +753,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
           const bbox = selectionBBox(['code']);
           const defaultW = DEFAULTS.theme.w; const defaultH = DEFAULTS.theme.h;
           const pos = bbox ? placeRightOf(bbox, defaultW, defaultH) : viewportCenterWorld();
-          await createTheme({ name, highlightIds: selectedCodeIds, size: DEFAULTS.theme, position: pos });
+          await createTheme({ name, highlightIds: selectedCodeIds, projectId, size: DEFAULTS.theme, position: pos });
           toast.success('Theme created');
           setSelectedCodeIds([]);
           onUpdate();
@@ -764,7 +764,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
           const bbox = selectionBBox(['theme']);
           const defaultW = DEFAULTS.insight.w; const defaultH = DEFAULTS.insight.h;
           const pos = bbox ? placeRightOf(bbox, defaultW, defaultH) : viewportCenterWorld();
-          await createInsight({ name, themeIds: selectedThemeIds, size: DEFAULTS.insight, position: pos });
+          await createInsight({ name, themeIds: selectedThemeIds, projectId, size: DEFAULTS.insight, position: pos });
           toast.success('Insight created');
           setSelectedThemeIds([]);
           onUpdate();

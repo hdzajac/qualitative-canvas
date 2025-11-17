@@ -502,9 +502,15 @@ function TranscriptWithAudio({
                                         className="text-[11px] leading-tight px-2 py-1 bg-primary/10 border border-primary/30 rounded cursor-pointer hover:bg-primary/20 group relative"
                                         onClick={() => {
                                             if (startSegmentInfo) {
-                                                const segElement = document.querySelector(`[data-segment-id="${startSegmentInfo.segmentId}"]`);
+                                                const segElement = document.querySelector(`[data-segment-id="${startSegmentInfo.segmentId}"]`) as HTMLElement;
                                                 if (segElement) {
                                                     segElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                    // Add blink animation
+                                                    segElement.classList.add('segment-blink');
+                                                    // Remove after animation completes
+                                                    setTimeout(() => {
+                                                        segElement.classList.remove('segment-blink');
+                                                    }, 3000);
                                                 }
                                             }
                                         }}

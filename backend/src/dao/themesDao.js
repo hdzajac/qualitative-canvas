@@ -3,6 +3,7 @@ export function mapTheme(r) {
     id: r.id,
     name: r.name,
     highlightIds: r.code_ids || [],
+    projectId: r.project_id,
     position: r.position || undefined,
     size: r.size || undefined,
     style: r.style || undefined,
@@ -13,12 +14,7 @@ export function mapTheme(r) {
 export async function listThemes(pool, { projectId } = {}) {
   if (projectId) {
     const r = await pool.query(
-      `SELECT DISTINCT t.* FROM themes t
-       JOIN LATERAL unnest(t.code_ids) AS cid ON true
-       JOIN codes c ON c.id = cid
-       JOIN files f ON f.id = c.file_id
-       WHERE f.project_id = $1
-       ORDER BY t.created_at DESC`,
+      `SELECT * FROM themes WHERE project_id = $1 ORDER BY created_at DESC`,
       [projectId]
     );
     return r.rows.map(mapTheme);
@@ -27,11 +23,11 @@ export async function listThemes(pool, { projectId } = {}) {
   return r.rows.map(mapTheme);
 }
 
-export async function createTheme(pool, { id, name, codeIds, highlightIds, position, size, style }) {
+export async function createTheme(pool, { id, name, codeIds, highlightIds, projectId, position, size, style }) {
   const ids = Array.isArray(codeIds) ? codeIds : Array.isArray(highlightIds) ? highlightIds : [];
   const r = await pool.query(
-    `INSERT INTO themes (id, name, code_ids, position, size, style) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [id, name, ids, position ?? null, size ?? null, style ?? null]
+    `INSERT INTO themes (id, name, code_ids, project_id, position, size, style) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [id, name, ids, projectId ?? null, position ?? null, size ?? null, style ?? null]
   );
   return mapTheme(r.rows[0]);
 }

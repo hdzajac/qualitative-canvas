@@ -12,6 +12,7 @@ import CanvasPage from "./pages/CanvasPage";
 import Themes from "./pages/Themes";
 import Insights from "./pages/Insights";
 import CodesPage from "./pages/Codes";
+import Analysis from "./pages/Analysis";
 import { getProjects } from "@/services/api";
 import { useSelectedProject } from "./hooks/useSelectedProject";
 import { Button } from "@/components/ui/button";
@@ -71,9 +72,7 @@ function TopBar() {
       <nav className="flex gap-6">
         <Link className={active('/projects')} to="/projects">Projects</Link>
         <Link className={active('/documents')} to="/documents">Documents</Link>
-        <Link className={active('/codes')} to="/codes">Codes</Link>
-        <Link className={active('/themes')} to="/themes">Themes</Link>
-        <Link className={active('/insights')} to="/insights">Insights</Link>
+        <Link className={active('/analysis')} to="/analysis">Analysis</Link>
         <Link className={active('/canvas')} to="/canvas">Canvas</Link>
       </nav>
       <div className="ml-auto">
@@ -99,6 +98,7 @@ const App = () => (
             <Route path="/codes" element={<ErrorBoundary><CodesPage /></ErrorBoundary>} />
             <Route path="/themes" element={<ErrorBoundary><Themes /></ErrorBoundary>} />
             <Route path="/insights" element={<ErrorBoundary><Insights /></ErrorBoundary>} />
+            <Route path="/analysis" element={<ErrorBoundary><Analysis /></ErrorBoundary>} />
             <Route path="/canvas" element={<ErrorBoundary><CanvasPage /></ErrorBoundary>} />
           </Route>
           <Route path="*" element={<NotFound />} />

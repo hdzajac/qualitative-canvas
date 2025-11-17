@@ -4,6 +4,7 @@ export interface Insight {
   id: string;
   name: string;
   themeIds: string[];
+  projectId?: string;
   createdAt: string;
   position?: { x: number; y: number };
   expanded?: boolean;

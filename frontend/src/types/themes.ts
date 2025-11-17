@@ -4,6 +4,7 @@ export interface Theme {
   id: string;
   name: string;
   highlightIds: string[]; // keep name for UI compat; backend maps to code_ids
+  projectId?: string;
   createdAt: string;
   position?: { x: number; y: number };
   size?: Size;
