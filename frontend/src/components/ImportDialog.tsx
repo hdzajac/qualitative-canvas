@@ -29,7 +29,7 @@ export default function ImportDialog({ onClose, onSuccess }: ImportDialogProps) 
             const formData = new FormData();
             formData.append('file', file);
 
-            // Get API base URL
+            // Get API base URL (without /api suffix)
             const API_BASE = import.meta.env.VITE_API_URL || window.location.origin;
             const BASE_URL = `${API_BASE.replace(/\/$/, '')}/api`;
 

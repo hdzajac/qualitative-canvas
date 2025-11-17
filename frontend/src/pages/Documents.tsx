@@ -30,7 +30,8 @@ function DocumentRow({ item }: { item: DocumentItem }) {
 
   const handleDownloadVTT = async (mediaItem: MediaFile) => {
     try {
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      // VITE_API_URL does not include /api suffix
+      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001';
       const baseFilename = mediaItem.originalFilename.replace(/\.[^/.]+$/, '');
 
       // Download VTT transcript

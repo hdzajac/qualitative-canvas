@@ -4,11 +4,11 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: http://localhost:${BACKEND_HOST_PORT:-5001}/api
+        VITE_API_URL: http://localhost:${BACKEND_HOST_PORT:-5001}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     environment:
-      - VITE_API_URL=http://localhost:${BACKEND_HOST_PORT:-5001}/api
+      - VITE_API_URL=http://localhost:${BACKEND_HOST_PORT:-5001}
     depends_on:
       backend:
         condition: service_started

@@ -50,7 +50,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VITE_API_URL=http://localhost:5002/api
+            VITE_API_URL=http://localhost:5002
 
       - name: Output image details
         run: |
