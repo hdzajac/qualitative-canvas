@@ -12,6 +12,29 @@ A visual canvas for qualitative research analysis with AI-assisted transcription
 
 **For users who want to run the application without setting up a development environment.**
 
+### Easiest Setup (Zero Configuration)
+
+**Just run one command** - no .env file, no configuration needed:
+
+```bash
+# Download and start (uses default settings)
+curl -o docker-compose.yml https://raw.githubusercontent.com/hdzajac/qualitative-canvas/main/docker-compose.simple.yml
+docker-compose up -d
+```
+
+**Access the application**:
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:5002
+
+**Stop**:
+```bash
+docker-compose down
+```
+
+**Note**: This uses default passwords suitable for local testing. For production use, see Option 2 below.
+
+---
+
 ### What You Get from GitHub Container Registry
 
 Pre-built application images are available at:
@@ -26,9 +49,21 @@ Pre-built application images are available at:
 - 4GB RAM minimum, 8GB recommended
 - 10GB disk space
 
-### Option 1: All-in-One (Includes Local Database)
+### Option 1: Super Simple (Default Settings)
 
-**Best for**: Quick testing, development, small teams
+**Best for**: Local testing, quick demos
+
+Download the simple compose file:
+```bash
+curl -o docker-compose.yml https://raw.githubusercontent.com/hdzajac/qualitative-canvas/main/docker-compose.simple.yml
+docker-compose up -d
+```
+
+This includes PostgreSQL with default credentials (postgres/postgres). Perfect for trying out the application.
+
+### Option 2: Production Setup (With Secure Passwords)
+
+**Best for**: Production use, teams, long-term deployments
 
 1. **Download production setup**:
    ```bash
@@ -59,19 +94,9 @@ Pre-built application images are available at:
    - Backend API: http://localhost:5002
    - Health check: http://localhost:5002/api/health
 
-5. **View logs**:
-   ```bash
-   docker-compose logs -f
-   ```
-
-6. **Stop**:
-   ```bash
-   docker-compose down
-   ```
-
 Data persists in Docker volumes (`postgres_data` and `media_files`).
 
-### Option 2: Use Existing Database
+### Option 3: Use Existing Database
 
 **Best for**: Production deployments, managed cloud databases
 

@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: qualitative-canvas-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: qualitative_canvas
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API (from GitHub Container Registry)
+  backend:
+    image: ghcr.io/hdzajac/qualitative-canvas-backend:latest
+    container_name: qualitative-canvas-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: qualitative_canvas
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: postgres
+      PORT: 5002
+      NODE_ENV: production
+      SESSION_SECRET: default-secret-change-in-production
+    volumes:
+      - media_files:/app/data/media
+    ports:
+      - "5002:5002"
+
+  # Frontend (from GitHub Container Registry)
+  frontend:
+    image: ghcr.io/hdzajac/qualitative-canvas-frontend:latest
+    container_name: qualitative-canvas-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres_data:
+  media_files:
