@@ -26,7 +26,7 @@ export const MediaUpload = ({ projectId, onUploaded, label = 'Upload audio/video
         try {
             const media = await uploadMedia(file, projectId);
             toast.success('Media uploaded');
-            
+
             // Auto-start transcription if enabled
             if (autoTranscribe && media.id) {
                 try {
@@ -37,7 +37,7 @@ export const MediaUpload = ({ projectId, onUploaded, label = 'Upload audio/video
                     toast.error('Uploaded but transcription failed to start');
                 }
             }
-            
+
             onUploaded?.();
         } catch (err) {
             console.error(err);
