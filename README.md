@@ -1,52 +1,134 @@
 # Qualitative Canvas
 
-Full-stack application for qualitative data analysis:
+A visual canvas for qualitative research analysis with AI-assisted transcription and coding.
+
+**Stack:**
 - Frontend: Vite + React + TypeScript
 - Backend: Node.js + Express + PostgreSQL
-- Worker: Python transcription service
+- Worker: Python transcription service (optional)
 - Docker Compose: orchestrates all services
 
-## Quick Start (Pre-built Images - No Coding Required)
+## 🚀 Quick Start (Pre-built Docker Images)
 
-**For users who want to run the application without setting up a development environment:**
+**For users who want to run the application without setting up a development environment.**
 
-1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+### What You Get from GitHub Container Registry
 
-2. Download or clone this repository:
-   ```sh
+Pre-built application images are available at:
+- `ghcr.io/hdzajac/qualitative-canvas-backend:latest`
+- `ghcr.io/hdzajac/qualitative-canvas-frontend:latest`
+
+**Important**: The database is NOT included in the container images. You provide PostgreSQL (see options below).
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+- 4GB RAM minimum, 8GB recommended
+- 10GB disk space
+
+### Option 1: All-in-One (Includes Local Database)
+
+**Best for**: Quick testing, development, small teams
+
+1. **Download production setup**:
+   ```bash
+   curl -o docker-compose.yml https://raw.githubusercontent.com/hdzajac/qualitative-canvas/main/docker-compose.prod.yml
+   curl -o .env https://raw.githubusercontent.com/hdzajac/qualitative-canvas/main/.env.prod.example
+   ```
+
+2. **Configure secure passwords**:
+   ```bash
+   # Edit .env file
+   nano .env
+   
+   # IMPORTANT: Change these values:
+   # - POSTGRES_PASSWORD
+   # - SESSION_SECRET
+   
+   # Generate secure values:
+   openssl rand -base64 32
+   ```
+
+3. **Start the application**:
+   ```bash
+   docker-compose up -d
+   ```
+
+4. **Access**:
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:5002
+   - Health check: http://localhost:5002/api/health
+
+5. **View logs**:
+   ```bash
+   docker-compose logs -f
+   ```
+
+6. **Stop**:
+   ```bash
+   docker-compose down
+   ```
+
+Data persists in Docker volumes (`postgres_data` and `media_files`).
+
+### Option 2: Use Existing Database
+
+**Best for**: Production deployments, managed cloud databases
+
+If you have PostgreSQL (AWS RDS, Google Cloud SQL, etc.), see [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed instructions.
+
+### Option 3: Development with Local Build
+
+**For developers who want to modify the code:**
+
+1. Clone this repository:
+   ```bash
    git clone https://github.com/hdzajac/qualitative-canvas.git
    cd qualitative-canvas
    ```
 
-3. Pull and start the pre-built images:
-   ```sh
+2. Start with pre-built images:
+   ```bash
    make pull-images
    make up-images
    ```
-   Or without Make:
-   ```sh
-   docker compose -f docker-compose.yml -f docker-compose.images.yml pull
-   docker compose -f docker-compose.yml -f docker-compose.images.yml up -d
+   
+   Or build locally:
+   ```bash
+   make up
    ```
 
-4. Access the application:
+3. Access:
    - **Frontend**: http://localhost:3000
    - **Backend API**: http://localhost:5001/api
 
-5. View logs (optional):
-   ```sh
+4. View logs:
+   ```bash
    make logs
    ```
 
-6. Stop the application:
-   ```sh
-   make down-images
+5. Stop:
+   ```bash
+   make down
    ```
 
-Data persists in the Docker volume `db_data_dev`. To completely remove all data:
-```sh
-docker compose down -v
+## 📚 Documentation
+
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Production deployment guide, cloud hosting, database setup
+- **[BACKEND_SETUP.md](./BACKEND_SETUP.md)** - Backend development guide
+- **[README_DOCKER.md](./README_DOCKER.md)** - Docker configuration details
+
+## 🔄 Updating to Latest Version
+
+```bash
+# Pull latest images
+docker-compose pull
+
+# Restart services
+docker-compose up -d
 ```
+
+Your data persists across updates in Docker volumes.
 
 **Note**: The pre-built images come with safe defaults. No `.env` file is required, but you can override settings via environment variables if needed.
 

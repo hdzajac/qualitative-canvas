@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: qualitative-canvas-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-qualitative_canvas}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API (from GitHub Container Registry)
+  backend:
+    image: ghcr.io/hdzajac/qualitative-canvas-backend:latest
+    container_name: qualitative-canvas-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${POSTGRES_DB:-qualitative_canvas}
+      DATABASE_USER: ${POSTGRES_USER:-postgres}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      
+      # Server
+      PORT: 5002
+      NODE_ENV: production
+      
+      # Sessions
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-secret-in-production}
+      
+      # Optional: Whisper API
+      WHISPER_API_URL: ${WHISPER_API_URL:-}
+      
+      # Optional: Diarization
+      WORKER_AUTO_FALLBACK: ${WORKER_AUTO_FALLBACK:-false}
+      AUTO_DIARIZATION_ASSIGN: ${AUTO_DIARIZATION_ASSIGN:-false}
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+    volumes:
+      - media_files:/app/data/media
+    ports:
+      - "${BACKEND_PORT:-5002}:5002"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5002/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend (from GitHub Container Registry)
+  frontend:
+    image: ghcr.io/hdzajac/qualitative-canvas-frontend:latest
+    container_name: qualitative-canvas-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: http://localhost:${BACKEND_PORT:-5002}
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+  media_files:
+    driver: local
+
+networks:
+  default:
+    name: qualitative-canvas-network
