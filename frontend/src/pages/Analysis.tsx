@@ -19,11 +19,12 @@ import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { ChevronRight, ChevronDown, MoreVertical, Plus } from 'lucide-react';
+import { ChevronRight, ChevronDown, MoreVertical, Plus, Download } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import { ExportDialog } from '@/components/ExportDialog';
 
 type RowType = 'code' | 'theme' | 'insight';
 
@@ -58,6 +59,7 @@ export default function AnalysisPage() {
     const [draggedType, setDraggedType] = useState<RowType | null>(null);
     const [showCreateTheme, setShowCreateTheme] = useState(false);
     const [showCreateInsight, setShowCreateInsight] = useState(false);
+    const [showExport, setShowExport] = useState(false);
     const [newName, setNewName] = useState('');
 
     // Build maps for quick lookups
@@ -414,6 +416,10 @@ export default function AnalysisPage() {
                             Create Insight ({selectedThemes.length})
                         </Button>
                     )}
+                    <Button size="sm" variant="outline" onClick={() => setShowExport(true)}>
+                        <Download className="w-4 h-4 mr-1" />
+                        Export
+                    </Button>
                 </div>
             </div>
 
@@ -578,6 +584,16 @@ export default function AnalysisPage() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Export Dialog */}
+            {projectId && (
+                <ExportDialog
+                    projectId={projectId}
+                    projectName={projectName}
+                    open={showExport}
+                    onOpenChange={setShowExport}
+                />
+            )}
         </div>
     );
 }

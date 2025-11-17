@@ -15,6 +15,7 @@ import mediaRoutes from './routes/media.js';
 import transcriptionRoutes from './routes/transcription.js';
 import segmentsRoutes from './routes/segments.js';
 import participantsRoutes from './routes/participants.js';
+import exportRoutes from './routes/export.js';
 import { runMigrations } from './db/migrate.js';
 
 dotenv.config();
@@ -79,6 +80,7 @@ export function buildApp() {
   // nested: /api/media/:mediaId/segments
   app.use('/api/media/:mediaId/segments', segmentsRoutes(pool));
   app.use('/api/media/:mediaId/participants', participantsRoutes(pool));
+  app.use('/api/export', exportRoutes(pool));
 
   // Simple metrics endpoint (for observability)
   app.get('/api/metrics', async (_req, res) => {
