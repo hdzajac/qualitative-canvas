@@ -13,9 +13,19 @@ export default function mediaService(pool) {
       await ensureDir(baseDir);
       const ext = path.extname(originalFilename || '').slice(0, 8) || '';
       const destPath = path.join(baseDir, `${id}${ext}`);
-      // Move temp file into place
+      // Copy temp file (rename fails across volumes in Docker)
       const fs = await import('fs/promises');
-      await fs.rename(tempPath, destPath);
+      try {
+        await fs.rename(tempPath, destPath);
+      } catch (err) {
+        // If rename fails (cross-device), copy and delete
+        if (err.code === 'EXDEV') {
+          await fs.copyFile(tempPath, destPath);
+          await fs.unlink(tempPath);
+        } else {
+          throw err;
+        }
+      }
       return createMedia(pool, { id, projectId, originalFilename, mimeType, storagePath: destPath, sizeBytes });
     },
     update: (id, patch) => updateMedia(pool, id, patch),
