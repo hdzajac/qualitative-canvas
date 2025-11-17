@@ -10,8 +10,9 @@ import { Progress } from '@/components/ui/progress';
 import { useJobPolling } from '@/hooks/useJobPolling';
 import { FileUpload } from '@/components/FileUpload';
 import { MediaUpload } from '@/components/MediaUpload';
-import { FileText, Music } from 'lucide-react';
+import { FileText, Music, Download } from 'lucide-react';
 import { useOptimisticMutation } from '@/hooks/useOptimisticMutation';
+import { toast } from 'sonner';
 
 type DocumentItem = (UploadedFile & { type: 'document' }) | (MediaFile & { type: 'media' });
 
@@ -26,6 +27,49 @@ function formatEta(seconds?: number) {
 function DocumentRow({ item }: { item: DocumentItem }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+
+  const handleDownloadVTT = async (mediaItem: MediaFile) => {
+    try {
+      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      const baseFilename = mediaItem.originalFilename.replace(/\.[^/.]+$/, '');
+
+      // Download VTT transcript
+      const vttResponse = await fetch(`${API_BASE}/api/export/media/${mediaItem.id}/transcript/vtt`);
+      if (!vttResponse.ok) {
+        const error = await vttResponse.json();
+        throw new Error(error.error || 'VTT download failed');
+      }
+      const vttBlob = await vttResponse.blob();
+      const vttUrl = window.URL.createObjectURL(vttBlob);
+      const vttLink = document.createElement('a');
+      vttLink.href = vttUrl;
+      vttLink.download = `${baseFilename}.vtt`;
+      document.body.appendChild(vttLink);
+      vttLink.click();
+      window.URL.revokeObjectURL(vttUrl);
+      document.body.removeChild(vttLink);
+
+      // Download audio file
+      const audioResponse = await fetch(`${API_BASE}/api/media/${mediaItem.id}/download`);
+      if (!audioResponse.ok) {
+        throw new Error('Audio download failed');
+      }
+      const audioBlob = await audioResponse.blob();
+      const audioUrl = window.URL.createObjectURL(audioBlob);
+      const audioLink = document.createElement('a');
+      audioLink.href = audioUrl;
+      audioLink.download = mediaItem.originalFilename;
+      document.body.appendChild(audioLink);
+      audioLink.click();
+      window.URL.revokeObjectURL(audioUrl);
+      document.body.removeChild(audioLink);
+
+      toast.success('Transcript and audio downloaded');
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to download files');
+    }
+  };
 
   const deleteDocMut = useMutation({
     mutationFn: (id: string) => deleteFile(id),
@@ -130,22 +174,37 @@ function DocumentRow({ item }: { item: DocumentItem }) {
         </div>
       </TableCell>
       <TableCell>
-        <Button
-          size="sm"
-          variant="destructive"
-          onClick={(e) => {
-            e.stopPropagation();
-            const isProcessing = item.status === 'processing';
-            const msg = isProcessing
-              ? 'This audio is currently being transcribed. Force delete?'
-              : 'Delete this audio file and its transcript? This cannot be undone.';
-            if (confirm(msg)) {
-              deleteMediaMut.mutate({ id: item.id, force: isProcessing });
-            }
-          }}
-        >
-          Delete
-        </Button>
+        <div className="flex gap-2">
+          {item.status === 'done' && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDownloadVTT(item);
+              }}
+            >
+              <Download className="w-3 h-3 mr-1" />
+              VTT
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={(e) => {
+              e.stopPropagation();
+              const isProcessing = item.status === 'processing';
+              const msg = isProcessing
+                ? 'This audio is currently being transcribed. Force delete?'
+                : 'Delete this audio file and its transcript? This cannot be undone.';
+              if (confirm(msg)) {
+                deleteMediaMut.mutate({ id: item.id, force: isProcessing });
+              }
+            }}
+          >
+            Delete
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );

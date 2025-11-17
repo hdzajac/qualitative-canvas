@@ -11,7 +11,7 @@ export default function exportService(pool) {
    */
   async function getProjectData(projectId) {
     const result = await pool.query(
-      'SELECT id, name, description, created_at, updated_at FROM projects WHERE id = $1',
+      'SELECT id, name, description, created_at FROM projects WHERE id = $1',
       [projectId]
     );
     return result.rows[0];
@@ -71,7 +71,7 @@ export default function exportService(pool) {
    */
   async function getAnnotationsData(projectId) {
     const result = await pool.query(
-      'SELECT id, project_id, content, position, style, created_at FROM annotations WHERE project_id = $1 ORDER BY created_at',
+      'SELECT id, project_id, content, position, created_at FROM annotations WHERE project_id = $1 ORDER BY created_at',
       [projectId]
     );
     return result.rows;
@@ -82,7 +82,7 @@ export default function exportService(pool) {
    */
   async function getMediaData(projectId) {
     const mediaResult = await pool.query(
-      `SELECT id, project_id, filename, original_name, mime_type, size_bytes, 
+      `SELECT id, project_id, original_filename, mime_type, size_bytes, 
               status, duration_sec, storage_path, created_at
        FROM media_files
        WHERE project_id = $1
@@ -128,13 +128,12 @@ export default function exportService(pool) {
   function generateProjectCSV(project) {
     if (!project) return '';
     
-    const headers = ['id', 'name', 'description', 'created_at', 'updated_at'];
+    const headers = ['id', 'name', 'description', 'created_at'];
     const row = {
       id: project.id,
       name: project.name,
       description: project.description || '',
-      created_at: formatDate(project.created_at),
-      updated_at: formatDate(project.updated_at)
+      created_at: formatDate(project.created_at)
     };
     
     return arrayToCSV(headers, [row]);
@@ -149,13 +148,16 @@ export default function exportService(pool) {
     }
     
     const headers = ['id', 'project_id', 'filename', 'content', 'created_at'];
-    const rows = files.map(file => ({
-      id: file.id,
-      project_id: file.project_id,
-      filename: file.filename,
-      content: file.content || '',
-      created_at: formatDate(file.created_at)
-    }));
+    // Filter out any files without filenames (should not happen, but defensive)
+    const rows = files
+      .filter(file => file.filename && file.filename.trim() !== '')
+      .map(file => ({
+        id: file.id,
+        project_id: file.project_id,
+        filename: file.filename,
+        content: file.content || '',
+        created_at: formatDate(file.created_at)
+      }));
     
     return arrayToCSV(headers, rows);
   }
@@ -252,15 +254,14 @@ export default function exportService(pool) {
    */
   function generateAnnotationsCSV(annotations) {
     if (!annotations || annotations.length === 0) {
-      return 'id,project_id,content,position_x,position_y,style_background,created_at\n';
+      return 'id,project_id,content,position_x,position_y,created_at\n';
     }
     
     const headers = ['id', 'project_id', 'content', 
-                     'position_x', 'position_y', 'style_background', 'created_at'];
+                     'position_x', 'position_y', 'created_at'];
     
     const rows = annotations.map(annotation => {
       const flattened = flattenJSONB(annotation.position, 'position');
-      const styleFlattened = flattenJSONB(annotation.style, 'style');
       
       return {
         id: annotation.id,
@@ -268,7 +269,6 @@ export default function exportService(pool) {
         content: annotation.content || '',
         position_x: flattened.position_x || '',
         position_y: flattened.position_y || '',
-        style_background: styleFlattened.style_background || '',
         created_at: formatDate(annotation.created_at)
       };
     });
@@ -281,17 +281,16 @@ export default function exportService(pool) {
    */
   function generateMediaCSV(media) {
     if (!media || media.length === 0) {
-      return 'id,project_id,filename,original_name,mime_type,size_bytes,status,duration_sec,storage_path,created_at\n';
+      return 'id,project_id,original_filename,mime_type,size_bytes,status,duration_sec,storage_path,created_at\n';
     }
     
-    const headers = ['id', 'project_id', 'filename', 'original_name', 'mime_type', 
+    const headers = ['id', 'project_id', 'original_filename', 'mime_type', 
                      'size_bytes', 'status', 'duration_sec', 'storage_path', 'created_at'];
     
     const rows = media.map(m => ({
       id: m.id,
       project_id: m.project_id,
-      filename: m.filename,
-      original_name: m.original_name,
+      original_filename: m.original_filename,
       mime_type: m.mime_type,
       size_bytes: m.size_bytes,
       status: m.status,

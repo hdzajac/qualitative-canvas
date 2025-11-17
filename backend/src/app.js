@@ -16,6 +16,7 @@ import transcriptionRoutes from './routes/transcription.js';
 import segmentsRoutes from './routes/segments.js';
 import participantsRoutes from './routes/participants.js';
 import exportRoutes from './routes/export.js';
+import importRoutes from './routes/import.js';
 import { runMigrations } from './db/migrate.js';
 
 dotenv.config();
@@ -44,9 +45,9 @@ export function buildApp() {
   app.use(cors(corsOrigin ? {
     origin: corsOrigin,
     credentials: true,
-    exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length']
+    exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'Content-Disposition']
   } : {
-    exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length']
+    exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'Content-Disposition']
   }));
 
   // Rate limit
@@ -81,6 +82,7 @@ export function buildApp() {
   app.use('/api/media/:mediaId/segments', segmentsRoutes(pool));
   app.use('/api/media/:mediaId/participants', participantsRoutes(pool));
   app.use('/api/export', exportRoutes(pool));
+  app.use('/api/import', importRoutes(pool));
 
   // Simple metrics endpoint (for observability)
   app.get('/api/metrics', async (_req, res) => {

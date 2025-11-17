@@ -14,6 +14,8 @@ import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { getProjects } from '@/services/api';
 import { useJobPolling } from '@/hooks/useJobPolling';
 import { useOptimisticMutation } from '@/hooks/useOptimisticMutation';
+import { Download } from 'lucide-react';
+import { toast } from 'sonner';
 
 function formatEta(seconds?: number) {
     if (seconds == null || seconds < 0) return '';
@@ -92,6 +94,51 @@ export default function TranscriptDetail() {
         },
     });
 
+    const handleDownloadVTT = async () => {
+        if (!id || !media) return;
+
+        try {
+            const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            const baseFilename = media.originalFilename.replace(/\.[^/.]+$/, '');
+
+            // Download VTT transcript
+            const vttResponse = await fetch(`${API_BASE}/api/export/media/${id}/transcript/vtt`);
+            if (!vttResponse.ok) {
+                const error = await vttResponse.json();
+                throw new Error(error.error || 'VTT download failed');
+            }
+            const vttBlob = await vttResponse.blob();
+            const vttUrl = window.URL.createObjectURL(vttBlob);
+            const vttLink = document.createElement('a');
+            vttLink.href = vttUrl;
+            vttLink.download = `${baseFilename}.vtt`;
+            document.body.appendChild(vttLink);
+            vttLink.click();
+            window.URL.revokeObjectURL(vttUrl);
+            document.body.removeChild(vttLink);
+
+            // Download audio file
+            const audioResponse = await fetch(`${API_BASE}/api/media/${id}/download`);
+            if (!audioResponse.ok) {
+                throw new Error('Audio download failed');
+            }
+            const audioBlob = await audioResponse.blob();
+            const audioUrl = window.URL.createObjectURL(audioBlob);
+            const audioLink = document.createElement('a');
+            audioLink.href = audioUrl;
+            audioLink.download = media.originalFilename;
+            document.body.appendChild(audioLink);
+            audioLink.click();
+            window.URL.revokeObjectURL(audioUrl);
+            document.body.removeChild(audioLink);
+
+            toast.success('Transcript and audio downloaded');
+        } catch (error) {
+            console.error('Download error:', error);
+            toast.error(error instanceof Error ? error.message : 'Failed to download transcript');
+        }
+    };
+
     let pct: number | undefined;
     // Display string separate from strict status enum to avoid type conflicts
     let statusLabelDisplay: string | undefined = media?.status;
@@ -130,6 +177,12 @@ export default function TranscriptDetail() {
                 <h1 className="text-xl font-extrabold uppercase tracking-wide">Transcript Viewer</h1>
                 <div className="ml-auto flex gap-2">
                     <Button variant="outline" size="sm" onClick={() => navigate('/transcripts')}>Back</Button>
+                    {media?.status === 'done' && segments.length > 0 && (
+                        <Button variant="outline" size="sm" onClick={handleDownloadVTT}>
+                            <Download className="w-4 h-4 mr-1" />
+                            Download VTT
+                        </Button>
+                    )}
                     {media?.status === 'done' && !finalized && (
                         <Button variant="outline" size="sm" disabled={finalizeMut.isPending} onClick={() => finalizeMut.mutate()}>
                             {finalizeMut.isPending ? 'Finalizing…' : 'Finalize'}

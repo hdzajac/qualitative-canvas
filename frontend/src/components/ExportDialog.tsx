@@ -32,7 +32,7 @@ export function ExportDialog({ projectId, projectName, open, onOpenChange }: Exp
         setExporting(true);
         try {
             const response = await fetch(
-                `${API_BASE}/api/export/projects/${projectId}/export?format=zip`,
+                `/api/export/projects/${projectId}/export?format=zip`,
                 { method: 'GET' }
             );
 
@@ -73,39 +73,39 @@ export function ExportDialog({ projectId, projectName, open, onOpenChange }: Exp
 
                 <div className="space-y-4 py-4">
                     <p className="text-sm text-muted-foreground">
-                        Perfect for analysis in Excel, R, SPSS, or long-term archival.
+                        Export your complete project in a single ZIP file. Perfect for backup, analysis in external tools, or future reimport.
                     </p>
 
                     <div className="rounded-lg border p-4 bg-muted/50">
-                        <h4 className="font-medium text-sm mb-2">Included in export:</h4>
+                        <h4 className="font-medium text-sm mb-2">Complete package includes:</h4>
                         <ul className="space-y-1 text-sm text-muted-foreground">
                             <li className="flex items-start">
-                                <span className="mr-2">•</span>
-                                <span>All text documents and transcripts</span>
+                                <span className="mr-2">📊</span>
+                                <span><strong>CSV data files:</strong> All codes, themes, insights, and annotations</span>
                             </li>
                             <li className="flex items-start">
-                                <span className="mr-2">•</span>
-                                <span>Codes with positions and highlighted text</span>
+                                <span className="mr-2">📄</span>
+                                <span><strong>Document content:</strong> Full text of all uploaded documents</span>
                             </li>
                             <li className="flex items-start">
-                                <span className="mr-2">•</span>
-                                <span>Themes and insights with relationships</span>
+                                <span className="mr-2">🎙️</span>
+                                <span><strong>VTT transcripts:</strong> Ready for video players and subtitle editors</span>
                             </li>
                             <li className="flex items-start">
-                                <span className="mr-2">•</span>
-                                <span>Canvas annotations and layouts</span>
+                                <span className="mr-2">👥</span>
+                                <span><strong>Participant data:</strong> Speaker names and assignments</span>
                             </li>
                             <li className="flex items-start">
-                                <span className="mr-2">•</span>
-                                <span>Participant information (if applicable)</span>
+                                <span className="mr-2">🔗</span>
+                                <span><strong>All relationships:</strong> Preserved for perfect reimport</span>
                             </li>
                         </ul>
                     </div>
 
-                    <div className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 rounded-lg p-3">
-                        <strong className="text-blue-900 dark:text-blue-100">Note:</strong>
-                        <span className="ml-1 text-blue-800 dark:text-blue-200">
-                            CSV files are UTF-8 encoded. In Excel, use "Get Data" → "From Text/CSV" for proper character display.
+                    <div className="text-xs text-muted-foreground bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 rounded-lg p-3">
+                        <strong className="text-amber-900 dark:text-amber-100">💡 Use cases:</strong>
+                        <span className="ml-1 text-amber-800 dark:text-amber-200 block mt-1">
+                            Analyze in Excel/R/SPSS • Archive projects • Share with collaborators • Reimport later (future feature)
                         </span>
                     </div>
                 </div>

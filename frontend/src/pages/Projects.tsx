@@ -8,8 +8,10 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { MoreHorizontal, Plus } from 'lucide-react';
+import { MoreHorizontal, Plus, Upload, Download } from 'lucide-react';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
+import ImportDialog from '@/components/ImportDialog';
+import { ExportDialog } from '@/components/ExportDialog';
 
 export default function Projects() {
   const qc = useQueryClient();
@@ -21,6 +23,13 @@ export default function Projects() {
   const [showNew, setShowNew] = useState(projects.length === 0);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
+
+  // Import dialog
+  const [showImport, setShowImport] = useState(false);
+
+  // Export dialog
+  const [showExport, setShowExport] = useState(false);
+  const [exportingProject, setExportingProject] = useState<Project | null>(null);
 
   const add = useMutation({
     mutationFn: () => createProject({ name: newName.trim(), description: newDesc.trim() || undefined }),
@@ -75,12 +84,17 @@ export default function Projects() {
 
   return (
     <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center">
+      <div className="flex items-center gap-3">
         <h1 className="text-2xl font-extrabold uppercase tracking-wide">Projects</h1>
         {hasProjects && (
-          <Button className="ml-auto brutal-button" onClick={() => setShowNew(v => !v)}>
-            <Plus className="h-4 w-4 mr-2" /> New Project
-          </Button>
+          <div className="ml-auto flex gap-2">
+            <Button className="brutal-button" variant="outline" onClick={() => setShowImport(true)}>
+              <Upload className="h-4 w-4 mr-2" /> Import
+            </Button>
+            <Button className="brutal-button" onClick={() => setShowNew(v => !v)}>
+              <Plus className="h-4 w-4 mr-2" /> New Project
+            </Button>
+          </div>
         )}
       </div>
 
@@ -112,6 +126,9 @@ export default function Projects() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenuItem onClick={() => startEdit(p)}>Edit</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setExportingProject(p); setShowExport(true); }}>
+                      <Download className="h-4 w-4 mr-2" />Export
+                    </DropdownMenuItem>
                     <DropdownMenuItem className="text-red-600" onClick={() => remove.mutate(p.id)}>Delete</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -136,6 +153,29 @@ export default function Projects() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {showImport && (
+        <ImportDialog
+          onClose={() => setShowImport(false)}
+          onSuccess={(projectId) => {
+            setShowImport(false);
+            setSelectedProjectId(projectId);
+            navigate('/documents');
+          }}
+        />
+      )}
+
+      {exportingProject && (
+        <ExportDialog
+          projectId={exportingProject.id}
+          projectName={exportingProject.name}
+          open={showExport}
+          onOpenChange={(open) => {
+            setShowExport(open);
+            if (!open) setExportingProject(null);
+          }}
+        />
+      )}
     </div>
   );
 }
