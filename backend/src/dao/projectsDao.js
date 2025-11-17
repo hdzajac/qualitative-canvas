@@ -4,6 +4,7 @@ export function mapProject(r) {
     name: r.name,
     description: r.description ?? undefined,
     createdAt: r.created_at?.toISOString?.() ?? r.created_at,
+    importedAt: r.imported_at?.toISOString?.() ?? r.imported_at ?? undefined,
   };
 }
 

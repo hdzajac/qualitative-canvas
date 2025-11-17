@@ -4,7 +4,8 @@ export async function ensureBaseSchema(pool) {
       id UUID PRIMARY KEY,
       name TEXT NOT NULL,
       description TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      imported_at TIMESTAMPTZ
     );
 
     CREATE TABLE IF NOT EXISTS files (

@@ -38,8 +38,9 @@ docker-compose down
 ### What You Get from GitHub Container Registry
 
 Pre-built application images are available at:
-- `ghcr.io/hdzajac/qualitative-canvas-backend:latest`
-- `ghcr.io/hdzajac/qualitative-canvas-frontend:latest`
+- `ghcr.io/hdzajac/qualitative-canvas-backend:latest` - Node.js API server
+- `ghcr.io/hdzajac/qualitative-canvas-frontend:latest` - React frontend (Nginx)
+- `ghcr.io/hdzajac/qualitative-canvas-worker:latest` - Python transcription worker
 
 **Important**: The database is NOT included in the container images. You provide PostgreSQL (see options below).
 

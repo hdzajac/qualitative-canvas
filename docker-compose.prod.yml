@@ -77,6 +77,20 @@ services:
       timeout: 10s
       retries: 3
 
+  # Worker for transcription (from GitHub Container Registry)
+  worker:
+    image: ghcr.io/hdzajac/qualitative-canvas-worker:latest
+    container_name: qualitative-canvas-worker
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      BACKEND_URL: http://backend:5002
+      POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-5}
+      LOG_LEVEL: ${WORKER_LOG_LEVEL:-INFO}
+      # Optional: Hugging Face token for speaker diarization
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+
 volumes:
   postgres_data:
     driver: local

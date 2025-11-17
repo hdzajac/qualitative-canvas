@@ -175,9 +175,30 @@ export default function importService(pool) {
       const projectRow = projectRows[0];
       const newProjectId = getNewId(projectRow.id);
 
+      // Check for duplicate project names and append number if needed
+      let projectName = projectRow.name;
+      const existingResult = await pool.query(
+        'SELECT name FROM projects WHERE name = $1 OR name ~ $2 ORDER BY name',
+        [projectName, `^${projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(\\d+\\)$`]
+      );
+
+      if (existingResult.rows.length > 0) {
+        // Extract numbers from existing names (including the base name without number)
+        const numbers = existingResult.rows
+          .map(row => {
+            if (row.name === projectName) return 1; // Base name counts as 1
+            const match = row.name.match(/\((\d+)\)$/);
+            return match ? parseInt(match[1], 10) : 0;
+          })
+          .filter(n => !isNaN(n) && n > 0);
+        
+        const maxNumber = numbers.length > 0 ? Math.max(...numbers) : 0;
+        projectName = `${projectRow.name} (${maxNumber + 1})`;
+      }
+
       await pool.query(
-        'INSERT INTO projects (id, name, description, created_at) VALUES ($1, $2, $3, COALESCE($4::timestamptz, now()))',
-        [newProjectId, projectRow.name, projectRow.description || null, projectRow.created_at || null]
+        'INSERT INTO projects (id, name, description, created_at, imported_at) VALUES ($1, $2, $3, COALESCE($4::timestamptz, now()), now())',
+        [newProjectId, projectName, projectRow.description || null, projectRow.created_at || null]
       );
 
       // 2. Import files (documents)

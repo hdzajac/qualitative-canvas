@@ -324,4 +324,56 @@ ${oldInsightId},${oldProjectId},"Combined Insight","${oldThemeId1};${oldThemeId2
     // Cleanup
     await pool.query('DELETE FROM projects WHERE id = $1', [newProjectId]);
   });
+
+  it('should append number to project name on duplicate import', async () => {
+    const projectId = uuidv4();
+    const projectName = 'Duplicate Test Project';
+    
+    const csvFiles = {
+      project: `id,name,description,created_at\n${projectId},"${projectName}","Test description",2024-01-01T00:00:00Z`,
+      files: 'id,project_id,filename,content,created_at\n',
+      codes: 'id,file_id,code_name,text,start_offset,end_offset,position_x,position_y,created_at\n',
+      themes: 'id,project_id,name,code_ids,created_at\n',
+      insights: 'id,project_id,name,theme_ids,created_at\n',
+      annotations: 'id,project_id,content,position_x,position_y,created_at\n'
+    };
+
+    // First import
+    const zip1 = await createImportZip(csvFiles);
+    const response1 = await request(app)
+      .post('/api/import/projects')
+      .attach('file', zip1, 'export.zip')
+      .expect(201);
+
+    const project1Id = response1.body.projectId;
+    const project1 = await pool.query('SELECT * FROM projects WHERE id = $1', [project1Id]);
+    expect(project1.rows[0].name).toBe(projectName);
+    expect(project1.rows[0].imported_at).toBeTruthy();
+
+    // Second import (should append (2))
+    const zip2 = await createImportZip(csvFiles);
+    const response2 = await request(app)
+      .post('/api/import/projects')
+      .attach('file', zip2, 'export.zip')
+      .expect(201);
+
+    const project2Id = response2.body.projectId;
+    const project2 = await pool.query('SELECT * FROM projects WHERE id = $1', [project2Id]);
+    expect(project2.rows[0].name).toBe(`${projectName} (2)`);
+    expect(project2.rows[0].imported_at).toBeTruthy();
+
+    // Third import (should append (3))
+    const zip3 = await createImportZip(csvFiles);
+    const response3 = await request(app)
+      .post('/api/import/projects')
+      .attach('file', zip3, 'export.zip')
+      .expect(201);
+
+    const project3Id = response3.body.projectId;
+    const project3 = await pool.query('SELECT * FROM projects WHERE id = $1', [project3Id]);
+    expect(project3.rows[0].name).toBe(`${projectName} (3)`);
+
+    // Cleanup
+    await pool.query('DELETE FROM projects WHERE id IN ($1, $2, $3)', [project1Id, project2Id, project3Id]);
+  });
 });
