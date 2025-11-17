@@ -24,16 +24,16 @@ const dbEnv = (process.env.NODE_ENV === 'test' ? 'test' : (process.env.NODE_ENV 
 const envKey = dbEnv === 'production' || dbEnv === 'prod' ? 'PROD' : 'DEV';
 
 // Resolve connection details with override order:
-// 1) DATABASE_URL_{ENV}
-// 2) DATABASE_URL
-// 3) discrete PG*_{ENV} or PG*
-// Prefer a single DATABASE_URL for simplicity; allow DATABASE_URL_DEV/PROD as overrides
+// 1) PG* base variables (PGHOST, PGPORT, etc.) - most common
+// 2) DATABASE_URL - connection string
+// 3) PG*_{ENV} environment-specific overrides
+// Prefer base PG* variables for simplicity; allow env-specific overrides
 let connectionString = process.env.DATABASE_URL || process.env[`DATABASE_URL_${envKey}`];
-const host = process.env[`PGHOST_${envKey}`] || process.env.PGHOST;
-const port = process.env[`PGPORT_${envKey}`] || process.env.PGPORT;
-const user = process.env[`PGUSER_${envKey}`] || process.env.PGUSER;
-const password = process.env[`PGPASSWORD_${envKey}`] || process.env.PGPASSWORD;
-let database = process.env[`PGDATABASE_${envKey}`] || process.env.PGDATABASE;
+const host = process.env.PGHOST || process.env[`PGHOST_${envKey}`];
+const port = process.env.PGPORT || process.env[`PGPORT_${envKey}`];
+const user = process.env.PGUSER || process.env[`PGUSER_${envKey}`];
+const password = process.env.PGPASSWORD || process.env[`PGPASSWORD_${envKey}`];
+let database = process.env.PGDATABASE || process.env[`PGDATABASE_${envKey}`];
 
 // If in test mode and TEST_DB_NAME is provided, override the database name in connection
 const testDbName = process.env.TEST_DB_NAME || process.env.PGDATABASE_TEST;
