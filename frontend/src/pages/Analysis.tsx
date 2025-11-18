@@ -340,8 +340,8 @@ export default function AnalysisPage() {
 
     const handleConfirmCreateTheme = () => {
         const selectedCodes = Array.from(selectedIds).filter(id => highlightMap.has(id));
-        if (!newName.trim() || selectedCodes.length === 0) {
-            toast.error('Enter a name and select codes');
+        if (!newName.trim()) {
+            toast.error('Enter a theme name');
             return;
         }
         createThemeMut.mutate({ name: newName.trim(), highlightIds: selectedCodes });
@@ -349,8 +349,8 @@ export default function AnalysisPage() {
 
     const handleConfirmCreateInsight = () => {
         const selectedThemes = Array.from(selectedIds).filter(id => themeMap.has(id));
-        if (!newName.trim() || selectedThemes.length === 0) {
-            toast.error('Enter a name and select themes');
+        if (!newName.trim()) {
+            toast.error('Enter an insight name');
             return;
         }
         createInsightMut.mutate({ name: newName.trim(), themeIds: selectedThemes });

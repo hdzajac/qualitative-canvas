@@ -235,7 +235,7 @@ export default function exportRoutes(pool) {
     try {
       // Get media file info
       const mediaResult = await pool.query(
-        'SELECT original_name FROM media_files WHERE id = $1',
+        'SELECT original_filename FROM media_files WHERE id = $1',
         [mediaId]
       );
       
@@ -243,7 +243,7 @@ export default function exportRoutes(pool) {
         return res.status(404).json({ error: 'Media file not found' });
       }
 
-      const originalName = mediaResult.rows[0].original_name;
+      const originalName = mediaResult.rows[0].original_filename;
 
       // Get segments ordered by index
       const segmentsResult = await pool.query(
