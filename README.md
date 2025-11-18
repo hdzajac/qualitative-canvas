@@ -255,17 +255,24 @@ You can also run frontend + backend inside Docker alongside Postgres + worker.
 
 To automatically detect speakers and assign participants to segments:
 
-1) Obtain a Hugging Face token with access to pyannote models and set it in your shell:
+1) **Get a Hugging Face token** with access to pyannote models:
+   - Visit https://huggingface.co/settings/tokens
+   - Accept the pyannote model license at https://huggingface.co/pyannote/speaker-diarization-3.1
+
+2) **Add to your `.env` file** (or create one from `.env.example`):
 
 ```sh
-export HUGGING_FACE_HUB_TOKEN=hf_...
-export AUTO_DIARIZATION_ASSIGN=1
+# In .env file
+HUGGING_FACE_HUB_TOKEN=hf_your_token_here
+AUTO_DIARIZATION_ASSIGN=1
 ```
 
-2) Start the worker (or rebuild if already running):
+3) **Start/restart the worker**:
 
 ```sh
 docker compose up -d --build worker
+# Or if using full profile:
+docker compose --profile full up -d --build worker
 ```
 
 The worker logs will show flags on startup:

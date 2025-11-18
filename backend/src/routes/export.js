@@ -197,9 +197,10 @@ export default function exportRoutes(pool) {
         const readmeContent = generateExportReadme(projectName, new Date().toISOString());
         archive.append(readmeContent, { name: 'README.txt' });
 
-        // Finalize archive and wait for it to finish
+        // Finalize archive and wait for it to finish writing to response
         await new Promise((resolve, reject) => {
-          archive.on('end', resolve);
+          res.on('finish', resolve);
+          res.on('error', reject);
           archive.on('error', reject);
           archive.finalize();
         });
