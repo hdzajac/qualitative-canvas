@@ -232,6 +232,12 @@ export default function exportRoutes(pool) {
     const { mediaId } = req.params;
     const format = req.query.format || 'tagged'; // 'tagged' or 'plain'
 
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(mediaId)) {
+      return res.status(400).json({ error: 'Invalid media ID format' });
+    }
+
     try {
       // Get media file info
       const mediaResult = await pool.query(

@@ -33,11 +33,11 @@ export default function exportService(pool) {
    */
   async function getCodesData(projectId) {
     const result = await pool.query(
-      `SELECT c.id, c.file_id, c.code_name, c.text, c.start_offset, c.end_offset, 
+      `SELECT c.id, c.file_entry_id, c.code_name, c.text, c.start_offset, c.end_offset, 
               c.position, c.created_at
        FROM codes c
-       JOIN files f ON c.file_id = f.id
-       WHERE f.project_id = $1
+       JOIN file_entries fe ON c.file_entry_id = fe.id
+       WHERE fe.project_id = $1
        ORDER BY c.created_at`,
       [projectId]
     );
@@ -167,24 +167,27 @@ export default function exportService(pool) {
    */
   function generateCodesCSV(codes) {
     if (!codes || codes.length === 0) {
-      return 'id,file_id,code_name,text,start_offset,end_offset,position_x,position_y,created_at\n';
+      return 'id,file_entry_id,code_name,text,start_offset,end_offset,position_x,position_y,size_width,size_height,created_at\n';
     }
     
-    const headers = ['id', 'file_id', 'code_name', 'text', 'start_offset', 'end_offset', 
-                     'position_x', 'position_y', 'created_at'];
+    const headers = ['id', 'file_entry_id', 'code_name', 'text', 'start_offset', 'end_offset', 
+                     'position_x', 'position_y', 'size_width', 'size_height', 'created_at'];
     
     const rows = codes.map(code => {
-      const flattened = flattenJSONB(code.position, 'position');
+      const position = flattenJSONB(code.position, 'position');
+      const size = flattenJSONB(code.size, 'size');
       
       return {
         id: code.id,
-        file_id: code.file_id,
+        file_entry_id: code.file_entry_id,
         code_name: code.code_name,
         text: code.text || '',
         start_offset: code.start_offset,
         end_offset: code.end_offset,
-        position_x: flattened.position_x || '',
-        position_y: flattened.position_y || '',
+        position_x: position.position_x || '',
+        position_y: position.position_y || '',
+        size_width: size.size_width || '',
+        size_height: size.size_height || '',
         created_at: formatDate(code.created_at)
       };
     });

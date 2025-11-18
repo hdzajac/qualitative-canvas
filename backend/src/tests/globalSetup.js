@@ -1,5 +1,14 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { Pool } from 'pg';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load .env.test explicitly for test environment
+// Use override: true to replace any variables loaded from root .env
+dotenv.config({ path: path.resolve(__dirname, '../../.env.test'), override: true });
 
 // Global setup for Vitest: create and migrate a dedicated test DB, then switch env vars so app uses it.
 export default async function() {
@@ -10,16 +19,19 @@ export default async function() {
   const devDbName = process.env.PGDATABASE || process.env.PGDATABASE_DEV || process.env.DB_DEV_DBNAME || 'qda_dev';
   const testDbName = process.env.TEST_DB_NAME || `${devDbName}_test`;
 
-  // Build base connection (to dev DB) to create test DB if needed
+  // Build base connection to postgres database (which always exists) to create test DB
   const baseConfig = {};
   if (process.env.DATABASE_URL) {
-    baseConfig.connectionString = process.env.DATABASE_URL;
+    // If using DATABASE_URL, we need to modify it to connect to postgres database
+    const url = new URL(process.env.DATABASE_URL);
+    url.pathname = '/postgres';
+    baseConfig.connectionString = url.toString();
   } else {
     baseConfig.host = process.env.PGHOST || 'localhost';
     baseConfig.port = process.env.PGPORT ? Number(process.env.PGPORT) : 5432;
     baseConfig.user = process.env.PGUSER || process.env.DB_DEV_USER || 'postgres';
     baseConfig.password = process.env.PGPASSWORD || process.env.DB_DEV_PASSWORD || 'postgres';
-    baseConfig.database = devDbName;
+    baseConfig.database = 'postgres'; // Connect to postgres database first
   }
   const adminPool = new Pool(baseConfig);
 
@@ -39,10 +51,29 @@ export default async function() {
     await adminPool.end().catch(() => {});
   }
 
-  // Point subsequent imports (pool.js) to test DB via env var override; app.init will create base schema and run migrations
+  // Point subsequent imports (pool.js) to test DB via env var override
   const testPoolConfig = { ...baseConfig, database: testDbName };
   process.env.TEST_DB_NAME = testDbName; // pool.js will prefer this when NODE_ENV=test
   process.env.PGDATABASE = testDbName; // fallback if logic checks PGDATABASE
+
+  // Run base schema and migrations on the test database
+  const testPool = new Pool(testPoolConfig);
+  try {
+    const { ensureBaseSchema } = await import('../db/baseSchema.js');
+    const { runMigrations } = await import('../db/migrate.js');
+    
+    await ensureBaseSchema(testPool);
+    console.log(`[test-db] Applied base schema to ${testDbName}`);
+    
+    await runMigrations(testPool);
+    console.log(`[test-db] Applied migrations to ${testDbName}`);
+  } catch (e) {
+    console.error('Failed to initialize test database schema:', e);
+    await testPool.end().catch(() => {});
+    throw e;
+  } finally {
+    await testPool.end().catch(() => {});
+  }
 
   console.log(`[test-db] Ready: will use database ${testDbName} for tests`);
 

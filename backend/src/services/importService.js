@@ -139,6 +139,16 @@ function reconstructPosition(row) {
   return null;
 }
 
+function reconstructSize(row) {
+  const width = parseFloat(row.size_width);
+  const height = parseFloat(row.size_height);
+  
+  if (!isNaN(width) && !isNaN(height)) {
+    return { width, height };
+  }
+  return null;
+}
+
 export default function importService(pool) {
   /**
    * Import a complete project from CSV files
@@ -177,23 +187,27 @@ export default function importService(pool) {
 
       // Check for duplicate project names and append number if needed
       let projectName = projectRow.name;
+      // Strip any existing (number) suffix from the imported name to get base name
+      const baseNameMatch = projectName.match(/^(.+?)\s*\((\d+)\)$/);
+      const baseName = baseNameMatch ? baseNameMatch[1] : projectName;
+      
       const existingResult = await pool.query(
         'SELECT name FROM projects WHERE name = $1 OR name ~ $2 ORDER BY name',
-        [projectName, `^${projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(\\d+\\)$`]
+        [baseName, `^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(\\d+\\)$`]
       );
 
       if (existingResult.rows.length > 0) {
         // Extract numbers from existing names (including the base name without number)
         const numbers = existingResult.rows
           .map(row => {
-            if (row.name === projectName) return 1; // Base name counts as 1
+            if (row.name === baseName) return 1; // Base name counts as 1
             const match = row.name.match(/\((\d+)\)$/);
             return match ? parseInt(match[1], 10) : 0;
           })
           .filter(n => !isNaN(n) && n > 0);
         
         const maxNumber = numbers.length > 0 ? Math.max(...numbers) : 0;
-        projectName = `${projectRow.name} (${maxNumber + 1})`;
+        projectName = `${baseName} (${maxNumber + 1})`;
       }
 
       await pool.query(
@@ -281,7 +295,8 @@ export default function importService(pool) {
       // First create entries for imported files
       for (const row of fileRows) {
         const newFileId = getNewId(row.id);
-        const newEntryId = uuidv4();
+        // Use same ID for file_entry as file (per migration 008 pattern)
+        const newEntryId = newFileId;
         
         await pool.query(
           'INSERT INTO file_entries (id, project_id, document_file_id, name, type, created_at) VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, now()))',
@@ -289,7 +304,9 @@ export default function importService(pool) {
         );
         
         // Map the file entry for codes reference
-        idMap[`file_entry_${row.id}`] = newEntryId;
+        // The NEW schema exports file_entry_id in codes CSV, but the file_entry was based on file.id
+        // So we need to map BOTH the old file_id and assume file_entry had same ID as file
+        idMap[`file_entry_${row.id}`] = newEntryId; // For codes that reference file_entry_id=file.id
       }
 
       // Create entries for imported media as transcripts
@@ -310,25 +327,26 @@ export default function importService(pool) {
       const codeRows = parseCSV(csvFiles.codes);
       for (const row of codeRows) {
         const newCodeId = getNewId(row.id);
-        const newFileId = getNewId(row.file_id);
-        // Get the file_entry_id for this file
-        const newFileEntryId = idMap[`file_entry_${row.file_id}`];
+        // Get the new file_entry_id (CSV now uses file_entry_id column)
+        const oldFileEntryId = row.file_entry_id || row.file_id; // Support both old and new format
+        const newFileEntryId = idMap[`file_entry_${oldFileEntryId}`];
         
-        if (newFileId && newFileEntryId) {
+        if (newFileEntryId) {
           const position = reconstructPosition(row);
+          const size = reconstructSize(row);
           
           await pool.query(
-            `INSERT INTO codes (id, file_id, file_entry_id, code_name, text, start_offset, end_offset, position, created_at)
+            `INSERT INTO codes (id, file_entry_id, code_name, text, start_offset, end_offset, position, size, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::timestamptz, now()))`,
             [
               newCodeId,
-              newFileId,
               newFileEntryId,
               row.code_name,
               row.text,
               row.start_offset ? parseInt(row.start_offset) : null,
               row.end_offset ? parseInt(row.end_offset) : null,
               position,
+              size,
               row.created_at || null
             ]
           );

@@ -38,22 +38,21 @@ describe('Export-Import Integration', () => {
       [fileId, originalProjectId, 'test.txt', 'Sample text for coding']
     );
 
-    // Create file entry for the document
-    const fileEntryId = uuidv4();
+    // Create file entry for the document (use same ID as file, as per migration 008)
     await pool.query(
       'INSERT INTO file_entries (id, project_id, document_file_id, name, type) VALUES ($1, $2, $3, $4, $5)',
-      [fileEntryId, originalProjectId, fileId, 'test.txt', 'document']
+      [fileId, originalProjectId, fileId, 'test.txt', 'document']
     );
 
-    // Create codes
+    // Create codes (reference file_entry which has same ID as file)
     const codeId1 = uuidv4();
     const codeId2 = uuidv4();
     await pool.query(
-      `INSERT INTO codes (id, file_id, file_entry_id, code_name, text, start_offset, end_offset, position)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8), ($9, $10, $11, $12, $13, $14, $15, $16)`,
+      `INSERT INTO codes (id, file_entry_id, code_name, text, start_offset, end_offset, position)
+       VALUES ($1, $2, $3, $4, $5, $6, $7), ($8, $9, $10, $11, $12, $13, $14)`,
       [
-        codeId1, fileId, fileEntryId, 'Code A', 'Sample', 0, 6, { x: 100, y: 100 },
-        codeId2, fileId, fileEntryId, 'Code B', 'text', 7, 11, { x: 150, y: 150 }
+        codeId1, fileId, 'Code A', 'Sample', 0, 6, { x: 100, y: 100 },
+        codeId2, fileId, 'Code B', 'text', 7, 11, { x: 150, y: 150 }
       ]
     );
 
@@ -110,10 +109,10 @@ describe('Export-Import Integration', () => {
 
     // === STEP 3: Verify imported data matches original ===
     
-    // Check project
+    // Check project (will be renamed to avoid duplicate)
     const projectResult = await pool.query('SELECT * FROM projects WHERE id = $1', [newProjectId]);
     expect(projectResult.rows.length).toBe(1);
-    expect(projectResult.rows[0].name).toBe('Export-Import Test');
+    expect(projectResult.rows[0].name).toBe('Export-Import Test (2)');
     expect(projectResult.rows[0].description).toBe('Testing full cycle');
 
     // Check files
@@ -123,9 +122,14 @@ describe('Export-Import Integration', () => {
     expect(filesResult.rows[0].content).toBe('Sample text for coding');
 
     // Check codes (with new IDs but same content)
-    const codesResult = await pool.query(
-      'SELECT * FROM codes WHERE file_id = $1 ORDER BY code_name',
+    // Codes reference file_entry_id now, need to get the file_entry for this file
+    const fileEntryResult = await pool.query(
+      'SELECT id FROM file_entries WHERE document_file_id = $1',
       [filesResult.rows[0].id]
+    );
+    const codesResult = await pool.query(
+      'SELECT * FROM codes WHERE file_entry_id = $1 ORDER BY code_name',
+      [fileEntryResult.rows[0].id]
     );
     expect(codesResult.rows.length).toBe(2);
     expect(codesResult.rows[0].code_name).toBe('Code A');
@@ -189,16 +193,16 @@ describe('Export-Import Integration', () => {
       [fileId, projectId1, 'doc.txt', 'Content here']
     );
 
-    const fileEntryId = uuidv4();
+    // Use same ID for file_entry as file (per migration 008 pattern)
     await pool.query(
       'INSERT INTO file_entries (id, project_id, document_file_id, name, type) VALUES ($1, $2, $3, $4, $5)',
-      [fileEntryId, projectId1, fileId, 'doc.txt', 'document']
+      [fileId, projectId1, fileId, 'doc.txt', 'document']
     );
 
     const codeId = uuidv4();
     await pool.query(
-      'INSERT INTO codes (id, file_id, file_entry_id, code_name, text, start_offset, end_offset, position) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-      [codeId, fileId, fileEntryId, 'Code', 'Content', 0, 7, { x: 50, y: 50 }]
+      'INSERT INTO codes (id, file_entry_id, code_name, text, start_offset, end_offset, position) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [codeId, fileId, 'Code', 'Content', 0, 7, { x: 50, y: 50 }]
     );
 
     // Export cycle 1
@@ -241,21 +245,19 @@ describe('Export-Import Integration', () => {
 
     const projectId3 = import2.body.projectId;
 
-    // Verify all three projects have the same content
-    const projects = await pool.query(
-      'SELECT * FROM projects WHERE id IN ($1, $2, $3) ORDER BY created_at',
-      [projectId1, projectId2, projectId3]
-    );
+    // Verify all three projects exist with correct names
+    const project1 = await pool.query('SELECT * FROM projects WHERE id = $1', [projectId1]);
+    const project2 = await pool.query('SELECT * FROM projects WHERE id = $1', [projectId2]);
+    const project3 = await pool.query('SELECT * FROM projects WHERE id = $1', [projectId3]);
 
-    expect(projects.rows.length).toBe(3);
-    expect(projects.rows[0].name).toBe('Cycle Test');
-    expect(projects.rows[1].name).toBe('Cycle Test');
-    expect(projects.rows[2].name).toBe('Cycle Test');
+    expect(project1.rows[0].name).toBe('Cycle Test');
+    expect(project2.rows[0].name).toBe('Cycle Test (2)');
+    expect(project3.rows[0].name).toBe('Cycle Test (3)');
 
     // Verify codes exist in all three
-    const codes1 = await pool.query('SELECT COUNT(*) as count FROM codes c JOIN files f ON c.file_id = f.id WHERE f.project_id = $1', [projectId1]);
-    const codes2 = await pool.query('SELECT COUNT(*) as count FROM codes c JOIN files f ON c.file_id = f.id WHERE f.project_id = $1', [projectId2]);
-    const codes3 = await pool.query('SELECT COUNT(*) as count FROM codes c JOIN files f ON c.file_id = f.id WHERE f.project_id = $1', [projectId3]);
+    const codes1 = await pool.query('SELECT COUNT(*) as count FROM codes c JOIN file_entries fe ON c.file_entry_id = fe.id WHERE fe.project_id = $1', [projectId1]);
+    const codes2 = await pool.query('SELECT COUNT(*) as count FROM codes c JOIN file_entries fe ON c.file_entry_id = fe.id WHERE fe.project_id = $1', [projectId2]);
+    const codes3 = await pool.query('SELECT COUNT(*) as count FROM codes c JOIN file_entries fe ON c.file_entry_id = fe.id WHERE fe.project_id = $1', [projectId3]);
 
     expect(parseInt(codes1.rows[0].count)).toBe(1);
     expect(parseInt(codes2.rows[0].count)).toBe(1);

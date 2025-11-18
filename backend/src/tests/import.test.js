@@ -108,7 +108,8 @@ ${uuidv4()},${oldProjectId},"Test annotation",100,100,2024-01-15T10:05:00.000Z`
     expect(filesResult.rows[0].content).toBe('Sample document content');
 
     // Verify codes were created with new IDs
-    const codesResult = await pool.query('SELECT * FROM codes WHERE file_id = $1', [filesResult.rows[0].id]);
+    const fileEntryResult = await pool.query('SELECT id FROM file_entries WHERE document_file_id = $1', [filesResult.rows[0].id]);
+    const codesResult = await pool.query('SELECT * FROM codes WHERE file_entry_id = $1', [fileEntryResult.rows[0].id]);
     expect(codesResult.rows.length).toBe(1);
     expect(codesResult.rows[0].code_name).toBe('Test Code');
     expect(codesResult.rows[0].position).toEqual({ x: 100, y: 200 });

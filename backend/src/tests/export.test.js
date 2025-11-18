@@ -31,10 +31,16 @@ describe('Export Service', () => {
       [fileId, projectId, 'test.txt', 'This is test content with some text.']
     );
 
+    // Create file_entry for the file (required for codes after migration 008)
+    await pool.query(
+      'INSERT INTO file_entries (id, project_id, document_file_id, name, type) VALUES ($1, $2, $3, $4, $5)',
+      [fileId, projectId, fileId, 'test.txt', 'document']
+    );
+
     // Create test codes
     const codeId = uuidv4();
     await pool.query(
-      `INSERT INTO codes (id, file_id, code_name, text, start_offset, end_offset, position)
+      `INSERT INTO codes (id, file_entry_id, code_name, text, start_offset, end_offset, position)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [codeId, fileId, 'Test Code', 'test content', 8, 20, { x: 100, y: 200 }]
     );
@@ -63,12 +69,7 @@ describe('Export Service', () => {
 
   afterEach(async () => {
     if (projectId) {
-      // Clean up test data
-      await pool.query('DELETE FROM annotations WHERE project_id = $1', [projectId]);
-      await pool.query('DELETE FROM insights WHERE project_id = $1', [projectId]);
-      await pool.query('DELETE FROM themes WHERE project_id = $1', [projectId]);
-      await pool.query('DELETE FROM codes WHERE file_id IN (SELECT id FROM files WHERE project_id = $1)', [projectId]);
-      await pool.query('DELETE FROM files WHERE project_id = $1', [projectId]);
+      // Clean up test data (CASCADE will handle related records)
       await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
     }
   });
@@ -76,11 +77,22 @@ describe('Export Service', () => {
   it('should export project as ZIP', async () => {
     const response = await request(app)
       .get(`/api/export/projects/${projectId}/export?format=zip`)
+      .buffer(true)
+      .parse((res, callback) => {
+        res.setEncoding('binary');
+        res.data = '';
+        res.on('data', (chunk) => {
+          res.data += chunk;
+        });
+        res.on('end', () => {
+          callback(null, Buffer.from(res.data, 'binary'));
+        });
+      })
       .expect(200);
 
     expect(response.headers['content-type']).toContain('application/zip');
     expect(response.headers['content-disposition']).toContain('.zip');
-    expect(response.body).toBeDefined();
+    expect(Buffer.isBuffer(response.body)).toBe(true);
     expect(response.body.length).toBeGreaterThan(0);
   });
 
@@ -90,7 +102,7 @@ describe('Export Service', () => {
       .expect(200);
 
     expect(response.headers['content-type']).toContain('text/csv');
-    expect(response.text).toContain('id,file_id,code_name,text');
+    expect(response.text).toContain('id,file_entry_id,code_name,text');
     expect(response.text).toContain('Test Code');
   });
 
@@ -120,7 +132,7 @@ describe('Export Service', () => {
 
     const specialCodeId = uuidv4();
     await pool.query(
-      `INSERT INTO codes (id, file_id, code_name, text, start_offset, end_offset)
+      `INSERT INTO codes (id, file_entry_id, code_name, text, start_offset, end_offset)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [specialCodeId, fileId, 'Code with "quotes"', 'Text with, comma and\nnewline', 0, 10]
     );
@@ -161,7 +173,7 @@ describe('Export Service', () => {
         .expect(200);
 
       // Should return only headers
-      expect(response.text).toBe('\uFEFFid,file_id,code_name,text,start_offset,end_offset,position_x,position_y,size_width,size_height,created_at\n');
+      expect(response.text).toBe('\uFEFFid,file_entry_id,code_name,text,start_offset,end_offset,position_x,position_y,size_width,size_height,created_at\n');
     } finally {
       await pool.query('DELETE FROM projects WHERE id = $1', [emptyProjectId]);
     }
