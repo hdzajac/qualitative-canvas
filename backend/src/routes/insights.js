@@ -9,6 +9,7 @@ export default function insightsRoutes(pool) {
 
   const CreateSchema = z.object({
     name: z.string().min(1).max(256),
+    projectId: z.string().uuid().optional(),
     themeIds: z.array(z.string().uuid()).optional(),
     position: z.any().optional(),
     expanded: z.boolean().optional(),
@@ -17,6 +18,7 @@ export default function insightsRoutes(pool) {
   });
   const UpdateSchema = z.object({
     name: z.string().min(1).max(256).optional(),
+    projectId: z.string().uuid().optional(),
     themeIds: z.array(z.string().uuid()).optional(),
     position: z.any().optional(),
     expanded: z.boolean().optional(),

@@ -14,20 +14,49 @@ To let users run the stack without building images or crafting a local `.env`, w
 - This document (`IMAGES.md`): Explains usage and publishing workflow.
 
 ## Usage
-Pull and run in detached mode:
+
+**IMPORTANT**: Pre-built images do NOT contain secrets. You must provide environment variables via a `.env` file.
+
+### Setup
+
+1. **Create `.env` file** (copy from `.env.example`):
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Edit `.env`** with your settings (especially for diarization):
+   ```bash
+   # Required for diarization
+   HUGGING_FACE_HUB_TOKEN=hf_your_token_here
+   AUTO_DIARIZATION_ASSIGN=1
+   
+   # Worker connection
+   WORKER_BASE_URL=http://backend:5000/api
+   WORKER_AUTO_FALLBACK=1
+   ```
+
+3. **Pull and run**:
+   ```bash
+   docker compose -f docker-compose.images.yml up -d
+   ```
+
+### Verify Environment Variables
+
+Check if worker loaded your `.env` correctly:
 ```bash
-./scripts/pull-images.sh
-docker compose -f docker-compose.yml -f docker-compose.images.yml up -d
+docker compose -f docker-compose.images.yml logs worker | grep "Flags:"
 ```
 
-Or skip explicit pulls (Compose will pull automatically):
-```bash
-docker compose -f docker-compose.yml -f docker-compose.images.yml up -d --pull always
+Expected output:
+```
+[worker][INFO] Flags: SIMULATE_WHISPER=0, DIARIZATION_AVAILABLE=1, TOKEN=present, AUTO_DIARIZATION_ASSIGN=1
 ```
 
-Stop / remove:
+If you see `TOKEN=absent`, your `.env` file is not being loaded. Make sure you're running from the directory containing `.env`.
+
+### Stop / Remove
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.images.yml down
+docker compose -f docker-compose.images.yml down
 ```
 
 ## Image Tags

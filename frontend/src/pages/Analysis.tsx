@@ -19,7 +19,7 @@ import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { ChevronRight, ChevronDown, MoreVertical, Plus, Download } from 'lucide-react';
+import { ChevronRight, ChevronDown, MoreVertical, Plus, Download, Check, Square } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -85,11 +85,20 @@ export default function AnalysisPage() {
                 selected: selectedIds.has(insight.id)
             });
 
+            // Mark all themes and codes as used regardless of expand state
+            insight.themeIds.forEach(themeId => {
+                const theme = themeMap.get(themeId);
+                if (!theme) return;
+                usedThemeIds.add(themeId);
+                theme.highlightIds.forEach(highlightId => {
+                    usedCodeIds.add(highlightId);
+                });
+            });
+
             if (expanded[insight.id]) {
                 insight.themeIds.forEach(themeId => {
                     const theme = themeMap.get(themeId);
                     if (!theme) return;
-                    usedThemeIds.add(themeId);
 
                     result.push({
                         id: theme.id,
@@ -102,11 +111,11 @@ export default function AnalysisPage() {
                         selected: selectedIds.has(theme.id)
                     });
 
+                    // Only show codes if theme is expanded (insight is already expanded at this point)
                     if (expanded[theme.id]) {
                         theme.highlightIds.forEach(highlightId => {
                             const code = highlightMap.get(highlightId);
                             if (!code) return;
-                            usedCodeIds.add(highlightId);
 
                             result.push({
                                 id: code.id,
@@ -137,11 +146,16 @@ export default function AnalysisPage() {
                 selected: selectedIds.has(theme.id)
             });
 
+            // Mark codes as used regardless of expand state
+            theme.highlightIds.forEach(highlightId => {
+                usedCodeIds.add(highlightId);
+            });
+
+            // Only add codes to rows if theme is expanded
             if (expanded[theme.id]) {
                 theme.highlightIds.forEach(highlightId => {
                     const code = highlightMap.get(highlightId);
                     if (!code) return;
-                    usedCodeIds.add(highlightId);
 
                     result.push({
                         id: code.id,
@@ -191,19 +205,16 @@ export default function AnalysisPage() {
 
     const toggleSelected = (id: string, event: React.MouseEvent) => {
         event.stopPropagation();
-        if (event.metaKey || event.ctrlKey || event.shiftKey) {
-            setSelectedIds(prev => {
-                const next = new Set(prev);
-                if (next.has(id)) {
-                    next.delete(id);
-                } else {
-                    next.add(id);
-                }
-                return next;
-            });
-        } else {
-            setSelectedIds(new Set([id]));
-        }
+        // Always toggle - multiselect behavior
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+            return next;
+        });
     };
 
     const handleClickOutside = useCallback(() => {
@@ -403,7 +414,7 @@ export default function AnalysisPage() {
 
             <div className="flex items-center justify-between">
                 <h1 className="text-xl font-extrabold uppercase tracking-wide">Analysis</h1>
-                <div className="flex gap-2">
+                <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                     {selectedCodes.length > 0 && (
                         <Button size="sm" onClick={handleCreateThemeFromSelection}>
                             <Plus className="w-4 h-4 mr-1" />
@@ -424,8 +435,9 @@ export default function AnalysisPage() {
             </div>
 
             <div className="border-2 border-black" onClick={(e) => e.stopPropagation()}>
-                <div className="grid grid-cols-[auto_1fr_auto_auto] border-b-2 border-black bg-secondary/50 font-semibold text-xs uppercase tracking-wide">
+                <div className="grid grid-cols-[auto_auto_1fr_auto_auto] border-b-2 border-black bg-secondary/50 font-semibold text-xs uppercase tracking-wide">
                     <div className="p-2 border-r-2 border-black w-8"></div>
+                    <div className="p-2 border-r-2 border-black w-10 text-center">✓</div>
                     <div className="p-2 border-r-2 border-black">Name</div>
                     <div className="p-2 border-r-2 border-black w-24 text-center">Children</div>
                     <div className="p-2 w-16"></div>
@@ -445,7 +457,7 @@ export default function AnalysisPage() {
                                     onDragOver={handleDragOver}
                                     onDrop={(e) => handleDrop(row, e)}
                                     className={`
-                                        grid grid-cols-[auto_1fr_auto_auto] border-b border-neutral-200 
+                                        grid grid-cols-[auto_auto_1fr_auto_auto] border-b border-neutral-200 
                                         transition-colors
                                         ${row.selected ? 'bg-primary/10 hover:bg-primary/15' : 'hover:bg-neutral-50'}
                                         ${row.type === 'insight' ? 'font-semibold bg-primary/5' : ''}
@@ -459,6 +471,17 @@ export default function AnalysisPage() {
                                     >
                                         {row.children && row.children.length > 0 && (
                                             expanded[row.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />
+                                        )}
+                                    </div>
+
+                                    <div
+                                        className="p-2 flex items-center justify-center cursor-pointer border-r border-neutral-200"
+                                        onClick={(e) => toggleSelected(row.id, e)}
+                                    >
+                                        {row.selected ? (
+                                            <Check className="w-4 h-4 text-primary" />
+                                        ) : (
+                                            <Square className="w-4 h-4 text-neutral-400" />
                                         )}
                                     </div>
 

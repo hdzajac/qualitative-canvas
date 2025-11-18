@@ -19,6 +19,7 @@ export default function themesRoutes(pool) {
 
   const CreateSchema = z.object({
     name: z.string().min(1).max(256),
+    projectId: z.string().uuid().optional(),
     codeIds: z.array(z.string().uuid()).optional(),
     highlightIds: z.array(z.string().uuid()).optional(),
     position: z.any().optional(),
@@ -27,6 +28,7 @@ export default function themesRoutes(pool) {
   });
   const UpdateSchema = z.object({
     name: z.string().min(1).max(256).optional(),
+    projectId: z.string().uuid().optional(),
     codeIds: z.array(z.string().uuid()).optional(),
     highlightIds: z.array(z.string().uuid()).optional(),
     position: z.any().optional(),
