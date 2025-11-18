@@ -24,7 +24,7 @@
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "pg": "^8.13.1",
-    "uuid": "^9.0.1",    docker logs qualitative-canvas-frontend-1
+    "uuid": "^9.0.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
