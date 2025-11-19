@@ -215,9 +215,9 @@ export default function Documents() {
   const qc = useQueryClient();
   const [projectId] = useSelectedProject();
   const { data: files } = useQuery({ queryKey: ['files', projectId], queryFn: () => getFiles(projectId), enabled: !!projectId });
-  const { data: media } = useQuery({ 
-    queryKey: ['media', projectId], 
-    queryFn: () => listMedia(projectId), 
+  const { data: media } = useQuery({
+    queryKey: ['media', projectId],
+    queryFn: () => listMedia(projectId),
     enabled: !!projectId,
     refetchInterval: (query) => {
       const data = query.state.data;

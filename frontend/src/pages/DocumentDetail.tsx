@@ -113,8 +113,8 @@ function DocumentView({ fileId }: { fileId: string }) {
 // Component for media files (audio with transcripts)
 function MediaView({ mediaId }: { mediaId: string }) {
     const qc = useQueryClient();
-    const { data: media } = useQuery({ 
-        queryKey: ['mediaItem', mediaId], 
+    const { data: media } = useQuery({
+        queryKey: ['mediaItem', mediaId],
         queryFn: () => getMedia(mediaId),
         refetchInterval: (query) => {
             const data = query.state.data;
