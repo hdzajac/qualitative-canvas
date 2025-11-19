@@ -45,6 +45,8 @@ type DragState =
   | null;
 
 interface UseCanvasInteractionProps {
+  tool: 'select' | 'hand' | 'text';
+  projectId: string;
   nodes: NodeView[];
   themes: Theme[];
   insights: Insight[];
@@ -72,9 +74,12 @@ interface UseCanvasInteractionProps {
   onNodeMoveComplete: (movedNodes: NodeView[]) => void;
   onMarqueeSelect: (codes: string[], themes: string[], additive: boolean) => void;
   deleteSelection: () => void;
+  onAnnotationCreate: (wx: number, wy: number) => void;
 }
 
 export function useCanvasInteraction({
+  tool,
+  projectId,
   nodes,
   themes,
   insights,
@@ -102,6 +107,7 @@ export function useCanvasInteraction({
   onNodeMoveComplete,
   onMarqueeSelect,
   deleteSelection,
+  onAnnotationCreate,
 }: UseCanvasInteractionProps) {
   const dragState = useRef<DragState>(null);
   const [hoverCursor, setHoverCursor] = useState<string>('default');
@@ -178,6 +184,12 @@ export function useCanvasInteraction({
 
     if (isPanning) {
       dragState.current = { mode: 'pan', startOffset: { ...offset }, startClient: { x: sx, y: sy } };
+      return;
+    }
+
+    // Text tool: create annotation on click
+    if (tool === 'text') {
+      onAnnotationCreate(world.x, world.y);
       return;
     }
 
@@ -629,6 +641,7 @@ export function useCanvasInteraction({
     hoverCursor,
     hoveredEdge: hoveredEdgeRef.current,
     hoveredEdgeVersion,
+    hoverInfo: hoverInfo.current,
     onMouseDown,
     onMouseMove,
     onMouseLeave,

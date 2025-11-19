@@ -235,6 +235,35 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     }
   }, [themes, insights, onUpdate]);
 
+  // Callback for creating annotation with text tool
+  const handleAnnotationCreate = useCallback(async (wx: number, wy: number) => {
+    if (!projectId) return;
+    try {
+      const newAnnotation = await createAnnotation({
+        projectId,
+        content: '',
+        position: { x: wx, y: wy },
+        size: { w: DEFAULTS.annotation.w, h: DEFAULTS.annotation.h },
+      });
+      const newNode: AnnotationNodeView = {
+        kind: 'annotation',
+        id: newAnnotation.id,
+        x: wx,
+        y: wy,
+        w: DEFAULTS.annotation.w,
+        h: DEFAULTS.annotation.h,
+        annotation: newAnnotation,
+      };
+      setNodes(prev => [...prev, newNode]);
+      setEditingAnnotation({ id: newAnnotation.id });
+      setTool('select');
+      toast.success('Post-it created');
+      onUpdate();
+    } catch {
+      toast.error('Failed to create post-it');
+    }
+  }, [projectId, setNodes, onUpdate]);
+
   // Callback for connection completion
   const handleConnectComplete = useCallback(async (fromKind: NodeKind, fromId: string, targetId: string, targetKind: NodeKind) => {
     try {
@@ -505,7 +534,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     // Nodes (show subtle handle only for hovered node, or for the source node during connect)
     nodes.forEach((n) => {
       const isConnectingFromThis = (dragState.current && dragState.current.mode === 'connect' && dragState.current.fromId === n.id);
-      const showHandle = isConnectingFromThis || ((hoverInfo.current && hoverInfo.current.kind === 'node' && hoverInfo.current.id === n.id) ? (n.kind === 'code' || n.kind === 'theme') : false);
+      const showHandle = isConnectingFromThis || ((interactionHoverInfo && interactionHoverInfo.kind === 'node' && interactionHoverInfo.id === n.id) ? (n.kind === 'code' || n.kind === 'theme') : false);
       const isConnectTarget = Boolean(connectTargetRef.current && connectTargetRef.current.id === n.id);
       const isEdgeHoverHighlight = highlightNodeIds.has(n.id);
       drawNode(ctx, n, selectedCodeIds, selectedThemeIds, getFontSize, getBottomRightLabel, getLabelScroll, { showHandle, highlightAsTarget: isConnectTarget || isEdgeHoverHighlight });
@@ -515,10 +544,8 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.w, size.h, offset.x, offset.y, zoom, nodes, selectedCodeIds, selectedThemeIds, getBottomRightLabel]);
 
-  // Track hover target to control handle visibility
-  const hoverInfo = useRef<null | { kind: 'node'; id: string }>(null);
   // Track a connect target under cursor during connect gesture
-  const connectTargetRef = useRef<null | { id: string; kind: 'theme' | 'insight' }>(null);
+  const connectTargetRef = useRef<{ id: string; kind: 'theme' | 'insight' } | null>(null);
 
   // Redraw whenever draw dependencies change (covers zoom/offset updates)
   useEffect(() => { draw(); }, [draw]);
@@ -559,6 +586,8 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
   // Canvas interaction management (mouse/keyboard handlers, drag state)
   const interaction = useCanvasInteraction({
+    tool,
+    projectId: projectId || '',
     nodes,
     themes,
     insights,
@@ -589,8 +618,9 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     onNodeMoveComplete: handleNodeMoveComplete,
     onMarqueeSelect: handleMarqueeSelect,
     deleteSelection,
+    onAnnotationCreate: handleAnnotationCreate,
   });
-  const { dragState, hoverCursor, hoveredEdge, hoveredEdgeVersion, onMouseDown, onMouseMove, onMouseLeave, onMouseUp, onWheel: interactionOnWheel } = interaction;
+  const { dragState, hoverCursor, hoveredEdge, hoveredEdgeVersion, hoverInfo: interactionHoverInfo, onMouseDown, onMouseMove, onMouseLeave, onMouseUp, onWheel: interactionOnWheel } = interaction;
 
   // Create a ref wrapper for dragState to maintain compatibility with existing code
   const hoveredEdgeRef = { current: hoveredEdge };
