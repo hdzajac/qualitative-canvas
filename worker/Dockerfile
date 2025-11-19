@@ -17,7 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download Whisper model during build (no auth needed)
 # This downloads the 484MB model.bin file to avoid runtime download delay
+# Temporarily unset HF_HUB_OFFLINE to allow download during build
 RUN echo "Pre-downloading Whisper 'small' model..." && \
+    unset HF_HUB_OFFLINE && \
     python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')" && \
     echo "Whisper model pre-downloaded successfully!"
 
