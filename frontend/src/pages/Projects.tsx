@@ -86,16 +86,16 @@ export default function Projects() {
     <div className="container mx-auto p-6 space-y-6">
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-extrabold uppercase tracking-wide">Projects</h1>
-        {hasProjects && (
-          <div className="ml-auto flex gap-2">
-            <Button className="brutal-button" variant="outline" onClick={() => setShowImport(true)}>
-              <Upload className="h-4 w-4 mr-2" /> Import
-            </Button>
+        <div className="ml-auto flex gap-2">
+          <Button className="brutal-button" variant="outline" onClick={() => setShowImport(true)}>
+            <Upload className="h-4 w-4 mr-2" /> Import
+          </Button>
+          {hasProjects && (
             <Button className="brutal-button" onClick={() => setShowNew(v => !v)}>
               <Plus className="h-4 w-4 mr-2" /> New Project
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {showNew && (
