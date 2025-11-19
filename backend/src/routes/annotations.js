@@ -10,8 +10,8 @@ export default function annotationsRoutes(pool) {
   const map = (r) => ({ id: r.id, content: r.content, position: r.position, size: r.size || undefined, style: r.style || undefined, createdAt: r.created_at.toISOString(), projectId: r.project_id ?? undefined });
 
   const PositionSchema = z.object({ x: z.number(), y: z.number() });
-  const CreateSchema = z.object({ content: z.string().min(1), position: PositionSchema, projectId: z.string().uuid().optional(), size: z.any().optional(), style: z.any().optional() });
-  const UpdateSchema = z.object({ content: z.string().min(1).optional(), position: PositionSchema.optional(), size: z.any().optional(), style: z.any().optional() });
+  const CreateSchema = z.object({ content: z.string(), position: PositionSchema, projectId: z.string().uuid().optional(), size: z.any().optional(), style: z.any().optional() });
+  const UpdateSchema = z.object({ content: z.string().optional(), position: PositionSchema.optional(), size: z.any().optional(), style: z.any().optional() });
 
   router.get('/', asyncHandler(async (req, res) => {
     const { projectId } = req.query;

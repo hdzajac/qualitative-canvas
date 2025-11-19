@@ -640,6 +640,7 @@ export function useCanvasInteraction({
     dragState,
     hoverCursor,
     hoveredEdge: hoveredEdgeRef.current,
+    hoveredEdgeRef, // Export the ref itself for Canvas.tsx draw function
     hoveredEdgeVersion,
     hoverInfo: hoverInfo.current,
     onMouseDown,

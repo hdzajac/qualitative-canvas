@@ -259,8 +259,10 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       setTool('select');
       toast.success('Post-it created');
       onUpdate();
-    } catch {
-      toast.error('Failed to create post-it');
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Failed to create post-it';
+      toast.error(msg);
+      console.error('Annotation creation error:', err);
     }
   }, [projectId, setNodes, onUpdate]);
 
@@ -549,6 +551,9 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
   // Redraw whenever draw dependencies change (covers zoom/offset updates)
   useEffect(() => { draw(); }, [draw]);
+  
+  // Redraw when edge hover state changes
+  useEffect(() => { draw(); }, [hoveredEdgeVersion, draw]);
 
   // Attach wheel event listener with { passive: false } to allow preventDefault
   useEffect(() => {
@@ -620,10 +625,7 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     deleteSelection,
     onAnnotationCreate: handleAnnotationCreate,
   });
-  const { dragState, hoverCursor, hoveredEdge, hoveredEdgeVersion, hoverInfo: interactionHoverInfo, onMouseDown, onMouseMove, onMouseLeave, onMouseUp, onWheel: interactionOnWheel } = interaction;
-
-  // Create a ref wrapper for dragState to maintain compatibility with existing code
-  const hoveredEdgeRef = { current: hoveredEdge };
+  const { dragState, hoverCursor, hoveredEdge, hoveredEdgeRef, hoveredEdgeVersion, hoverInfo: interactionHoverInfo, onMouseDown, onMouseMove, onMouseLeave, onMouseUp, onWheel: interactionOnWheel } = interaction;
 
   // Edge model for hit-testing: store screen-space polyline of each edge
   type EdgeHit = { kind: 'code-theme' | 'theme-insight'; fromId: string; toId: string };
