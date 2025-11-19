@@ -15,20 +15,17 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download diarization model during build
-# This requires a HF token at build time, but results in faster container startup
-ARG HUGGING_FACE_HUB_TOKEN
+# This requires HUGGING_FACE_HUB_TOKEN secret at build time for faster container startup
+# The secret is mounted as a file at /run/secrets/HUGGING_FACE_HUB_TOKEN
 RUN --mount=type=secret,id=HUGGING_FACE_HUB_TOKEN \
     if [ -f /run/secrets/HUGGING_FACE_HUB_TOKEN ]; then \
-        export HF_TOKEN=$(cat /run/secrets/HUGGING_FACE_HUB_TOKEN); \
-    else \
-        export HF_TOKEN="$HUGGING_FACE_HUB_TOKEN"; \
-    fi && \
-    if [ -n "$HF_TOKEN" ]; then \
-        echo "Downloading diarization model with token..." && \
+        echo "HF token secret found - downloading diarization model..." && \
+        export HF_TOKEN=$(cat /run/secrets/HUGGING_FACE_HUB_TOKEN) && \
         python -c "from pyannote.audio import Pipeline; Pipeline.from_pretrained('pyannote/speaker-diarization-3.1', use_auth_token='$HF_TOKEN')" && \
-        echo "Model downloaded successfully!"; \
+        echo "Model pre-downloaded successfully!"; \
     else \
-        echo "No HF token provided - model will be downloaded at runtime"; \
+        echo "WARNING: No HF token secret found at /run/secrets/HUGGING_FACE_HUB_TOKEN"; \
+        echo "Model will be downloaded at runtime (~30 second delay on first start)"; \
     fi
 
 COPY . .
