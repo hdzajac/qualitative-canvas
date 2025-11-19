@@ -469,14 +469,38 @@ def transcribe_real(base_url: str, media, text_content, job, total_ms_hint=None)
 def run_diarization(base_url: str, media):  # pragma: no cover - heavy
     if not DIARIZATION_AVAILABLE:
         return
-    # Load diarization model from cache (HF_HUB_OFFLINE=1 forces offline mode)
-    # No authentication needed at runtime - model was pre-downloaded during build
-    log_info(f"Loading diarization model from cache: {DIARIZATION_MODEL}")
+    # Load diarization model - try offline first (pre-cached), then online if token available
+    log_info(f"Loading diarization model: {DIARIZATION_MODEL}")
+    
+    # Try loading from cache first (offline mode)
     try:
         pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=False)
-    except Exception as e:
-        log_error(f"Failed to load diarization model (is it cached?): {e}")
-        return
+        log_info("Loaded diarization model from cache")
+    except Exception as cache_err:
+        log_warn(f"Model not in cache: {cache_err}")
+        
+        # Not cached - try downloading if token available
+        if not DIARIZATION_TOKEN:
+            log_error("No HF token available - cannot download diarization model. Set HUGGING_FACE_HUB_TOKEN environment variable.")
+            return
+        
+        try:
+            log_info("Attempting to download diarization model (first time setup)...")
+            # Temporarily allow online access for download
+            import os
+            old_offline = os.environ.get('HF_HUB_OFFLINE')
+            os.environ['HF_HUB_OFFLINE'] = '0'
+            
+            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=DIARIZATION_TOKEN)
+            
+            # Restore offline mode
+            if old_offline is not None:
+                os.environ['HF_HUB_OFFLINE'] = old_offline
+            
+            log_info("Diarization model downloaded successfully - will be cached for future use")
+        except Exception as download_err:
+            log_error(f"Failed to download diarization model: {download_err}")
+            return
     audio_bytes = requests.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
     # Write original bytes then transcode to 16k mono WAV to ensure readable format
     src_path = None

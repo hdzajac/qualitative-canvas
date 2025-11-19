@@ -45,6 +45,7 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
       - DIARIZATION_MODEL=${DIARIZATION_MODEL:-pyannote/speaker-diarization-3.1}
       - DIARIZATION_MAX_SECONDS=${DIARIZATION_MAX_SECONDS:-0}
+      - HF_HUB_OFFLINE=1
     depends_on:
       db-dev:
         condition: service_healthy
