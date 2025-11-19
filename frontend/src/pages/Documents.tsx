@@ -215,7 +215,16 @@ export default function Documents() {
   const qc = useQueryClient();
   const [projectId] = useSelectedProject();
   const { data: files } = useQuery({ queryKey: ['files', projectId], queryFn: () => getFiles(projectId), enabled: !!projectId });
-  const { data: media } = useQuery({ queryKey: ['media', projectId], queryFn: () => listMedia(projectId), enabled: !!projectId });
+  const { data: media } = useQuery({ 
+    queryKey: ['media', projectId], 
+    queryFn: () => listMedia(projectId), 
+    enabled: !!projectId,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      // Poll every 3 seconds if any media is processing
+      return data?.some((m: any) => m.status === 'processing') ? 3000 : false;
+    }
+  });
   const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
   const projectName = projects.find(p => p.id === projectId)?.name || 'Project';
 

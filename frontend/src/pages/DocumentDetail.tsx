@@ -113,11 +113,24 @@ function DocumentView({ fileId }: { fileId: string }) {
 // Component for media files (audio with transcripts)
 function MediaView({ mediaId }: { mediaId: string }) {
     const qc = useQueryClient();
-    const { data: media } = useQuery({ queryKey: ['mediaItem', mediaId], queryFn: () => getMedia(mediaId) });
+    const { data: media } = useQuery({ 
+        queryKey: ['mediaItem', mediaId], 
+        queryFn: () => getMedia(mediaId),
+        refetchInterval: (query) => {
+            const data = query.state.data;
+            // Poll every 3 seconds while processing
+            return data?.status === 'processing' ? 3000 : false;
+        }
+    });
     const { data: segments = [] } = useQuery({
         queryKey: ['segments', mediaId],
         queryFn: () => listSegments(mediaId),
-        enabled: !!mediaId
+        enabled: !!mediaId,
+        refetchInterval: (query) => {
+            const mediaQuery = qc.getQueryData(['mediaItem', mediaId]) as any;
+            // Poll segments while media is processing
+            return mediaQuery?.status === 'processing' ? 3000 : false;
+        }
     });
     const { data: participants = [] } = useQuery({
         queryKey: ['participants', mediaId],
