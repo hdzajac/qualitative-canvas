@@ -551,9 +551,6 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
   // Redraw whenever draw dependencies change (covers zoom/offset updates)
   useEffect(() => { draw(); }, [draw]);
-  
-  // Redraw when edge hover state changes
-  useEffect(() => { draw(); }, [hoveredEdgeVersion, draw]);
 
   // Attach wheel event listener with { passive: false } to allow preventDefault
   useEffect(() => {
@@ -626,6 +623,9 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     onAnnotationCreate: handleAnnotationCreate,
   });
   const { dragState, hoverCursor, hoveredEdge, hoveredEdgeRef, hoveredEdgeVersion, hoverInfo: interactionHoverInfo, onMouseDown, onMouseMove, onMouseLeave, onMouseUp, onWheel: interactionOnWheel } = interaction;
+
+  // Redraw when edge hover state changes
+  useEffect(() => { draw(); }, [hoveredEdgeVersion, draw]);
 
   // Edge model for hit-testing: store screen-space polyline of each edge
   type EdgeHit = { kind: 'code-theme' | 'theme-insight'; fromId: string; toId: string };
