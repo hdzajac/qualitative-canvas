@@ -2,7 +2,8 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    AUTO_DIARIZATION_ASSIGN=1
+    AUTO_DIARIZATION_ASSIGN=1 \
+    HF_HUB_OFFLINE=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
@@ -20,18 +21,19 @@ RUN echo "Pre-downloading Whisper 'small' model..." && \
     python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')" && \
     echo "Whisper model pre-downloaded successfully!"
 
-# Pre-download diarization model during build (requires HF token)
-# This requires HUGGING_FACE_HUB_TOKEN secret at build time for faster container startup
+# Pre-download diarization model during build (requires HF token ONLY at build time)
+# At runtime, HF_HUB_OFFLINE=1 forces use of cached model without internet/token checks
 # The secret is mounted as a file at /run/secrets/HUGGING_FACE_HUB_TOKEN
 RUN --mount=type=secret,id=HUGGING_FACE_HUB_TOKEN \
     if [ -f /run/secrets/HUGGING_FACE_HUB_TOKEN ]; then \
-        echo "HF token secret found - downloading diarization model..." && \
+        echo "HF token secret found - downloading diarization model for offline use..." && \
         export HF_TOKEN=$(cat /run/secrets/HUGGING_FACE_HUB_TOKEN) && \
-        python -c "from pyannote.audio import Pipeline; Pipeline.from_pretrained('pyannote/speaker-diarization-3.1', use_auth_token='$HF_TOKEN')" && \
-        echo "Diarization model pre-downloaded successfully!"; \
+        unset HF_HUB_OFFLINE && \
+        python -c "from pyannote.audio import Pipeline; Pipeline.from_pretrained('pyannote/speaker-diarization-3.1', use_auth_token='\$HF_TOKEN')" && \
+        echo "Diarization model cached successfully - will work offline at runtime!"; \
     else \
         echo "WARNING: No HF token secret found at /run/secrets/HUGGING_FACE_HUB_TOKEN"; \
-        echo "Diarization model will be downloaded at runtime (~5 second delay on first start)"; \
+        echo "Diarization will NOT work without pre-cached model files."; \
     fi
 
 COPY . .

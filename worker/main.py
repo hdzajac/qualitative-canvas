@@ -457,22 +457,14 @@ def transcribe_real(base_url: str, media, text_content, job, total_ms_hint=None)
 def run_diarization(base_url: str, media):  # pragma: no cover - heavy
     if not (DIARIZATION_AVAILABLE and DIARIZATION_TOKEN):
         return
-    # Authenticate with the HF Hub if possible; newer APIs use login/token instead of use_auth_token
+    # Load diarization model from cache (HF_HUB_OFFLINE=1 forces offline mode)
+    # No authentication needed at runtime - model was pre-downloaded during build
+    log_info(f"Loading diarization model from cache: {DIARIZATION_MODEL}")
     try:
-        if 'login' in globals() and login and DIARIZATION_TOKEN:
-            try:
-                login(DIARIZATION_TOKEN, add_to_git_credential=False)
-            except Exception:
-                # fallback to saving token
-                if 'HfFolder' in globals() and HfFolder:
-                    try:
-                        HfFolder.save_token(DIARIZATION_TOKEN)
-                    except Exception:
-                        pass
-    except Exception:
-        pass
-    log_info(f"Loading diarization model: {DIARIZATION_MODEL}")
-    pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL)
+        pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=False)
+    except Exception as e:
+        log_error(f"Failed to load diarization model (is it cached?): {e}")
+        return
     audio_bytes = requests.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
     # Write original bytes then transcode to 16k mono WAV to ensure readable format
     src_path = None
