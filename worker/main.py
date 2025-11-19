@@ -469,52 +469,43 @@ def transcribe_real(base_url: str, media, text_content, job, total_ms_hint=None)
 def run_diarization(base_url: str, media):  # pragma: no cover - heavy
     if not DIARIZATION_AVAILABLE:
         return
-    # Load diarization model - try offline first (pre-cached), then online if token available
+    
+    # Load diarization model
+    # - GitHub builds: HF_HUB_OFFLINE=1, model pre-cached, no token needed
+    # - Local builds: No offline flag, downloads with token from .env on first use
     log_info(f"Loading diarization model: {DIARIZATION_MODEL}")
     
+    import os
+    offline_mode = os.environ.get('HF_HUB_OFFLINE') == '1'
+    
     pipeline = None
-    
-    # Try loading from cache first (offline mode)
     try:
-        pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=False)
-        log_info("Loaded diarization model from cache")
-    except Exception as cache_err:
-        log_warn(f"Model not in cache: {cache_err}")
-        
-        # Not cached - try downloading if token available
-        if not DIARIZATION_TOKEN:
-            log_error("No HF token available - cannot download diarization model. Set HUGGING_FACE_HUB_TOKEN environment variable.")
-            return
-        
-        try:
-            log_info("Attempting to download diarization model (first time setup)...")
-            # Temporarily allow online access for download
-            import os
-            old_offline = os.environ.get('HF_HUB_OFFLINE')
-            os.environ['HF_HUB_OFFLINE'] = '0'
-            
+        if offline_mode:
+            # Production: Load from cache without token
+            log_info("Offline mode: loading model from cache")
+            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=False)
+        else:
+            # Local dev: Use token to load/download
+            if not DIARIZATION_TOKEN:
+                log_error("No HF token available - cannot load diarization model. Set HUGGING_FACE_HUB_TOKEN environment variable.")
+                return
+            log_info("Online mode: loading model with token (will download if not cached)")
             pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=DIARIZATION_TOKEN)
-            
-            # Restore offline mode
-            if old_offline is not None:
-                os.environ['HF_HUB_OFFLINE'] = old_offline
-            else:
-                os.environ.pop('HF_HUB_OFFLINE', None)
-            
-            log_info("Diarization model downloaded successfully - will be cached for future use")
-        except Exception as download_err:
-            error_msg = str(download_err)
-            if 'gated' in error_msg.lower() or 'accept' in error_msg.lower():
-                log_error(f"Diarization model is GATED. You must:")
-                log_error(f"1. Visit https://hf.co/{DIARIZATION_MODEL}")
-                log_error(f"2. Accept the user conditions")
-                log_error(f"3. Rebuild the worker or wait for next transcription attempt")
-            else:
-                log_error(f"Failed to download diarization model: {download_err}")
-            return
+        
+        log_info("Diarization model loaded successfully")
+    except Exception as load_err:
+        error_msg = str(load_err)
+        if 'gated' in error_msg.lower() or 'accept' in error_msg.lower():
+            log_error(f"Diarization model is GATED. You must:")
+            log_error(f"1. Visit https://hf.co/{DIARIZATION_MODEL}")
+            log_error(f"2. Accept the user conditions")
+            log_error(f"3. Try transcription again")
+        else:
+            log_error(f"Failed to load diarization model: {load_err}")
+        return
     
-    if pipeline is None:
-        log_error("Failed to load diarization pipeline")
+    if pipeline is None or not callable(getattr(pipeline, '__call__', None)):
+        log_error("Diarization pipeline is invalid or not callable")
         return
     audio_bytes = requests.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
     # Write original bytes then transcode to 16k mono WAV to ensure readable format
