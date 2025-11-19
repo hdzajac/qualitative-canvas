@@ -119,7 +119,25 @@ export function useCanvasInteraction({
   // Helper to test if mouse is near an edge
   const hitTestEdge = useCallback(
     (wx: number, wy: number): EdgeHit | null => {
-      const tol = 8 / zoom;
+      // Fixed tolerance regardless of zoom for more reliable hit detection
+      const tol = 12;
+      
+      // Helper: distance from point to line segment
+      const distToSegment = (px: number, py: number, x1: number, y1: number, x2: number, y2: number) => {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+        
+        // Project point onto line segment
+        let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        
+        const closestX = x1 + t * dx;
+        const closestY = y1 + t * dy;
+        return Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
+      };
+      
       // Check code-theme edges
       for (const t of themes) {
         const tn = nodes.find((n) => n.kind === 'theme' && n.id === t.id);
@@ -131,9 +149,7 @@ export function useCanvasInteraction({
           const ay = hn.y + hn.h;
           const bx = tn.x + tn.w / 2;
           const by = tn.y;
-          const mx = (ax + bx) / 2;
-          const my = (ay + by) / 2;
-          const d = Math.sqrt((wx - mx) ** 2 + (wy - my) ** 2);
+          const d = distToSegment(wx, wy, ax, ay, bx, by);
           if (d <= tol) return { kind: 'code-theme', fromId: hid, toId: t.id };
         }
       }
@@ -148,15 +164,13 @@ export function useCanvasInteraction({
           const ay = tnode.y + tnode.h;
           const bx = inode.x + inode.w / 2;
           const by = inode.y;
-          const mx = (ax + bx) / 2;
-          const my = (ay + by) / 2;
-          const d = Math.sqrt((wx - mx) ** 2 + (wy - my) ** 2);
+          const d = distToSegment(wx, wy, ax, ay, bx, by);
           if (d <= tol) return { kind: 'theme-insight', fromId: tid, toId: i.id };
         }
       }
       return null;
     },
-    [nodes, themes, insights, zoom]
+    [nodes, themes, insights]
   );
 
   // Helper to toggle array membership
