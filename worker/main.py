@@ -78,19 +78,31 @@ def resolve_base_url(original: str) -> str:
     if not AUTO_FALLBACK:
         return original
     fallback = f"http://host.docker.internal:{LOCAL_BACKEND_PORT}/api"
+    
+    # Try original URL with very short timeout to catch DNS errors quickly
+    original_reachable = False
     try:
-        r = requests.get(f"{original.rstrip('/')}/health", timeout=1.2)
+        r = requests.get(f"{original.rstrip('/')}/health", timeout=0.5)
         if r.ok:
-            return original
-    except Exception:
-        pass
+            original_reachable = True
+    except Exception as e:
+        # DNS errors (like 'backend' not found) will be caught here
+        log_debug(f"Original URL {original} not reachable: {type(e).__name__}")
+    
+    if original_reachable:
+        return original
+    
+    # Original failed, try fallback
     try:
-        r2 = requests.get(f"{fallback.rstrip('/')}/health", timeout=1.2)
+        r2 = requests.get(f"{fallback.rstrip('/')}/health", timeout=1.0)
         if r2.ok:
             log_info(f"Auto-fallback: using {fallback} instead of {original}")
             return fallback
-    except Exception:
-        log_warn(f"Neither {original} nor {fallback} reachable; worker will still attempt {fallback}.")
+    except Exception as e:
+        log_debug(f"Fallback URL {fallback} not reachable: {type(e).__name__}")
+    
+    # Both failed - prefer fallback for local development scenario
+    log_warn(f"Neither {original} nor {fallback} reachable during startup; using fallback {fallback}")
     return fallback
 
 def build_base_list():

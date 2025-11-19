@@ -41,7 +41,7 @@ services:
       - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
       # Force disable simulation explicitly (ignore any host SIMULATE_WHISPER override)
       - SIMULATE_WHISPER=0
-      - WORKER_AUTO_FALLBACK=0
+      - WORKER_AUTO_FALLBACK=${WORKER_AUTO_FALLBACK:-1}
       - CHUNK_SECONDS=${CHUNK_SECONDS:-0}
       - WHISPER_BEAM_SIZE=${WHISPER_BEAM_SIZE:-1}
       - LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
