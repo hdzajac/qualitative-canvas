@@ -118,8 +118,8 @@ function MediaView({ mediaId }: { mediaId: string }) {
         queryFn: () => getMedia(mediaId),
         refetchInterval: (query) => {
             const data = query.state.data;
-            // Poll every 3 seconds while waiting or processing
-            return data?.status === 'waiting' || data?.status === 'processing' ? 3000 : false;
+            // Poll every 3 seconds while uploaded (queued) or processing
+            return data?.status === 'uploaded' || data?.status === 'processing' ? 3000 : false;
         }
     });
     const { data: segments = [] } = useQuery({
@@ -128,8 +128,8 @@ function MediaView({ mediaId }: { mediaId: string }) {
         enabled: !!mediaId,
         refetchInterval: (query) => {
             const mediaQuery = qc.getQueryData(['mediaItem', mediaId]) as any;
-            // Poll segments while media is waiting or processing
-            return mediaQuery?.status === 'waiting' || mediaQuery?.status === 'processing' ? 3000 : false;
+            // Poll segments while media is uploaded (queued) or processing
+            return mediaQuery?.status === 'uploaded' || mediaQuery?.status === 'processing' ? 3000 : false;
         }
     });
     const { data: participants = [] } = useQuery({

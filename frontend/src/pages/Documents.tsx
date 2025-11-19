@@ -221,8 +221,8 @@ export default function Documents() {
     enabled: !!projectId,
     refetchInterval: (query) => {
       const data = query.state.data;
-      // Poll every 3 seconds if any media is waiting or processing
-      return data?.some((m: any) => m.status === 'waiting' || m.status === 'processing') ? 3000 : false;
+      // Poll every 3 seconds if any media is uploaded (queued) or processing
+      return data?.some((m: any) => m.status === 'uploaded' || m.status === 'processing') ? 3000 : false;
     }
   });
   const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
