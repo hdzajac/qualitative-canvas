@@ -503,7 +503,14 @@ def run_diarization(base_url: str, media):  # pragma: no cover - heavy
             
             log_info("Diarization model downloaded successfully - will be cached for future use")
         except Exception as download_err:
-            log_error(f"Failed to download diarization model: {download_err}")
+            error_msg = str(download_err)
+            if 'gated' in error_msg.lower() or 'accept' in error_msg.lower():
+                log_error(f"Diarization model is GATED. You must:")
+                log_error(f"1. Visit https://hf.co/{DIARIZATION_MODEL}")
+                log_error(f"2. Accept the user conditions")
+                log_error(f"3. Rebuild the worker or wait for next transcription attempt")
+            else:
+                log_error(f"Failed to download diarization model: {download_err}")
             return
     
     if pipeline is None:
