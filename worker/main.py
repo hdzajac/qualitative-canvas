@@ -472,6 +472,8 @@ def run_diarization(base_url: str, media):  # pragma: no cover - heavy
     # Load diarization model - try offline first (pre-cached), then online if token available
     log_info(f"Loading diarization model: {DIARIZATION_MODEL}")
     
+    pipeline = None
+    
     # Try loading from cache first (offline mode)
     try:
         pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=False)
@@ -496,11 +498,17 @@ def run_diarization(base_url: str, media):  # pragma: no cover - heavy
             # Restore offline mode
             if old_offline is not None:
                 os.environ['HF_HUB_OFFLINE'] = old_offline
+            else:
+                os.environ.pop('HF_HUB_OFFLINE', None)
             
             log_info("Diarization model downloaded successfully - will be cached for future use")
         except Exception as download_err:
             log_error(f"Failed to download diarization model: {download_err}")
             return
+    
+    if pipeline is None:
+        log_error("Failed to load diarization pipeline")
+        return
     audio_bytes = requests.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
     # Write original bytes then transcode to 16k mono WAV to ensure readable format
     src_path = None
