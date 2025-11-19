@@ -41,6 +41,19 @@ jobs:
             type=sha
             type=ref,event=branch
 
+      - name: Check if HF token is available
+        if: matrix.service == 'worker'
+        run: |
+          if [ -n "${{ secrets.HUGGING_FACE_HUB_TOKEN }}" ]; then
+            echo "HF token is set (length: ${#token})"
+            echo "HF_TOKEN_AVAILABLE=true" >> $GITHUB_ENV
+          else
+            echo "WARNING: HF token is NOT set"
+            echo "HF_TOKEN_AVAILABLE=false" >> $GITHUB_ENV
+          fi
+        env:
+          token: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
