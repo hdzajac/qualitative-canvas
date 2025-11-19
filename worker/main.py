@@ -331,8 +331,8 @@ def main():
                     log_warn(f"fail_job call failed: {e}")
                 continue  # move to next lease
             log_info(f"Inserted {posted['count']} segments (mode={'real' if WHISPER_AVAILABLE and not SIMULATE_WHISPER else 'sim'}) cid={cid}")
-            # diarization pass (runs when available and token present; independent of transcription simulation)
-            if DIARIZATION_AVAILABLE and DIARIZATION_TOKEN:
+            # diarization pass (runs when available; uses pre-cached model in offline mode)
+            if DIARIZATION_AVAILABLE:
                 try:
                     run_diarization(base, media)
                 except Exception as e:
@@ -455,7 +455,7 @@ def transcribe_real(base_url: str, media, text_content, job, total_ms_hint=None)
     return segs if segs else build_fake_segments(text_content)
 
 def run_diarization(base_url: str, media):  # pragma: no cover - heavy
-    if not (DIARIZATION_AVAILABLE and DIARIZATION_TOKEN):
+    if not DIARIZATION_AVAILABLE:
         return
     # Load diarization model from cache (HF_HUB_OFFLINE=1 forces offline mode)
     # No authentication needed at runtime - model was pre-downloaded during build
