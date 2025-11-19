@@ -29,9 +29,8 @@ RUN echo "Pre-downloading Whisper 'small' model..." && \
 RUN --mount=type=secret,id=HUGGING_FACE_HUB_TOKEN \
     if [ -f /run/secrets/HUGGING_FACE_HUB_TOKEN ]; then \
         echo "HF token secret found - downloading diarization model for offline use..." && \
-        export HF_TOKEN=$(cat /run/secrets/HUGGING_FACE_HUB_TOKEN) && \
         unset HF_HUB_OFFLINE && \
-        python -c "from pyannote.audio import Pipeline; Pipeline.from_pretrained('pyannote/speaker-diarization-3.1', use_auth_token='\$HF_TOKEN')" && \
+        python -c "import sys; from pyannote.audio import Pipeline; token=open('/run/secrets/HUGGING_FACE_HUB_TOKEN').read().strip(); Pipeline.from_pretrained('pyannote/speaker-diarization-3.1', use_auth_token=token)" && \
         echo "Diarization model cached successfully - will work offline at runtime!"; \
     else \
         echo "WARNING: No HF token secret found at /run/secrets/HUGGING_FACE_HUB_TOKEN"; \
