@@ -471,25 +471,24 @@ def run_diarization(base_url: str, media):  # pragma: no cover - heavy
         return
     
     # Load diarization model
-    # - GitHub builds: HF_HUB_OFFLINE=1, model pre-cached, no token needed
+    # - GitHub builds: HF_HUB_OFFLINE=1, model pre-cached, no token needed at runtime
     # - Local builds: No offline flag, downloads with token from .env on first use
     log_info(f"Loading diarization model: {DIARIZATION_MODEL}")
     
     import os
     offline_mode = os.environ.get('HF_HUB_OFFLINE') == '1'
     
-    if not DIARIZATION_TOKEN:
-        log_error("No HF token available - cannot load diarization model. Set HUGGING_FACE_HUB_TOKEN environment variable.")
-        return
-    
     pipeline = None
     try:
         if offline_mode:
-            # Production: Load from cache with token (gated models need token even from cache)
-            log_info("Offline mode: loading model from cache")
-            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=DIARIZATION_TOKEN)
+            # Production: Load from cache without token (model pre-cached during build)
+            log_info("Offline mode: loading model from cache (no token needed)")
+            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=False)
         else:
             # Local dev: Use token to load/download
+            if not DIARIZATION_TOKEN:
+                log_error("No HF token available - cannot load diarization model. Set HUGGING_FACE_HUB_TOKEN environment variable.")
+                return
             log_info("Online mode: loading model with token (will download if not cached)")
             pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, use_auth_token=DIARIZATION_TOKEN)
         
