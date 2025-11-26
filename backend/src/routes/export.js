@@ -197,12 +197,14 @@ export default function exportRoutes(pool) {
         const readmeContent = generateExportReadme(projectName, new Date().toISOString());
         archive.append(readmeContent, { name: 'README.txt' });
 
-        // Finalize archive and wait for it to finish writing to response
+        // Finalize archive and wait for streaming to complete
+        archive.finalize();
+        
+        // Wait for archive to finish streaming to response
         await new Promise((resolve, reject) => {
-          res.on('finish', resolve);
-          res.on('error', reject);
+          archive.on('end', resolve);
           archive.on('error', reject);
-          archive.finalize();
+          res.on('error', reject);
         });
       } else if (format === 'csv') {
         // Single CSV export for specific entity
