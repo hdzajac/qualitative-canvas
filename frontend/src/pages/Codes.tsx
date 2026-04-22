@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getFiles, getHighlights, getProjects, deleteHighlight } from '@/services/api';
 import type { Highlight } from '@/types';
@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export default function CodesPage() {
     const navigate = useNavigate();
@@ -19,6 +20,7 @@ export default function CodesPage() {
 
     const projectName = projects.find(p => p.id === projectId)?.name || 'Project';
     const fileNameById = useMemo(() => Object.fromEntries(files.map(f => [f.id, f.filename] as const)), [files]);
+    const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
     return (
         <div className="container mx-auto p-6 space-y-4">
@@ -64,7 +66,7 @@ export default function CodesPage() {
                                 </Button>
                             </TableCell>
                             <TableCell className="text-right">
-                                <Button size="sm" variant="destructive" className="rounded-none h-7 px-2" onClick={async () => { if (!confirm('Delete this code?')) return; await deleteHighlight(h.id); qc.invalidateQueries({ queryKey: ['highlights', projectId] }); }}>
+                                <Button size="sm" variant="destructive" className="rounded-none h-7 px-2" onClick={() => setPendingDeleteId(h.id)}>
                                     Delete
                                 </Button>
                             </TableCell>
@@ -77,6 +79,18 @@ export default function CodesPage() {
                     )}
                 </TableBody>
             </Table>
+
+            <ConfirmDialog
+                open={!!pendingDeleteId}
+                title="Delete this code?"
+                onConfirm={async () => {
+                    if (!pendingDeleteId) return;
+                    await deleteHighlight(pendingDeleteId);
+                    qc.invalidateQueries({ queryKey: ['highlights', projectId] });
+                    setPendingDeleteId(null);
+                }}
+                onCancel={() => setPendingDeleteId(null)}
+            />
         </div>
     );
 }

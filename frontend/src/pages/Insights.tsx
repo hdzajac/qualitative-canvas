@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { MoreHorizontal } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export default function Insights() {
     const navigate = useNavigate();
@@ -26,6 +27,7 @@ export default function Insights() {
     const themeMap = useMemo(() => new Map(themes.map(t => [t.id, t] as const)), [themes]);
     const highlightMap = useMemo(() => new Map(highlights.map(h => [h.id, h] as const)), [highlights]);
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+    const [pendingDeleteInsightId, setPendingDeleteInsightId] = useState<string | null>(null);
 
     const toggle = (id: string) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
@@ -102,9 +104,7 @@ export default function Insights() {
                                                         className="text-red-600"
                                                         onClick={async (e) => {
                                                             e.stopPropagation();
-                                                            if (!confirm('Delete this insight?')) return;
-                                                            await deleteInsight(ins.id);
-                                                            qc.invalidateQueries({ queryKey: ['insights', projectId] });
+                                                                setPendingDeleteInsightId(ins.id);
                                                         }}
                                                     >
                                                         Delete
@@ -137,6 +137,18 @@ export default function Insights() {
                     )}
                 </TableBody>
             </Table>
+
+            <ConfirmDialog
+                open={!!pendingDeleteInsightId}
+                title="Delete this insight?"
+                onConfirm={async () => {
+                    if (!pendingDeleteInsightId) return;
+                    await deleteInsight(pendingDeleteInsightId);
+                    qc.invalidateQueries({ queryKey: ['insights', projectId] });
+                    setPendingDeleteInsightId(null);
+                }}
+                onCancel={() => setPendingDeleteInsightId(null)}
+            />
         </div>
     );
 }

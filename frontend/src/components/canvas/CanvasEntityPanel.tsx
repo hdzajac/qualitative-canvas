@@ -4,6 +4,7 @@ import { X as CloseIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import type { NodeView, NodeKind } from './CanvasTypes';
 import type { Highlight, Theme } from '../../types';
+import { ConfirmDialog } from '../ui/confirm-dialog';
 import {
     deleteHighlight,
     deleteTheme,
@@ -47,11 +48,11 @@ export const CanvasEntityPanel: React.FC<CanvasEntityPanelProps> = ({
 }) => {
     const [editingTitle, setEditingTitle] = useState(false);
     const [titleDraft, setTitleDraft] = useState('');
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     if (!entity) return null;
 
     const handleDelete = async () => {
-        if (!confirm('Delete this item?')) return;
         try {
             if (entity.kind === 'code') await deleteHighlight(entity.id);
             if (entity.kind === 'theme') await deleteTheme(entity.id);
@@ -112,7 +113,7 @@ export const CanvasEntityPanel: React.FC<CanvasEntityPanelProps> = ({
                         size="sm"
                         variant="destructive"
                         className="rounded-none"
-                        onClick={handleDelete}
+                        onClick={() => setShowDeleteConfirm(true)}
                     >
                         Delete
                     </Button>
@@ -297,6 +298,14 @@ export const CanvasEntityPanel: React.FC<CanvasEntityPanelProps> = ({
                     </>
                 )}
             </div>
+
+            <ConfirmDialog
+                open={showDeleteConfirm}
+                title="Delete this item?"
+                onConfirm={() => { void handleDelete(); setShowDeleteConfirm(false); }}
+                onCancel={() => setShowDeleteConfirm(false)}
+            />
         </>
     );
 };
+

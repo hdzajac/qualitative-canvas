@@ -1,3 +1,5 @@
+import { ensureFileEntryForMedia, ensureFileEntryForDocument } from './fileEntriesDao.js';
+
 export function mapCode(r) {
   return {
     id: r.id,
@@ -48,9 +50,6 @@ export async function listCodes(pool, { fileId, projectId } = {}) {
 }
 
 export async function createCode(pool, { id, fileId, startOffset, endOffset, text, codeName, position, size, style }) {
-  // Ensure file_entry exists for this fileId (it might be a media file or document file)
-  const { ensureFileEntryForMedia, ensureFileEntryForDocument } = await import('./fileEntriesDao.js');
-  
   // Check if this is a media file or document file
   const mediaCheck = await pool.query('SELECT id FROM media_files WHERE id = $1', [fileId]);
   const isMedia = mediaCheck.rows.length > 0;

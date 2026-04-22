@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { ExportDialog } from '@/components/ExportDialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 type RowType = 'code' | 'theme' | 'insight';
 
@@ -61,6 +62,7 @@ export default function AnalysisPage() {
     const [showCreateInsight, setShowCreateInsight] = useState(false);
     const [showExport, setShowExport] = useState(false);
     const [newName, setNewName] = useState('');
+    const [pendingDeleteRow, setPendingDeleteRow] = useState<AnalysisRow | null>(null);
 
     // Build maps for quick lookups
     const highlightMap = useMemo(() => new Map(highlights.map(h => [h.id, h])), [highlights]);
@@ -368,23 +370,7 @@ export default function AnalysisPage() {
     };
 
     const handleDelete = async (row: AnalysisRow) => {
-        if (!confirm(`Delete this ${row.type}?`)) return;
-
-        try {
-            if (row.type === 'code') {
-                await deleteHighlight(row.id);
-                qc.invalidateQueries({ queryKey: ['highlights', projectId] });
-            } else if (row.type === 'theme') {
-                await deleteTheme(row.id);
-                qc.invalidateQueries({ queryKey: ['themes', projectId] });
-            } else if (row.type === 'insight') {
-                await deleteInsight(row.id);
-                qc.invalidateQueries({ queryKey: ['insights', projectId] });
-            }
-            toast.success('Deleted');
-        } catch (error) {
-            toast.error('Failed to delete');
-        }
+        setPendingDeleteRow(row);
     };
 
     const selectedCodes = Array.from(selectedIds).filter(id => highlightMap.has(id));
@@ -617,6 +603,32 @@ export default function AnalysisPage() {
                     onOpenChange={setShowExport}
                 />
             )}
+
+            <ConfirmDialog
+                open={!!pendingDeleteRow}
+                title={pendingDeleteRow ? `Delete this ${pendingDeleteRow.type}?` : ''}
+                onConfirm={async () => {
+                    if (!pendingDeleteRow) return;
+                    try {
+                        if (pendingDeleteRow.type === 'code') {
+                            await deleteHighlight(pendingDeleteRow.id);
+                            qc.invalidateQueries({ queryKey: ['highlights', projectId] });
+                        } else if (pendingDeleteRow.type === 'theme') {
+                            await deleteTheme(pendingDeleteRow.id);
+                            qc.invalidateQueries({ queryKey: ['themes', projectId] });
+                        } else if (pendingDeleteRow.type === 'insight') {
+                            await deleteInsight(pendingDeleteRow.id);
+                            qc.invalidateQueries({ queryKey: ['insights', projectId] });
+                        }
+                        toast.success('Deleted');
+                    } catch {
+                        toast.error('Failed to delete');
+                    } finally {
+                        setPendingDeleteRow(null);
+                    }
+                }}
+                onCancel={() => setPendingDeleteRow(null)}
+            />
         </div>
     );
 }

@@ -12,6 +12,7 @@ import AudioBar from '@/components/AudioBar';
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 // Component for document files (text)
 function DocumentView({ fileId }: { fileId: string }) {
@@ -25,6 +26,7 @@ function DocumentView({ fileId }: { fileId: string }) {
 
     const viewerRef = useRef<DocumentViewerHandle>(null);
     const sortedHighlights = useMemo(() => [...highlights].sort((a, b) => a.startOffset - b.startOffset), [highlights]);
+    const [pendingDeleteHighlightId, setPendingDeleteHighlightId] = useState<string | null>(null);
 
     if (!file) return <div className="text-sm text-neutral-600">Loading document...</div>;
 
@@ -85,13 +87,7 @@ function DocumentView({ fileId }: { fileId: string }) {
                                             className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-100 rounded"
                                             onClick={async (e) => {
                                                 e.stopPropagation();
-                                                if (!confirm('Delete this code?')) return;
-                                                try {
-                                                    await deleteHighlight(h.id);
-                                                    refetchHighlights();
-                                                } catch {
-                                                    toast.error('Failed to delete code');
-                                                }
+                                                setPendingDeleteHighlightId(h.id);
                                             }}
                                             title="Delete code"
                                         >
@@ -106,6 +102,23 @@ function DocumentView({ fileId }: { fileId: string }) {
                     )}
                 />
             </div>
+
+            <ConfirmDialog
+                open={!!pendingDeleteHighlightId}
+                title="Delete this code?"
+                onConfirm={async () => {
+                    if (!pendingDeleteHighlightId) return;
+                    try {
+                        await deleteHighlight(pendingDeleteHighlightId);
+                        refetchHighlights();
+                    } catch {
+                        toast.error('Failed to delete code');
+                    } finally {
+                        setPendingDeleteHighlightId(null);
+                    }
+                }}
+                onCancel={() => setPendingDeleteHighlightId(null)}
+            />
         </>
     );
 }
@@ -127,7 +140,7 @@ function MediaView({ mediaId }: { mediaId: string }) {
         queryFn: () => listSegments(mediaId),
         enabled: !!mediaId,
         refetchInterval: (query) => {
-            const mediaQuery = qc.getQueryData(['mediaItem', mediaId]) as any;
+            const mediaQuery = qc.getQueryData<{ status: string }>(['mediaItem', mediaId]);
             // Poll segments while media is uploaded (queued) or processing
             return mediaQuery?.status === 'uploaded' || mediaQuery?.status === 'processing' ? 3000 : false;
         }
@@ -298,6 +311,8 @@ function TranscriptWithAudio({
     const [autoScrollMode, setAutoScrollMode] = useState<'center' | 'pin'>('pin');
     const [deletedSegmentIds, setDeletedSegmentIds] = useState<Set<string>>(new Set());
     const deleteQueueRef = useRef<Set<string>>(new Set());
+    const [pendingDeleteCodeId, setPendingDeleteCodeId] = useState<string | null>(null);
+    const [isFlushingDeleteQueue, setIsFlushingDeleteQueue] = useState(false);
 
     useEffect(() => {
         setSrc(audioUrl);
@@ -376,32 +391,39 @@ function TranscriptWithAudio({
 
     // When user edits text, flush delete queue
     const handleUpdateSegmentText = async (segmentId: string, newText: string) => {
-        // Flush delete queue first
-        if (deleteQueueRef.current.size > 0) {
-            await Promise.all(
-                Array.from(deleteQueueRef.current).map(id =>
-                    deleteSegment(mediaId, id).catch(console.error)
-                )
-            );
-            deleteQueueRef.current.clear();
-            setDeletedSegmentIds(new Set());
-        }
-
-        // Then perform the update
-        await qc.cancelQueries({ queryKey: ['segments', mediaId] });
-        const prev = qc.getQueryData<TranscriptSegment[]>(['segments', mediaId]);
-        if (prev) {
-            qc.setQueryData<TranscriptSegment[]>(['segments', mediaId],
-                prev.map(s => s.id === segmentId ? { ...s, text: newText } : s)
-            );
-        }
+        // Prevent concurrent flushes
+        if (isFlushingDeleteQueue) return;
+        setIsFlushingDeleteQueue(true);
         try {
-            await updateSegment(mediaId, segmentId, { text: newText });
-        } catch (error) {
-            qc.setQueryData<TranscriptSegment[]>(['segments', mediaId], prev);
-            throw error;
+            // Flush delete queue first
+            if (deleteQueueRef.current.size > 0) {
+                await Promise.all(
+                    Array.from(deleteQueueRef.current).map(id =>
+                        deleteSegment(mediaId, id).catch(console.error)
+                    )
+                );
+                deleteQueueRef.current.clear();
+                setDeletedSegmentIds(new Set());
+            }
+
+            // Then perform the update
+            await qc.cancelQueries({ queryKey: ['segments', mediaId] });
+            const prev = qc.getQueryData<TranscriptSegment[]>(['segments', mediaId]);
+            if (prev) {
+                qc.setQueryData<TranscriptSegment[]>(['segments', mediaId],
+                    prev.map(s => s.id === segmentId ? { ...s, text: newText } : s)
+                );
+            }
+            try {
+                await updateSegment(mediaId, segmentId, { text: newText });
+            } catch (error) {
+                qc.setQueryData<TranscriptSegment[]>(['segments', mediaId], prev);
+                throw error;
+            } finally {
+                qc.invalidateQueries({ queryKey: ['segments', mediaId] });
+            }
         } finally {
-            qc.invalidateQueries({ queryKey: ['segments', mediaId] });
+            setIsFlushingDeleteQueue(false);
         }
     };
 
@@ -535,13 +557,7 @@ function TranscriptWithAudio({
                                             className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-100 rounded"
                                             onClick={async (e) => {
                                                 e.stopPropagation();
-                                                if (!confirm('Delete this code?')) return;
-                                                try {
-                                                    await deleteHighlight(code.id);
-                                                    qc.invalidateQueries({ queryKey: ['highlights', mediaId] });
-                                                } catch {
-                                                    toast.error('Failed to delete code');
-                                                }
+                                                setPendingDeleteCodeId(code.id);
                                             }}
                                             title="Delete code"
                                         >
@@ -620,6 +636,23 @@ function TranscriptWithAudio({
                     </div>
                 </SheetContent>
             </Sheet>
+
+            <ConfirmDialog
+                open={!!pendingDeleteCodeId}
+                title="Delete this code?"
+                onConfirm={async () => {
+                    if (!pendingDeleteCodeId) return;
+                    try {
+                        await deleteHighlight(pendingDeleteCodeId);
+                        qc.invalidateQueries({ queryKey: ['highlights', mediaId] });
+                    } catch {
+                        toast.error('Failed to delete code');
+                    } finally {
+                        setPendingDeleteCodeId(null);
+                    }
+                }}
+                onCancel={() => setPendingDeleteCodeId(null)}
+            />
         </div>
     );
 }
@@ -651,6 +684,15 @@ function ParticipantPanel({
     const setValue = (id: string, v: string) => setNames(prev => ({ ...prev, [id]: v }));
     const dirty = (p: Participant) => valueFor(p) !== (p.name ?? '');
     const empty = (p: Participant) => valueFor(p).trim().length === 0;
+
+    // Extracted handlers for performance
+    const handleInputChange = (id: string) => (e: React.ChangeEvent<HTMLInputElement>) => setValue(id, e.target.value);
+    const handleSave = (id: string) => () => onSave(id, valueFor(participants.find(p => p.id === id)!).trim());
+    const handleDelete = (id: string) => () => onDelete(id);
+    const handleCreateChange = (e: React.ChangeEvent<HTMLInputElement>) => onNewPartChange({ name: e.target.value });
+    const handleMergeSourceChange = (e: React.ChangeEvent<HTMLSelectElement>) => merging.setSource(e.target.value);
+    const handleMergeTargetChange = (e: React.ChangeEvent<HTMLSelectElement>) => merging.setTarget(e.target.value);
+
     return (
         <div className="w-full lg:w-[260px] lg:top-24 overflow-hidden">
             <div className="font-semibold mb-2">Participants</div>
@@ -658,10 +700,10 @@ function ParticipantPanel({
                 <ul className="space-y-1">
                     {participants.map(p => (
                         <li key={p.id} className="flex items-center gap-2">
-                            <input className="border px-2 py-1 flex-1 min-w-0" value={valueFor(p)} onChange={(e) => setValue(p.id, e.target.value)} />
+                            <input className="border px-2 py-1 flex-1 min-w-0" value={valueFor(p)} onChange={handleInputChange(p.id)} />
                             <span className="text-[11px] text-neutral-600 whitespace-nowrap">({counts.find(c => c.participantId === p.id)?.count ?? 0})</span>
-                            <Button size="sm" disabled={!dirty(p) || empty(p) || isSaving} onClick={() => onSave(p.id, valueFor(p).trim())}>Save</Button>
-                            <Button size="sm" variant="ghost" onClick={() => onDelete(p.id)}>Delete</Button>
+                            <Button size="sm" disabled={!dirty(p) || empty(p) || isSaving} onClick={handleSave(p.id)}>Save</Button>
+                            <Button size="sm" variant="ghost" onClick={handleDelete(p.id)}>Delete</Button>
                         </li>
                     ))}
                     {participants.length === 0 && <li className="text-sm text-neutral-600">No participants yet.</li>}
@@ -669,19 +711,19 @@ function ParticipantPanel({
                 <div className="pt-2 border-t border-neutral-200">
                     <div className="text-xs text-neutral-600 mb-1">Create</div>
                     <div className="flex items-center gap-2">
-                        <input className="border px-2 py-1 flex-1" placeholder="Name" value={newPart.name} onChange={(e) => onNewPartChange({ name: e.target.value })} />
+                        <input className="border px-2 py-1 flex-1" placeholder="Name" value={newPart.name} onChange={handleCreateChange} />
                         <Button size="sm" disabled={!newPart.name} onClick={onCreate}>Add</Button>
                     </div>
                 </div>
                 <div className="pt-2 border-t border-neutral-200">
                     <div className="text-xs text-neutral-600 mb-1">Merge</div>
                     <div className="flex items-center gap-2">
-                        <select className="border px-2 py-1 flex-1" value={merging.source} onChange={(e) => merging.setSource(e.target.value)}>
+                        <select className="border px-2 py-1 flex-1" value={merging.source} onChange={handleMergeSourceChange}>
                             <option value="">Source…</option>
                             {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                         <span className="text-xs text-neutral-600">→</span>
-                        <select className="border px-2 py-1 flex-1" value={merging.target} onChange={(e) => merging.setTarget(e.target.value)}>
+                        <select className="border px-2 py-1 flex-1" value={merging.target} onChange={handleMergeTargetChange}>
                             <option value="">Target…</option>
                             {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>

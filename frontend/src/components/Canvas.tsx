@@ -17,6 +17,7 @@ import CanvasContextPopup from './canvas/CanvasContextPopup';
 import CanvasSizeControls from './canvas/CanvasSizeControls';
 import AnnotationSticky from './canvas/AnnotationSticky';
 import { CanvasHelpPanel } from './canvas/CanvasHelpPanel';
+import { ConfirmDialog } from './ui/confirm-dialog';
 import { CanvasEntityPanel } from './canvas/CanvasEntityPanel';
 import { useCanvasViewport } from './canvas/useCanvasViewport';
 import { useCanvasSelection } from './canvas/useCanvasSelection';
@@ -168,31 +169,38 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.w, size.h]);
 
+  // Confirm dialog state
+  const [confirmState, setConfirmState] = useState<{ title: string; onConfirm: () => void } | null>(null);
+
   // Deletion helper for selected items
-  const deleteSelection = useCallback(async () => {
+  const deleteSelection = useCallback(() => {
     const codes = selectedCodeIdsRef.current.slice();
     const themes = selectedThemeIdsRef.current.slice();
     if (codes.length === 0 && themes.length === 0) return;
     const total = codes.length + themes.length;
-    if (!confirm(`Delete ${total} selected item${total > 1 ? 's' : ''}?`)) return;
-    try {
-      await Promise.all([
-        ...codes.map((id) => deleteHighlight(id)),
-        ...themes.map((id) => deleteTheme(id)),
-      ]);
-      setNodes((prev) => prev.filter((n) => !((n.kind === 'code' && codes.includes(n.id)) || (n.kind === 'theme' && themes.includes(n.id)))));
-      setSelectedCodeIds([]);
-      setSelectedThemeIds([]);
-      const oe = openEntityRef.current;
-      if (oe && ((oe.kind === 'code' && codes.includes(oe.id)) || (oe.kind === 'theme' && themes.includes(oe.id)))) {
-        setOpenEntity(null);
-      }
-      toast.success('Deleted');
-      onUpdate();
-    } catch {
-      toast.error('Delete failed');
-    }
-  }, [selectedCodeIdsRef, selectedThemeIdsRef, setNodes, setSelectedCodeIds, setSelectedThemeIds, onUpdate]);
+    setConfirmState({
+      title: `Delete ${total} selected item${total > 1 ? 's' : ''}?`,
+      onConfirm: async () => {
+        try {
+          await Promise.all([
+            ...codes.map((id) => deleteHighlight(id)),
+            ...themes.map((id) => deleteTheme(id)),
+          ]);
+          setNodes((prev) => prev.filter((n) => !((n.kind === 'code' && codes.includes(n.id)) || (n.kind === 'theme' && themes.includes(n.id)))));
+          setSelectedCodeIds([]);
+          setSelectedThemeIds([]);
+          const oe = openEntityRef.current;
+          if (oe && ((oe.kind === 'code' && codes.includes(oe.id)) || (oe.kind === 'theme' && themes.includes(oe.id)))) {
+            setOpenEntity(null);
+          }
+          toast.success('Deleted');
+          onUpdate();
+        } catch {
+          toast.error('Delete failed');
+        }
+      },
+    });
+  }, [selectedCodeIdsRef, selectedThemeIdsRef, setNodes, setSelectedCodeIds, setSelectedThemeIds, onUpdate, setConfirmState]);
 
   // Popup editing for all kinds
   const [openEntity, setOpenEntity] = useState<{ kind: NodeKind; id: string } | null>(null);
@@ -212,8 +220,9 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   // Callback for edge deletion
   const handleEdgeDelete = useCallback((edge: { kind: 'code-theme' | 'theme-insight'; fromId: string; toId: string }) => {
     const confirmMsg = edge.kind === 'code-theme' ? 'Remove code from theme?' : 'Remove theme from insight?';
-    if (confirm(confirmMsg)) {
-      (async () => {
+    setConfirmState({
+      title: confirmMsg,
+      onConfirm: async () => {
         try {
           if (edge.kind === 'code-theme') {
             const t = themes.find(tt => tt.id === edge.toId);
@@ -231,9 +240,9 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
         } catch {
           toast.error('Failed to update');
         }
-      })();
-    }
-  }, [themes, insights, onUpdate]);
+      },
+    });
+  }, [themes, insights, onUpdate, setConfirmState]);
 
   // Callback for creating annotation with text tool
   const handleAnnotationCreate = useCallback(async (wx: number, wy: number) => {
@@ -929,6 +938,13 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
 
       {/* Help button & panel */}
       <CanvasHelpPanel visible={showHelp} onToggle={() => setShowHelp(s => !s)} />
+
+      <ConfirmDialog
+        open={!!confirmState}
+        title={confirmState?.title ?? ''}
+        onConfirm={() => { void confirmState?.onConfirm(); setConfirmState(null); }}
+        onCancel={() => setConfirmState(null)}
+      />
     </div>
   );
 };

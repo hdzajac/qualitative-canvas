@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { MoreHorizontal } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export default function Themes() {
     const navigate = useNavigate();
@@ -25,6 +26,7 @@ export default function Themes() {
     const projectHighlights = useMemo(() => highlights.filter(h => fileIds.has(h.fileId)), [highlights, fileIds]);
     const highlightById = useMemo(() => new Map(projectHighlights.map(h => [h.id, h] as const)), [projectHighlights]);
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+    const [pendingDeleteThemeId, setPendingDeleteThemeId] = useState<string | null>(null);
 
     const toggle = (id: string) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
@@ -88,11 +90,9 @@ export default function Themes() {
                                             <DropdownMenuContent align="end">
                                                 <DropdownMenuItem
                                                     className="text-red-600"
-                                                    onClick={async (e) => {
+                                                    onClick={(e) => {
                                                         e.stopPropagation();
-                                                        if (!confirm('Delete this theme?')) return;
-                                                        await deleteTheme(t.id);
-                                                        qc.invalidateQueries({ queryKey: ['themes', projectId] });
+                                                        setPendingDeleteThemeId(t.id);
                                                     }}
                                                 >
                                                     Delete
@@ -124,6 +124,18 @@ export default function Themes() {
                     )}
                 </TableBody>
             </Table>
+
+            <ConfirmDialog
+                open={!!pendingDeleteThemeId}
+                title="Delete this theme?"
+                onConfirm={async () => {
+                    if (!pendingDeleteThemeId) return;
+                    await deleteTheme(pendingDeleteThemeId);
+                    qc.invalidateQueries({ queryKey: ['themes', projectId] });
+                    setPendingDeleteThemeId(null);
+                }}
+                onCancel={() => setPendingDeleteThemeId(null)}
+            />
         </div>
     );
 }

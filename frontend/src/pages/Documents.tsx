@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getFiles, deleteFile, getProjects, listMedia, deleteMedia, createTranscriptionJob, uploadMedia } from '@/services/api';
 import type { UploadedFile, MediaFile } from '@/types';
@@ -13,6 +14,7 @@ import { MediaUpload } from '@/components/MediaUpload';
 import { FileText, Music, Download } from 'lucide-react';
 import { useOptimisticMutation } from '@/hooks/useOptimisticMutation';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 type DocumentItem = (UploadedFile & { type: 'document' }) | (MediaFile & { type: 'media' });
 
@@ -27,6 +29,8 @@ function formatEta(seconds?: number) {
 function DocumentRow({ item }: { item: DocumentItem }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [pendingDocDelete, setPendingDocDelete] = useState<string | null>(null);
+  const [pendingMediaDelete, setPendingMediaDelete] = useState<{ id: string; force: boolean } | null>(null);
 
   const handleDownloadVTT = async (mediaItem: MediaFile) => {
     try {
@@ -90,37 +94,43 @@ function DocumentRow({ item }: { item: DocumentItem }) {
 
   if (item.type === 'document') {
     return (
-      <TableRow
-        className="cursor-pointer hover:bg-indigo-50"
-        onClick={() => navigate(`/documents/${item.id}`)}
-      >
-        <TableCell>
-          <div className="flex items-center gap-2">
-            <FileText className="w-4 h-4 text-neutral-600" />
-            <span className="font-medium">{item.filename}</span>
-          </div>
-        </TableCell>
-        <TableCell className="text-xs text-neutral-600">
-          {new Date(item.createdAt).toLocaleString()}
-        </TableCell>
-        <TableCell>
-          <span className="text-xs text-neutral-600">Document</span>
-        </TableCell>
-        <TableCell>
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (confirm('Delete this document? This cannot be undone.')) {
-                deleteDocMut.mutate(item.id);
-              }
-            }}
-          >
-            Delete
-          </Button>
-        </TableCell>
-      </TableRow>
+      <>
+        <TableRow
+          className="cursor-pointer hover:bg-indigo-50"
+          onClick={() => navigate(`/documents/${item.id}`)}
+        >
+          <TableCell>
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-neutral-600" />
+              <span className="font-medium">{item.filename}</span>
+            </div>
+          </TableCell>
+          <TableCell className="text-xs text-neutral-600">
+            {new Date(item.createdAt).toLocaleString()}
+          </TableCell>
+          <TableCell>
+            <span className="text-xs text-neutral-600">Document</span>
+          </TableCell>
+          <TableCell>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={(e) => {
+                e.stopPropagation();
+                setPendingDocDelete(item.id);
+              }}
+            >
+              Delete
+            </Button>
+          </TableCell>
+        </TableRow>
+        <ConfirmDialog
+          open={!!pendingDocDelete}
+          title="Delete this document? This cannot be undone."
+          onConfirm={() => { deleteDocMut.mutate(pendingDocDelete!); setPendingDocDelete(null); }}
+          onCancel={() => setPendingDocDelete(null)}
+        />
+      </>
     );
   }
 
@@ -149,14 +159,15 @@ function DocumentRow({ item }: { item: DocumentItem }) {
   }
 
   return (
-    <TableRow
-      className="cursor-pointer hover:bg-indigo-50"
-      onClick={() => {
-        if (item.status === 'done') {
-          navigate(`/documents/${item.id}`);
-        }
-      }}
-    >
+    <>
+      <TableRow
+        className="cursor-pointer hover:bg-indigo-50"
+        onClick={() => {
+          if (item.status === 'done') {
+            navigate(`/documents/${item.id}`);
+          }
+        }}
+      >
       <TableCell>
         <div className="flex items-center gap-2">
           <Music className="w-4 h-4 text-neutral-600" />
@@ -195,12 +206,7 @@ function DocumentRow({ item }: { item: DocumentItem }) {
             onClick={(e) => {
               e.stopPropagation();
               const isProcessing = item.status === 'processing';
-              const msg = isProcessing
-                ? 'This audio is currently being transcribed. Force delete?'
-                : 'Delete this audio file and its transcript? This cannot be undone.';
-              if (confirm(msg)) {
-                deleteMediaMut.mutate({ id: item.id, force: isProcessing });
-              }
+              setPendingMediaDelete({ id: item.id, force: isProcessing });
             }}
           >
             Delete
@@ -208,6 +214,15 @@ function DocumentRow({ item }: { item: DocumentItem }) {
         </div>
       </TableCell>
     </TableRow>
+    <ConfirmDialog
+      open={!!pendingMediaDelete}
+      title={pendingMediaDelete?.force
+        ? 'This audio is currently being transcribed. Force delete?'
+        : 'Delete this audio file and its transcript? This cannot be undone.'}
+      onConfirm={() => { deleteMediaMut.mutate(pendingMediaDelete!); setPendingMediaDelete(null); }}
+      onCancel={() => setPendingMediaDelete(null)}
+    />
+    </>
   );
 }
 
