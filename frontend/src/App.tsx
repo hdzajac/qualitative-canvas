@@ -8,6 +8,7 @@ import Projects from "./pages/Projects";
 import Documents from "./pages/Documents";
 import DocumentDetail from "./pages/DocumentDetail";
 import CanvasPage from "./pages/CanvasPage";
+import CanvasV2Page from "./pages/CanvasV2Page";
 import Themes from "./pages/Themes";
 import Insights from "./pages/Insights";
 import CodesPage from "./pages/Codes";
@@ -98,6 +99,7 @@ const App = () => (
             <Route path="/insights" element={<ErrorBoundary><Insights /></ErrorBoundary>} />
             <Route path="/analysis" element={<ErrorBoundary><Analysis /></ErrorBoundary>} />
             <Route path="/canvas" element={<ErrorBoundary><CanvasPage /></ErrorBoundary>} />
+            <Route path="/canvas-v2" element={<ErrorBoundary><CanvasV2Page /></ErrorBoundary>} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

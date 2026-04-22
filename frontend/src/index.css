@@ -107,3 +107,13 @@
 .segment-blink {
   animation: segment-blink 1s ease-in-out 2;
 }
+
+/* React Flow edge hover / selected feedback */
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #374151;
+  stroke-width: 2;
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #2563eb;
+  stroke-width: 2;
+}
