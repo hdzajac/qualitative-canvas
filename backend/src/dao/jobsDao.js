@@ -4,6 +4,7 @@ export function mapJob(r) {
     mediaFileId: r.media_file_id,
     model: r.model ?? undefined,
     languageHint: r.language_hint ?? undefined,
+    numSpeakers: r.num_speakers ?? undefined,
     status: r.status,
     startedAt: r.started_at?.toISOString?.() ?? r.started_at ?? undefined,
     completedAt: r.completed_at?.toISOString?.() ?? r.completed_at ?? undefined,
@@ -16,11 +17,11 @@ export function mapJob(r) {
   };
 }
 
-export async function createJob(pool, { id, mediaFileId, model, languageHint }) {
+export async function createJob(pool, { id, mediaFileId, model, languageHint, numSpeakers }) {
   const r = await pool.query(
-    `INSERT INTO transcription_jobs (id, media_file_id, model, language_hint, status)
-     VALUES ($1,$2,$3,$4,'queued') RETURNING *`,
-    [id, mediaFileId, model ?? null, languageHint ?? null]
+    `INSERT INTO transcription_jobs (id, media_file_id, model, language_hint, num_speakers, status)
+     VALUES ($1,$2,$3,$4,$5,'queued') RETURNING *`,
+    [id, mediaFileId, model ?? null, languageHint ?? null, numSpeakers ?? null]
   );
   return mapJob(r.rows[0]);
 }

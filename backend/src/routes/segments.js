@@ -99,6 +99,64 @@ export default function segmentsRoutes(pool) {
     }
   }));
 
+  // Merge consecutive same-speaker segments into single rows
+  // Body: { gapThresholdMs?: number, maxDurationMs?: number }
+  router.post('/merge-speaker-runs', asyncHandler(async (req, res) => {
+    const mediaId = req.params.mediaId;
+    const schema = z.object({
+      gapThresholdMs: z.number().int().min(0).max(60000).optional().default(800),
+      maxDurationMs: z.number().int().min(1000).max(300000).optional().default(30000),
+    });
+    const parsed = schema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const media = await getMedia(pool, mediaId);
+    if (!media) return res.status(404).json({ error: 'Media not found' });
+
+    const { gapThresholdMs, maxDurationMs } = parsed.data;
+
+    // Fetch all segments ordered by position
+    const segments = await listSegmentsForMedia(pool, mediaId);
+    const before = segments.length;
+    if (before === 0) return res.json({ before: 0, merged: 0 });
+
+    // Walk and merge consecutive runs sharing the same participantId
+    const merged = [];
+    let current = { ...segments[0] };
+    for (let i = 1; i < segments.length; i++) {
+      const seg = segments[i];
+      const sameParticipant = seg.participantId === current.participantId;
+      const gap = seg.startMs - current.endMs;
+      const wouldExceedMax = (seg.endMs - current.startMs) > maxDurationMs;
+      if (sameParticipant && gap <= gapThresholdMs && !wouldExceedMax) {
+        // Extend current run
+        current = {
+          ...current,
+          endMs: seg.endMs,
+          text: current.text + ' ' + seg.text,
+        };
+      } else {
+        merged.push(current);
+        current = { ...seg };
+      }
+    }
+    merged.push(current);
+
+    // Re-index and assign fresh IDs, preserving participantId
+    const toInsert = merged.map((s, idx) => ({
+      id: randomUUID(),
+      idx,
+      startMs: s.startMs,
+      endMs: s.endMs,
+      text: s.text.trim(),
+      participantId: s.participantId ?? null,
+    }));
+
+    // Replace all segments atomically
+    await replaceSegmentsBulk(pool, mediaId, toInsert);
+
+    res.json({ before, merged: toInsert.length });
+  }));
+
   // Delete a single segment
   router.delete('/:segmentId', asyncHandler(async (req, res) => {
     const { mediaId, segmentId } = req.params;

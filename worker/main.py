@@ -49,6 +49,8 @@ LOCAL_BACKEND_PORT = os.getenv('LOCAL_BACKEND_PORT', '5002')
 CHUNK_SECONDS = int(os.getenv('CHUNK_SECONDS', '0'))  # 0 disables chunking
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
 AUTO_DIARIZATION_ASSIGN = os.getenv('AUTO_DIARIZATION_ASSIGN', '0') == '1'
+MERGE_GAP_MS = int(os.getenv('MERGE_GAP_MS', '800'))  # max gap (ms) between same-speaker segments to merge
+MERGE_MAX_MS = int(os.getenv('MERGE_MAX_MS', '30000'))  # max merged segment duration (ms)
 
 _LEVELS = {'DEBUG': 10, 'INFO': 20, 'WARN': 30, 'ERROR': 40}
 _LV = _LEVELS.get(LOG_LEVEL, 20)
@@ -346,7 +348,8 @@ def main():
             # diarization pass (runs when available; uses pre-cached model in offline mode)
             if DIARIZATION_AVAILABLE:
                 try:
-                    run_diarization(base, media)
+                    num_speakers = job.get('numSpeakers') or None
+                    run_diarization(base, media, num_speakers=num_speakers)
                 except Exception as e:
                     log_warn(f"Diarization error: {e}")
             done = complete_job(base, job['id'])
@@ -466,7 +469,7 @@ def transcribe_real(base_url: str, media, text_content, job, total_ms_hint=None)
             chunk_index += 1
     return segs if segs else build_fake_segments(text_content)
 
-def run_diarization(base_url: str, media):  # pragma: no cover - heavy
+def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  # pragma: no cover - heavy
     if not DIARIZATION_AVAILABLE:
         return
     
@@ -546,7 +549,11 @@ def run_diarization(base_url: str, media):  # pragma: no cover - heavy
         else:
             log_info("Diarization: starting inference…")
         t0 = time.perf_counter()
-        diar = pipeline(final_wav_path or wav_path)
+        pipeline_kwargs = {}
+        if num_speakers is not None:
+            pipeline_kwargs['num_speakers'] = num_speakers
+            log_info(f"Diarization: using num_speakers={num_speakers}")
+        diar = pipeline(final_wav_path or wav_path, **pipeline_kwargs)
         t_ms = int((time.perf_counter() - t0) * 1000)
         log_info(f"Diarization inference done in {t_ms}ms")
     finally:
@@ -666,6 +673,20 @@ def run_diarization(base_url: str, media):  # pragma: no cover - heavy
                 print(f"Filled {sum(len(v) for v in assign_map.values())} previously unassigned segments by nearest speaker for media {media['id']}")
         except Exception as e:
             log_warn(f"post-assign fill failed: {e}")
+        # Merge consecutive same-speaker runs to reduce fragmentation
+        try:
+            mr = requests.post(
+                f"{base_url}/media/{media['id']}/segments/merge-speaker-runs",
+                json={"gapThresholdMs": MERGE_GAP_MS, "maxDurationMs": MERGE_MAX_MS},
+                timeout=60,
+            )
+            if mr.ok:
+                result = mr.json()
+                log_info(f"Merged speaker runs: {result['before']} → {result['merged']} segments for media {media['id']}")
+            else:
+                log_warn(f"merge-speaker-runs {mr.status_code}: {mr.text[:200]}")
+        except Exception as e:
+            log_warn(f"merge-speaker-runs call failed: {e}")
     except Exception as e:
         log_warn(f"Diarization auto-assign failed: {e}")
 

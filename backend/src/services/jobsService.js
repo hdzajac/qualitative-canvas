@@ -4,10 +4,10 @@ import { getMedia, updateMedia } from '../dao/mediaDao.js';
 
 export default function jobsService(pool) {
   return {
-    async create(mediaFileId, { model, languageHint } = {}) {
+    async create(mediaFileId, { model, languageHint, numSpeakers } = {}) {
       const media = await getMedia(pool, mediaFileId);
       if (!media) throw new Error('Media not found');
-      const job = await createJob(pool, { id: uuidv4(), mediaFileId, model, languageHint });
+      const job = await createJob(pool, { id: uuidv4(), mediaFileId, model, languageHint, numSpeakers });
       return job;
     },
     get: (id) => getJob(pool, id),

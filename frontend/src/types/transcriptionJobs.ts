@@ -3,6 +3,7 @@ export interface TranscriptionJob {
   mediaFileId: string;
   model?: string;
   languageHint?: string;
+  numSpeakers?: number;
   status: 'queued' | 'processing' | 'done' | 'error';
   startedAt?: string;
   completedAt?: string;

@@ -9,7 +9,7 @@ export default function transcriptionRoutes(pool) {
 
   // Create a job for a given media file
   router.post('/media/:id/transcribe', asyncHandler(async (req, res) => {
-    const schema = z.object({ model: z.string().optional(), languageHint: z.string().optional() });
+    const schema = z.object({ model: z.string().optional(), languageHint: z.string().optional(), numSpeakers: z.number().int().min(1).max(20).optional() });
     const parsed = schema.safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
     const job = await jobsService.create(req.params.id, parsed.data);

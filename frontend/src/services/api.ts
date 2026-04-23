@@ -175,7 +175,7 @@ export async function uploadMedia(file: File, projectId: string): Promise<MediaF
 }
 
 // Transcription jobs
-export const createTranscriptionJob = (mediaId: string, opts: { model?: string; languageHint?: string } = {}): Promise<TranscriptionJob> =>
+export const createTranscriptionJob = (mediaId: string, opts: { model?: string; languageHint?: string; numSpeakers?: number } = {}): Promise<TranscriptionJob> =>
   http<TranscriptionJob>(`/media/${mediaId}/transcribe`, { method: 'POST', body: JSON.stringify(opts) });
 
 export const getTranscriptionJob = (jobId: string): Promise<TranscriptionJob> => http<TranscriptionJob>(`/transcribe-jobs/${jobId}`);
