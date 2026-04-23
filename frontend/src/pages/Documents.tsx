@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getFiles, deleteFile, getProjects, listMedia, deleteMedia, createTranscriptionJob, uploadMedia } from '@/services/api';
+import { getVttDownloadUrl } from '@/services/api';
 import type { UploadedFile, MediaFile } from '@/types';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { useNavigate } from 'react-router-dom';
@@ -32,30 +33,10 @@ function DocumentRow({ item }: { item: DocumentItem }) {
   const [pendingDocDelete, setPendingDocDelete] = useState<string | null>(null);
   const [pendingMediaDelete, setPendingMediaDelete] = useState<{ id: string; force: boolean } | null>(null);
 
-  const handleDownloadVTT = async (mediaItem: MediaFile) => {
+  const handleDownloadAudio = async (mediaItem: MediaFile) => {
     try {
-      // VITE_API_URL does not include /api suffix
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-      const baseFilename = mediaItem.originalFilename.replace(/\.[^/.]+$/, '');
-
-      // Download VTT transcript
-      const vttResponse = await fetch(`${API_BASE}/api/export/media/${mediaItem.id}/transcript/vtt`);
-      if (!vttResponse.ok) {
-        const error = await vttResponse.json();
-        throw new Error(error.error || 'VTT download failed');
-      }
-      const vttBlob = await vttResponse.blob();
-      const vttUrl = window.URL.createObjectURL(vttBlob);
-      const vttLink = document.createElement('a');
-      vttLink.href = vttUrl;
-      vttLink.download = `${baseFilename}.vtt`;
-      document.body.appendChild(vttLink);
-      vttLink.click();
-      window.URL.revokeObjectURL(vttUrl);
-      document.body.removeChild(vttLink);
-
-      // Download audio file
-      const audioResponse = await fetch(`${API_BASE}/api/media/${mediaItem.id}/download`);
+      const audioDownloadUrl = `/api/media/${mediaItem.id}/download`;
+      const audioResponse = await fetch(audioDownloadUrl);
       if (!audioResponse.ok) {
         throw new Error('Audio download failed');
       }
@@ -68,11 +49,35 @@ function DocumentRow({ item }: { item: DocumentItem }) {
       audioLink.click();
       window.URL.revokeObjectURL(audioUrl);
       document.body.removeChild(audioLink);
-
-      toast.success('Transcript and audio downloaded');
+      toast.success('Audio downloaded');
     } catch (error) {
       console.error('Download error:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to download files');
+      toast.error(error instanceof Error ? error.message : 'Failed to download audio');
+    }
+  };
+
+  const handleDownloadVTT = async (mediaItem: MediaFile) => {
+    try {
+      // Download VTT transcript
+      const vttUrlApi = getVttDownloadUrl(mediaItem.id);
+      const vttResponse = await fetch(vttUrlApi);
+      if (!vttResponse.ok) {
+        const error = await vttResponse.json();
+        throw new Error(error.error || 'VTT download failed');
+      }
+      const vttBlob = await vttResponse.blob();
+      const vttUrl = window.URL.createObjectURL(vttBlob);
+      const vttLink = document.createElement('a');
+      vttLink.href = vttUrl;
+      vttLink.download = `${mediaItem.originalFilename}.vtt`;
+      document.body.appendChild(vttLink);
+      vttLink.click();
+      window.URL.revokeObjectURL(vttUrl);
+      document.body.removeChild(vttLink);
+      toast.success('Transcript downloaded');
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to download transcript');
     }
   };
 
@@ -168,60 +173,73 @@ function DocumentRow({ item }: { item: DocumentItem }) {
           }
         }}
       >
-      <TableCell>
-        <div className="flex items-center gap-2">
-          <Music className="w-4 h-4 text-neutral-600" />
-          <span className="font-medium">{item.originalFilename}</span>
-        </div>
-      </TableCell>
-      <TableCell className="text-xs text-neutral-600">
-        {new Date(item.createdAt).toLocaleString()}
-      </TableCell>
-      <TableCell>
-        <div className="flex flex-col gap-1">
-          {item.status === 'processing' && pct != null && (
-            <Progress value={pct} className="w-32" />
-          )}
-          <span className="text-xs text-neutral-600">{statusDisplay}</span>
-        </div>
-      </TableCell>
-      <TableCell>
-        <div className="flex gap-2">
-          {item.status === 'done' && (
+        <TableCell>
+          <div className="flex items-center gap-2">
+            <Music className="w-4 h-4 text-neutral-600" />
+            <span className="font-medium">{item.originalFilename}</span>
+          </div>
+        </TableCell>
+        <TableCell className="text-xs text-neutral-600">
+          {new Date(item.createdAt).toLocaleString()}
+        </TableCell>
+        <TableCell>
+          <div className="flex flex-col gap-1">
+            {item.status === 'processing' && pct != null && (
+              <Progress value={pct} className="w-32" />
+            )}
+            <span className="text-xs text-neutral-600">{statusDisplay}</span>
+          </div>
+        </TableCell>
+        <TableCell>
+          <div className="flex gap-2">
+            {item.status === 'done' && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDownloadVTT(item);
+                  }}
+                >
+                  <Download className="w-3 h-3 mr-1" />
+                  VTT
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDownloadAudio(item);
+                  }}
+                >
+                  <Music className="w-3 h-3 mr-1" />
+                  Audio
+                </Button>
+              </>
+            )}
             <Button
               size="sm"
-              variant="outline"
+              variant="destructive"
               onClick={(e) => {
                 e.stopPropagation();
-                handleDownloadVTT(item);
+                const isProcessing = item.status === 'processing';
+                setPendingMediaDelete({ id: item.id, force: isProcessing });
               }}
             >
-              <Download className="w-3 h-3 mr-1" />
-              VTT
+              Delete
             </Button>
-          )}
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={(e) => {
-              e.stopPropagation();
-              const isProcessing = item.status === 'processing';
-              setPendingMediaDelete({ id: item.id, force: isProcessing });
-            }}
-          >
-            Delete
-          </Button>
-        </div>
-      </TableCell>
-    </TableRow>
-    <ConfirmDialog
-      open={!!pendingMediaDelete}
-      title={pendingMediaDelete?.force
-        ? 'This audio is currently being transcribed. Force delete?'
-        : 'Delete this audio file and its transcript? This cannot be undone.'}
-      onConfirm={() => { deleteMediaMut.mutate(pendingMediaDelete!); setPendingMediaDelete(null); }}
-      onCancel={() => setPendingMediaDelete(null)}
-    />
+          </div>
+        </TableCell>
+      </TableRow>
+      <ConfirmDialog
+        open={!!pendingMediaDelete}
+        title={pendingMediaDelete?.force
+          ? 'This audio is currently being transcribed. Force delete?'
+          : 'Delete this audio file and its transcript? This cannot be undone.'}
+        onConfirm={() => { deleteMediaMut.mutate(pendingMediaDelete!); setPendingMediaDelete(null); }}
+        onCancel={() => setPendingMediaDelete(null)}
+      />
     </>
   );
 }
