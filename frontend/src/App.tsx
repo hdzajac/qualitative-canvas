@@ -98,8 +98,8 @@ const App = () => (
             <Route path="/themes" element={<ErrorBoundary><Themes /></ErrorBoundary>} />
             <Route path="/insights" element={<ErrorBoundary><Insights /></ErrorBoundary>} />
             <Route path="/analysis" element={<ErrorBoundary><Analysis /></ErrorBoundary>} />
-            <Route path="/canvas" element={<ErrorBoundary><CanvasPage /></ErrorBoundary>} />
-            <Route path="/canvas-v2" element={<ErrorBoundary><CanvasV2Page /></ErrorBoundary>} />
+            <Route path="/canvas" element={<ErrorBoundary><CanvasV2Page /></ErrorBoundary>} />
+            <Route path="/canvas-legacy" element={<ErrorBoundary><CanvasPage /></ErrorBoundary>} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

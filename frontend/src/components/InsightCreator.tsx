@@ -11,12 +11,14 @@ import { DEFAULTS } from '@/components/canvas/CanvasTypes';
 
 interface InsightCreatorProps {
   themes: Theme[];
+  projectId?: string;
+  preSelectedIds?: string[];
   onInsightCreated: () => void;
 }
 
-export const InsightCreator = ({ themes, onInsightCreated }: InsightCreatorProps) => {
+export const InsightCreator = ({ themes, projectId, preSelectedIds, onInsightCreated }: InsightCreatorProps) => {
   const [insightName, setInsightName] = useState('');
-  const [selectedThemes, setSelectedThemes] = useState<string[]>([]);
+  const [selectedThemes, setSelectedThemes] = useState<string[]>(preSelectedIds ?? []);
 
   const handleToggleTheme = (themeId: string) => {
     setSelectedThemes((prev) =>
@@ -37,6 +39,7 @@ export const InsightCreator = ({ themes, onInsightCreated }: InsightCreatorProps
         name: insightName.trim(),
         themeIds: selectedThemes,
         size: DEFAULTS.insight,
+        projectId,
       });
       toast.success('Insight created');
       setInsightName('');

@@ -108,6 +108,26 @@
   animation: segment-blink 1s ease-in-out 2;
 }
 
+/* Subtle opacity pulse for FieldAura border ring */
+@keyframes field-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%       { opacity: 0.75; }
+}
+
+/* Continuous organic blob morphing for FieldAura fill blob */
+@keyframes field-morph {
+  0%   { border-radius: 60% 40% 55% 45% / 45% 55% 40% 60%; }
+  20%  { border-radius: 50% 50% 42% 58% / 52% 48% 55% 45%; }
+  40%  { border-radius: 45% 55% 60% 40% / 58% 42% 50% 50%; }
+  60%  { border-radius: 55% 45% 48% 52% / 42% 58% 45% 55%; }
+  80%  { border-radius: 48% 52% 55% 45% / 55% 45% 58% 42%; }
+  100% { border-radius: 60% 40% 55% 45% / 45% 55% 40% 60%; }
+}
+
+.field-aura-morph {
+  animation: field-morph 8s ease-in-out infinite;
+}
+
 /* React Flow edge hover / selected feedback */
 .react-flow__edge:hover .react-flow__edge-path {
   stroke: #374151;

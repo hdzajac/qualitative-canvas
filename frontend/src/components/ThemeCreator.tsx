@@ -12,11 +12,16 @@ import { DEFAULTS } from '@/components/canvas/CanvasTypes';
 interface ThemeCreatorProps {
   highlights: Highlight[];
   onThemeCreated: () => void;
+  /** IDs already selected on the canvas — skips the code picker when provided */
+  preSelectedIds?: string[];
+  /** Project to attach the theme to */
+  projectId?: string;
 }
 
-export const ThemeCreator = ({ highlights, onThemeCreated }: ThemeCreatorProps) => {
+export const ThemeCreator = ({ highlights, onThemeCreated, preSelectedIds, projectId }: ThemeCreatorProps) => {
+  const hasPreSelected = (preSelectedIds?.length ?? 0) > 0;
   const [themeName, setThemeName] = useState('');
-  const [selectedHighlights, setSelectedHighlights] = useState<string[]>([]);
+  const [selectedHighlights, setSelectedHighlights] = useState<string[]>(preSelectedIds ?? []);
 
   const handleToggleHighlight = (highlightId: string) => {
     setSelectedHighlights((prev) =>
@@ -27,8 +32,8 @@ export const ThemeCreator = ({ highlights, onThemeCreated }: ThemeCreatorProps) 
   };
 
   const handleCreateTheme = async () => {
-    if (!themeName.trim() || selectedHighlights.length === 0) {
-      toast.error('Please provide a theme name and select at least one code');
+    if (!themeName.trim()) {
+      toast.error('Please provide a theme name');
       return;
     }
 
@@ -36,13 +41,14 @@ export const ThemeCreator = ({ highlights, onThemeCreated }: ThemeCreatorProps) 
       await createTheme({
         name: themeName.trim(),
         highlightIds: selectedHighlights,
+        projectId,
         size: DEFAULTS.theme,
       });
       toast.success('Theme created');
       setThemeName('');
       setSelectedHighlights([]);
       onThemeCreated();
-    } catch (error) {
+    } catch {
       toast.error('Failed to create theme');
     }
   };
@@ -59,36 +65,43 @@ export const ThemeCreator = ({ highlights, onThemeCreated }: ThemeCreatorProps) 
             value={themeName}
             onChange={(e) => setThemeName(e.target.value)}
             placeholder="Enter theme name"
+            autoFocus
           />
         </div>
 
-        <div>
-          <Label>Select Codes</Label>
-          <div className="mt-2 space-y-2 max-h-[300px] overflow-y-auto">
-            {highlights.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No codes available</p>
-            ) : (
-              highlights.map((highlight) => (
-                <div key={highlight.id} className="flex items-start space-x-2">
-                  <Checkbox
-                    id={highlight.id}
-                    checked={selectedHighlights.includes(highlight.id)}
-                    onCheckedChange={() => handleToggleHighlight(highlight.id)}
-                  />
-                  <label
-                    htmlFor={highlight.id}
-                    className="text-sm cursor-pointer flex-1"
-                  >
-                    <span className="font-medium">{highlight.codeName}</span>
-                    <span className="text-muted-foreground italic ml-2">
-                      "{highlight.text.substring(0, 50)}..."
-                    </span>
-                  </label>
-                </div>
-              ))
-            )}
+        {hasPreSelected ? (
+          <p className="text-sm text-muted-foreground">
+            {preSelectedIds!.length} code{preSelectedIds!.length !== 1 ? 's' : ''} selected from canvas will be attached automatically.
+          </p>
+        ) : (
+          <div>
+            <Label>Select Codes <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <div className="mt-2 space-y-2 max-h-[300px] overflow-y-auto">
+              {highlights.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No codes available</p>
+              ) : (
+                highlights.map((highlight) => (
+                  <div key={highlight.id} className="flex items-start space-x-2">
+                    <Checkbox
+                      id={highlight.id}
+                      checked={selectedHighlights.includes(highlight.id)}
+                      onCheckedChange={() => handleToggleHighlight(highlight.id)}
+                    />
+                    <label
+                      htmlFor={highlight.id}
+                      className="text-sm cursor-pointer flex-1"
+                    >
+                      <span className="font-medium">{highlight.codeName}</span>
+                      <span className="text-muted-foreground italic ml-2">
+                        &ldquo;{highlight.text.substring(0, 50)}&hellip;&rdquo;
+                      </span>
+                    </label>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         <Button onClick={handleCreateTheme} className="w-full">
           Create Theme
