@@ -192,20 +192,24 @@ export default function CanvasV2Page() {
         <div className="fixed inset-0 top-[56px]">
             {/* Floating toolbar */}
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex gap-2 flex-wrap justify-center">
-                <Button
-                    variant="outline"
-                    className="border-2 border-black rounded-none bg-white uppercase tracking-wide text-xs px-3 py-1"
-                    onClick={() => setShowThemeDialog(true)}
-                >
-                    + New Theme
-                </Button>
-                <Button
-                    variant="outline"
-                    className="border-2 border-black rounded-none bg-white uppercase tracking-wide text-xs px-3 py-1"
-                    onClick={() => setShowInsightDialog(true)}
-                >
-                    + New Insight
-                </Button>
+                {selectedCodeIds.length >= 1 && (
+                    <Button
+                        variant="outline"
+                        className="border-2 border-emerald-600 rounded-none bg-emerald-50 uppercase tracking-wide text-xs px-3 py-1 text-emerald-700"
+                        onClick={() => setShowThemeDialog(true)}
+                    >
+                        + Theme from {selectedCodeIds.length} Code{selectedCodeIds.length !== 1 ? 's' : ''}
+                    </Button>
+                )}
+                {selectedThemeIds.length >= 1 && (
+                    <Button
+                        variant="outline"
+                        className="border-2 border-amber-500 rounded-none bg-amber-50 uppercase tracking-wide text-xs px-3 py-1 text-amber-700"
+                        onClick={() => setShowInsightDialog(true)}
+                    >
+                        + Insight from {selectedThemeIds.length} Theme{selectedThemeIds.length !== 1 ? 's' : ''}
+                    </Button>
+                )}
                 <Button
                     variant="outline"
                     className="border-2 border-black rounded-none bg-white uppercase tracking-wide text-xs px-3 py-1"
@@ -213,24 +217,6 @@ export default function CanvasV2Page() {
                 >
                     + Add Note
                 </Button>
-                {selectedCodeIds.length >= 2 && (
-                    <Button
-                        variant="outline"
-                        className="border-2 border-emerald-600 rounded-none bg-emerald-50 uppercase tracking-wide text-xs px-3 py-1 text-emerald-700"
-                        onClick={() => setShowThemeDialog(true)}
-                    >
-                        + Theme from {selectedCodeIds.length} Codes
-                    </Button>
-                )}
-                {selectedThemeIds.length >= 2 && (
-                    <Button
-                        variant="outline"
-                        className="border-2 border-amber-500 rounded-none bg-amber-50 uppercase tracking-wide text-xs px-3 py-1 text-amber-700"
-                        onClick={() => setShowInsightDialog(true)}
-                    >
-                        + Insight from {selectedThemeIds.length} Themes
-                    </Button>
-                )}
             </div>
 
             <Dialog open={showThemeDialog} onOpenChange={(open) => {

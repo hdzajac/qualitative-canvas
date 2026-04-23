@@ -24,6 +24,7 @@ import {
     deleteAnnotation as apiDeleteAnnotation,
     deleteTheme,
     deleteInsight,
+    deleteHighlight,
 } from '@/services/api';
 import { toast } from 'sonner';
 
@@ -126,6 +127,7 @@ function buildNodes(
     const fileById = new Map(files.map((f) => [f.id, f.filename ?? f.id]));
     const posMap = new Map(prevNodes.map((n) => [n.id, n.position]));
     const styleMap = new Map(prevNodes.map((n) => [n.id, n.style]));
+    const selectedMap = new Map(prevNodes.map((n) => [n.id, n.selected ?? false]));
 
     // Build a reverse map: highlightId → [{ themeId, themeName, color }]
     const parentThemesMap = new Map<string, CodeCardParent[]>();
@@ -198,6 +200,7 @@ function buildNodes(
         nodes.push({
             id: nodeId,
             type: 'code',
+            selected: selectedMap.get(nodeId) ?? false,
             position: resolvedPos,
             style: { width: DEFAULT_W },
             data: { ...data, _relOffset: relOffset, _parentNodeId: parentNodeId } as unknown as Record<string, unknown>,
@@ -238,6 +241,7 @@ function buildNodes(
         nodes.push({
             id: nodeId,
             type: 'theme',
+            selected: selectedMap.get(nodeId) ?? false,
             position: themePos,
             style: styleMap.get(nodeId) ?? { width: t.size?.w ?? DEFAULT_W, height: t.size?.h ?? DEFAULT_H },
             data: { ...data, _relOffset: relOffset, _parentNodeId: parentNodeId } as unknown as Record<string, unknown>,
@@ -265,6 +269,7 @@ function buildNodes(
         nodes.push({
             id: nodeId,
             type: 'insight',
+            selected: selectedMap.get(nodeId) ?? false,
             position: insightPos,
             style: styleMap.get(nodeId) ?? { width: i.size?.w ?? DEFAULT_W, height: i.size?.h ?? DEFAULT_H },
             data: data as unknown as Record<string, unknown>,
@@ -282,6 +287,7 @@ function buildNodes(
         nodes.push({
             id: nodeId,
             type: 'annotation',
+            selected: selectedMap.get(nodeId) ?? false,
             position: posMap.get(nodeId) ?? { x: a.position?.x ?? 60 + (idx % 6) * 190, y: a.position?.y ?? 60 },
             style: styleMap.get(nodeId) ?? { width: a.size?.w ?? DEFAULT_ANNOTATION_W, height: a.size?.h ?? DEFAULT_ANNOTATION_H },
             data: data as unknown as Record<string, unknown>,
@@ -972,6 +978,29 @@ export function FlowCanvas({
         [themes, insights, setNodes, onUpdate]
     );
 
+    const handleNodesDelete = useCallback(
+        async (deletedNodes: Node[]) => {
+            const promises = deletedNodes.map((n) => {
+                const colonIdx = n.id.indexOf(':');
+                const kind = n.id.slice(0, colonIdx);
+                const id = n.id.slice(colonIdx + 1);
+                if (kind === 'code') return deleteHighlight(id);
+                if (kind === 'theme') return deleteTheme(id);
+                if (kind === 'insight') return deleteInsight(id);
+                if (kind === 'annotation') return apiDeleteAnnotation(id);
+                return Promise.resolve();
+            });
+            try {
+                await Promise.all(promises);
+                onUpdate();
+            } catch {
+                toast.error('Failed to delete one or more cards');
+                onUpdate(); // re-sync state
+            }
+        },
+        [onUpdate]
+    );
+
     return (
         <div className="w-full h-full">
             <ReactFlow
@@ -983,13 +1012,14 @@ export function FlowCanvas({
                 onNodeDrag={onNodeDrag}
                 onNodeDragStop={onNodeDragStop}
                 onSelectionChange={handleSelectionChange}
+                onNodesDelete={handleNodesDelete}
                 fitView
                 minZoom={0.1}
                 maxZoom={2}
                 panOnDrag={[1, 2]}
                 selectionOnDrag={true}
                 multiSelectionKeyCode="Shift"
-                deleteKeyCode="Delete"
+                deleteKeyCode={['Delete', 'Backspace']}
                 proOptions={{ hideAttribution: true }}
             >
                 <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#e5e7eb" />
