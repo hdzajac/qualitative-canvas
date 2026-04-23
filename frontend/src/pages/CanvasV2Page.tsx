@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { getFiles, getHighlights, getThemes, getInsights, getAnnotations, createAnnotation } from '@/services/api';
+import { getFiles, getHighlights, getThemes, getInsights, getAnnotations, createAnnotation, updateTheme } from '@/services/api';
 import type { Highlight, Theme, Insight, Annotation } from '@/types';
 import { FlowCanvas } from '@/components/canvas/FlowCanvas';
 import { CanvasEntityPanel } from '@/components/canvas/CanvasEntityPanel';
@@ -147,6 +147,47 @@ export default function CanvasV2Page() {
         setOpenEntity({ kind: kind as NodeKind, id });
     }, []);
 
+    // Store a pending theme position to set after creation
+    const [pendingThemePosition, setPendingThemePosition] = useState<{ themeName: string; codeIds: string[]; position: { x: number; y: number } } | null>(null);
+
+    // Patch new theme position after creation if needed
+    useEffect(() => {
+        if (!pendingThemePosition) return;
+        // Find the new theme by name and code membership
+        const newTheme = themes.find(t => t.name?.trim() === pendingThemePosition.themeName.trim() &&
+            pendingThemePosition.codeIds.every(id => (t.highlightIds ?? []).includes(id))
+        );
+        if (newTheme && (!newTheme.position || newTheme.position.x !== pendingThemePosition.position.x || newTheme.position.y !== pendingThemePosition.position.y)) {
+            updateTheme(newTheme.id, { position: pendingThemePosition.position }).then(() => {
+                setPendingThemePosition(null);
+                handleUpdate();
+            });
+        }
+    }, [themes, pendingThemePosition, handleUpdate]);
+
+    // Helper to compute average position of selected codes
+    const getAverageCodePosition = useCallback(() => {
+        const codeNodes = document.querySelectorAll('[data-id^="code:"]');
+        let sumX = 0, sumY = 0, count = 0;
+        selectedCodeIds.forEach(id => {
+            const el = document.querySelector(`[data-id="code:${id}"]`);
+            if (el) {
+                const rect = el.getBoundingClientRect();
+                sumX += rect.left + rect.width / 2;
+                sumY += rect.top + rect.height / 2;
+                count++;
+            }
+        });
+        if (count === 0) return { x: 200, y: 200 };
+        // Convert screen to canvas coordinates (approx)
+        const canvas = document.querySelector('.react-flow__viewport');
+        const canvasRect = canvas?.getBoundingClientRect();
+        return {
+            x: canvasRect ? (sumX / count - canvasRect.left) : 200,
+            y: canvasRect ? (sumY / count - canvasRect.top) : 200,
+        };
+    }, [selectedCodeIds]);
+
     return (
         <div className="fixed inset-0 top-[56px]">
             {/* Floating toolbar */}
@@ -204,7 +245,15 @@ export default function CanvasV2Page() {
                         highlights={highlights}
                         projectId={projectId ?? undefined}
                         preSelectedIds={selectedCodeIds}
-                        onThemeCreated={() => {
+                        onThemeCreated={(themeName) => {
+                            // If creating from selected codes, set pending position
+                            if (selectedCodeIds.length > 0) {
+                                setPendingThemePosition({
+                                    themeName,
+                                    codeIds: [...selectedCodeIds],
+                                    position: getAverageCodePosition(),
+                                });
+                            }
                             setShowThemeDialog(false);
                             setSelectedCodeIds([]);
                             handleUpdate();

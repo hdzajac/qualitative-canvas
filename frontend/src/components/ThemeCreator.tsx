@@ -11,7 +11,7 @@ import { DEFAULTS } from '@/components/canvas/CanvasTypes';
 
 interface ThemeCreatorProps {
   highlights: Highlight[];
-  onThemeCreated: () => void;
+  onThemeCreated: (themeName: string) => void;
   /** IDs already selected on the canvas — skips the code picker when provided */
   preSelectedIds?: string[];
   /** Project to attach the theme to */
@@ -47,7 +47,7 @@ export const ThemeCreator = ({ highlights, onThemeCreated, preSelectedIds, proje
       toast.success('Theme created');
       setThemeName('');
       setSelectedHighlights([]);
-      onThemeCreated();
+      onThemeCreated(themeName.trim()); // Pass theme name up
     } catch {
       toast.error('Failed to create theme');
     }
