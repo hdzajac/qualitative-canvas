@@ -1046,6 +1046,7 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
                     id="codeName"
                     ref={inputRef}
                     value={codeName}
+                    maxLength={256}
                     onChange={(e) => setCodeName(e.target.value)}
                     placeholder="Enter a code name for this highlight"
                     onKeyDown={(e) => {
@@ -1053,6 +1054,11 @@ export const TextViewer = forwardRef<TextViewerHandle, TextViewerProps>(
                       if (e.key === 'Enter') return handleCreateCode();
                     }}
                   />
+                  {codeName.length >= 230 && (
+                    <p className={`text-xs mt-1 ${codeName.length >= 256 ? 'text-red-500' : 'text-amber-500'}`}>
+                      {codeName.length}/256 characters{codeName.length >= 256 ? ' — maximum reached' : ''}
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={handleCreateCode} className="brutal-button">Create Code</Button>

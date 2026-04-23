@@ -577,6 +577,21 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
     turns = list(diar.itertracks(yield_label=True))
     print(f"Diarization completed: {len(turns)} speaker turns")
     if not AUTO_DIARIZATION_ASSIGN:
+        # Still merge consecutive runs even when auto-assign is disabled
+        # (merges unassigned segments — null participantId matches null)
+        try:
+            mr = requests.post(
+                f"{base_url}/media/{media['id']}/segments/merge-speaker-runs",
+                json={"gapThresholdMs": MERGE_GAP_MS, "maxDurationMs": MERGE_MAX_MS},
+                timeout=60,
+            )
+            if mr.ok:
+                result = mr.json()
+                log_info(f"Merged speaker runs: {result['before']} → {result['merged']} segments for media {media['id']}")
+            else:
+                log_warn(f"merge-speaker-runs {mr.status_code}: {mr.text[:200]}")
+        except Exception as e:
+            log_warn(f"merge-speaker-runs call failed: {e}")
         return
     try:
         # Fetch existing participants

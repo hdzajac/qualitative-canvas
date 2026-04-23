@@ -234,5 +234,9 @@ export const getParticipantSegmentCounts = (mediaId: string): Promise<Array<{ pa
 export const mergeParticipants = (mediaId: string, sourceId: string, targetId: string): Promise<{ ok: boolean }> =>
   http<{ ok: boolean }>(`/media/${mediaId}/participants/merge`, { method: 'POST', body: JSON.stringify({ sourceId, targetId }) });
 
+// Merge consecutive same-speaker segments into fewer, longer rows
+export const mergeSpeakerRuns = (mediaId: string, opts: { gapThresholdMs?: number; maxDurationMs?: number } = {}): Promise<{ before: number; merged: number }> =>
+  http<{ before: number; merged: number }>(`/media/${mediaId}/segments/merge-speaker-runs`, { method: 'POST', body: JSON.stringify(opts) });
+
 // Download VTT transcript for a media file
 export const getVttDownloadUrl = (mediaId: string, format: 'tagged' | 'plain' = 'tagged') => `${BASE_URL}/export/media/${mediaId}/transcript/vtt?format=${format}`;

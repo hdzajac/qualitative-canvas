@@ -36,10 +36,10 @@ function CodeCard({ data, selected }: NodeProps) {
 
     const card = (
         <div
-            className="relative bg-white flex overflow-hidden"
+            className="relative bg-white flex flex-col overflow-visible"
             style={{
                 width: '100%',
-                height: '100%',
+                minHeight: 72,
                 border: selected ? '3px solid #2563eb' : '1.5px solid #111827',
                 boxShadow: selected
                     ? '0 6px 14px rgba(0,0,0,0.25)'
@@ -58,25 +58,25 @@ function CodeCard({ data, selected }: NodeProps) {
                 ↗
             </button>
 
-            {/* Title */}
+            {/* Title — grows to fit full code name */}
             <div
-                className="pl-4 pr-6 pt-2 pb-5 text-gray-900 text-sm leading-snug w-full overflow-hidden"
+                className="flex-1 pl-4 pr-6 pt-2 pb-1 text-gray-900 text-sm leading-snug"
                 style={{ wordBreak: 'break-word' }}
             >
                 {highlight.codeName || 'Untitled'}
             </div>
 
             {/* Bottom row: filename */}
-            <div className="absolute bottom-1 left-4 right-2 flex items-center gap-1 overflow-hidden">
-                {fileName && (
+            {fileName && (
+                <div className="pl-4 pr-2 pb-1 overflow-hidden">
                     <span
-                        className="text-gray-400 overflow-hidden whitespace-nowrap text-ellipsis"
+                        className="text-gray-400 block overflow-hidden whitespace-nowrap text-ellipsis"
                         style={{ fontSize: 11 }}
                     >
                         {fileName}
                     </span>
-                )}
-            </div>
+                </div>
+            )}
 
             {/* React Flow handles */}
             <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />

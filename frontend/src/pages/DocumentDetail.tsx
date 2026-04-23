@@ -1,7 +1,7 @@
 import { useRef, useMemo, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { getFile, getHighlights, getProjects, getMedia, listSegments, listParticipants, updateSegment, deleteSegment, getMediaDownloadUrl, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants, deleteHighlight } from '@/services/api';
+import { getFile, getHighlights, getProjects, getMedia, listSegments, listParticipants, updateSegment, deleteSegment, getMediaDownloadUrl, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants, mergeSpeakerRuns, deleteHighlight } from '@/services/api';
 import { toast } from 'sonner';
 import type { Highlight, TranscriptSegment, Participant } from '@/types';
 import { useOptimisticMutation } from '@/hooks/useOptimisticMutation';
@@ -201,6 +201,15 @@ function MediaView({ mediaId }: { mediaId: string }) {
             qc.invalidateQueries({ queryKey: ['segments', mediaId] });
         },
     });
+    const mergeRunsMut = useMutation({
+        mutationFn: () => mergeSpeakerRuns(mediaId, { gapThresholdMs: 800, maxDurationMs: 30000 }),
+        onSuccess: (result) => {
+            qc.invalidateQueries({ queryKey: ['segments', mediaId] });
+            qc.invalidateQueries({ queryKey: ['participantCounts', mediaId] });
+            toast.success(`Merged ${result.before} segments → ${result.merged}`);
+        },
+        onError: () => toast.error('Failed to merge segments'),
+    });
 
     if (!media) return <div className="text-sm text-neutral-600">Loading transcript...</div>;
 
@@ -255,6 +264,8 @@ function MediaView({ mediaId }: { mediaId: string }) {
                                 onMergeParticipants={() => mergeMut.mutate()}
                                 isMergingParticipants={mergeMut.isPending}
                                 isSavingParticipant={updatePartMut.isPending}
+                                onMergeSegmentRuns={() => mergeRunsMut.mutate()}
+                                isMergingSegmentRuns={mergeRunsMut.isPending}
                             />
                         </AudioProvider>
                     </div>
@@ -286,6 +297,8 @@ function TranscriptWithAudio({
     onMergeParticipants,
     isMergingParticipants,
     isSavingParticipant,
+    onMergeSegmentRuns,
+    isMergingSegmentRuns,
 }: {
     mediaId: string;
     audioUrl: string | null;
@@ -304,6 +317,8 @@ function TranscriptWithAudio({
     onMergeParticipants: () => void;
     isMergingParticipants: boolean;
     isSavingParticipant: boolean;
+    onMergeSegmentRuns: () => void;
+    isMergingSegmentRuns: boolean;
 }) {
     const qc = useQueryClient();
     const { src, setSrc, currentTimeMs, playSegment } = useAudio();
@@ -498,6 +513,14 @@ function TranscriptWithAudio({
         <div className="relative space-y-3 pb-24">
             {/* Top right controls */}
             <div className="absolute right-0 top-0 flex gap-2 z-20">
+                <button
+                    className="brutal-button px-3 py-1 text-xs disabled:opacity-50"
+                    onClick={onMergeSegmentRuns}
+                    disabled={isMergingSegmentRuns}
+                    title="Merge consecutive same-speaker lines (≤800ms gap, ≤30s max)"
+                >
+                    {isMergingSegmentRuns ? 'Merging…' : 'Merge segments'}
+                </button>
                 <button className="brutal-button px-3 py-1 text-xs" onClick={() => setParticipantsPanelOpen(true)}>
                     Participants
                 </button>

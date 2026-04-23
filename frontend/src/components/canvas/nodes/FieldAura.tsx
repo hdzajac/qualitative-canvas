@@ -48,9 +48,16 @@ export function FieldAura({ proximity, isHovered, fieldRadius, isFlashing, color
         config: { tension: 160, friction: 26 },
     });
 
-    // Animate the ring radius with spring physics for a satisfying expansion
+    // Animate the ring radius with spring physics for a satisfying expansion.
+    // Apply square-root dampening so the ring grows slower as more codes are added
+    // rather than expanding linearly with child distance.
+    const BASE_RADIUS = 180;
+    const visualRadius = fieldRadius <= BASE_RADIUS
+        ? fieldRadius
+        : BASE_RADIUS + Math.sqrt((fieldRadius - BASE_RADIUS) * BASE_RADIUS);
+
     const { animatedRadius } = useSpring({
-        animatedRadius: fieldRadius,
+        animatedRadius: visualRadius,
         config: { tension: 60, friction: 20 },
     });
 

@@ -190,7 +190,7 @@ function buildNodes(
 
         const data: CodeCardData = {
             highlight: h,
-            fileName: h.fileId ? fileById.get(h.fileId) : undefined,
+            fileName: (h.fileId ? fileById.get(h.fileId) : undefined) ?? h.fileName,
             onOpen: (id) => onOpen('code', id),
             parentThemes,
             onRemoveFromTheme: (themeId) => onRemoveFromTheme(h.id, themeId),
@@ -199,7 +199,7 @@ function buildNodes(
             id: nodeId,
             type: 'code',
             position: resolvedPos,
-            style: styleMap.get(nodeId) ?? { width: h.size?.w ?? DEFAULT_W, height: h.size?.h ?? DEFAULT_H },
+            style: { width: DEFAULT_W },
             data: { ...data, _relOffset: relOffset, _parentNodeId: parentNodeId } as unknown as Record<string, unknown>,
         });
     });
