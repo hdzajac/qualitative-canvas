@@ -5,7 +5,7 @@ export default function annotationsService(pool) {
   return {
     list: (filters) => listAnnotations(pool, filters),
     create: (data) => createAnnotation(pool, { id: uuidv4(), ...data }),
-    update: (id, patch) => updateAnnotation(pool, id, patch),
-    remove: (id) => deleteAnnotation(pool, id),
+    update: (id, userId, patch) => updateAnnotation(pool, id, userId, patch),
+    remove: (id, userId) => deleteAnnotation(pool, id, userId),
   };
 }

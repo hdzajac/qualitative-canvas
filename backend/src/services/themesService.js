@@ -5,7 +5,7 @@ export default function themesService(pool) {
   return {
     list: (filters) => listThemes(pool, filters),
     create: (data) => createTheme(pool, { id: uuidv4(), ...data }),
-    update: (id, patch) => updateTheme(pool, id, patch),
-    remove: (id) => deleteTheme(pool, id),
+    update: (id, userId, patch) => updateTheme(pool, id, userId, patch),
+    remove: (id, userId) => deleteTheme(pool, id, userId),
   };
 }

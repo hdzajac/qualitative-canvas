@@ -53,14 +53,14 @@ export default function themesRoutes(pool) {
     const { id } = req.params;
     const parsed = UpdateSchema.safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
-    const updated = await service.update(id, parsed.data);
+    const updated = await service.update(id, req.user.id, parsed.data);
     if (!updated) return res.status(404).json({ error: 'Not found' });
     res.json(updated);
   }));
 
   router.delete('/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const ok = await service.remove(id);
+    const ok = await service.remove(id, req.user.id);
     if (!ok) return res.status(404).json({ error: 'Not found' });
     res.status(204).send();
   }));

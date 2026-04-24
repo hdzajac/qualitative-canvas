@@ -32,17 +32,31 @@ export async function createTheme(pool, { id, name, codeIds, highlightIds, proje
   return mapTheme(r.rows[0]);
 }
 
-export async function updateTheme(pool, id, { name, codeIds, highlightIds, position, size, style }) {
+export async function updateTheme(pool, id, userId, { name, codeIds, highlightIds, position, size, style }) {
   const ids = Array.isArray(codeIds) ? codeIds : Array.isArray(highlightIds) ? highlightIds : null;
   const r = await pool.query(
-    `UPDATE themes SET name=COALESCE($2,name), code_ids=COALESCE($3,code_ids), position=COALESCE($4,position), size=COALESCE($5,size), style=COALESCE($6,style)
-     WHERE id=$1 RETURNING *`,
-    [id, name ?? null, ids, position ?? null, size ?? null, style ?? null]
+    `UPDATE themes
+      SET name=COALESCE($3,name), code_ids=COALESCE($4,code_ids), position=COALESCE($5,position),
+          size=COALESCE($6,size), style=COALESCE($7,style)
+     WHERE id=$1
+       AND EXISTS (
+         SELECT 1 FROM project_members WHERE project_id = themes.project_id AND user_id = $2
+       )
+     RETURNING *`,
+    [id, userId, name ?? null, ids, position ?? null, size ?? null, style ?? null]
   );
   return r.rows[0] ? mapTheme(r.rows[0]) : null;
 }
 
-export async function deleteTheme(pool, id) {
-  const r = await pool.query('DELETE FROM themes WHERE id=$1 RETURNING id', [id]);
+export async function deleteTheme(pool, id, userId) {
+  const r = await pool.query(
+    `DELETE FROM themes
+     WHERE id=$1
+       AND EXISTS (
+         SELECT 1 FROM project_members WHERE project_id = themes.project_id AND user_id = $2
+       )
+     RETURNING id`,
+    [id, userId]
+  );
   return Boolean(r.rows[0]);
 }

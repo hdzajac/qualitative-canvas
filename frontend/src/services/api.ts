@@ -47,6 +47,7 @@ const BASE_URL = `${API_BASE.replace(/\/$/, '')}/api`;
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
     ...init,
   });
@@ -62,6 +63,7 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 // Variant that returns null on 404 instead of throwing
 async function httpMaybe<T>(path: string, init?: RequestInit): Promise<T | null> {
   const res = await fetch(`${BASE_URL}${path}`, {
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
     ...init,
   });
@@ -240,3 +242,44 @@ export const mergeSpeakerRuns = (mediaId: string, opts: { gapThresholdMs?: numbe
 
 // Download VTT transcript for a media file
 export const getVttDownloadUrl = (mediaId: string, format: 'tagged' | 'plain' = 'tagged') => `${BASE_URL}/export/media/${mediaId}/transcript/vtt?format=${format}`;
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  displayName: string | null;
+  createdAt?: string;
+}
+
+export const authMe = (): Promise<AuthUser> => http<AuthUser>('/auth/me');
+export const authLogin = (email: string, password: string): Promise<AuthUser> =>
+  http<AuthUser>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+export const authSignup = (email: string, password: string, displayName?: string): Promise<AuthUser> =>
+  http<AuthUser>('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, displayName }) });
+export const authLogout = (): Promise<void> =>
+  http<void>('/auth/logout', { method: 'POST' });
+export const authUpdateProfile = (displayName: string): Promise<AuthUser> =>
+  http<AuthUser>('/auth/me', { method: 'PUT', body: JSON.stringify({ displayName }) });
+
+// ── Project members ───────────────────────────────────────────────────────────
+
+export interface ProjectMember {
+  id: string;
+  email: string;
+  displayName: string | null;
+  role: 'owner' | 'member';
+  addedAt: string;
+}
+
+export const getProjectMembers = (projectId: string): Promise<ProjectMember[]> =>
+  http<ProjectMember[]>(`/projects/${projectId}/members`);
+export const addProjectMember = (projectId: string, email: string, role: 'owner' | 'member' = 'member'): Promise<ProjectMember> =>
+  http<ProjectMember>(`/projects/${projectId}/members`, { method: 'POST', body: JSON.stringify({ email, role }) });
+export const updateProjectMember = (projectId: string, userId: string, role: 'owner' | 'member'): Promise<{ role: string }> =>
+  http<{ role: string }>(`/projects/${projectId}/members/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) });
+export const removeProjectMember = (projectId: string, userId: string): Promise<void> =>
+  http<void>(`/projects/${projectId}/members/${userId}`, { method: 'DELETE' });
+export const getProjectDetail = (projectId: string): Promise<Project & { role: string }> =>
+  http<Project & { role: string }>(`/projects/${projectId}`);
+

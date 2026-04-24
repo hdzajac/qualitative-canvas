@@ -27,16 +27,30 @@ export async function createAnnotation(pool, { id, content, position, projectId,
   return mapAnnotation(r.rows[0]);
 }
 
-export async function updateAnnotation(pool, id, { content, position, size, style }) {
+export async function updateAnnotation(pool, id, userId, { content, position, size, style }) {
   const r = await pool.query(
-    `UPDATE annotations SET content=COALESCE($2,content), position=COALESCE($3,position), size=COALESCE($4,size), style=COALESCE($5,style)
-     WHERE id=$1 RETURNING *`,
-    [id, content ?? null, position ?? null, size ?? null, style ?? null]
+    `UPDATE annotations
+      SET content=COALESCE($3,content), position=COALESCE($4,position),
+          size=COALESCE($5,size), style=COALESCE($6,style)
+     WHERE id=$1
+       AND EXISTS (
+         SELECT 1 FROM project_members WHERE project_id = annotations.project_id AND user_id = $2
+       )
+     RETURNING *`,
+    [id, userId, content ?? null, position ?? null, size ?? null, style ?? null]
   );
   return r.rows[0] ? mapAnnotation(r.rows[0]) : null;
 }
 
-export async function deleteAnnotation(pool, id) {
-  const r = await pool.query('DELETE FROM annotations WHERE id=$1 RETURNING id', [id]);
+export async function deleteAnnotation(pool, id, userId) {
+  const r = await pool.query(
+    `DELETE FROM annotations
+     WHERE id=$1
+       AND EXISTS (
+         SELECT 1 FROM project_members WHERE project_id = annotations.project_id AND user_id = $2
+       )
+     RETURNING id`,
+    [id, userId]
+  );
   return Boolean(r.rows[0]);
 }

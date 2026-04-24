@@ -5,7 +5,7 @@ export default function codesService(pool) {
   return {
     list: (filters) => listCodes(pool, filters),
     create: (data) => createCode(pool, { id: uuidv4(), ...data }),
-    update: (id, patch) => updateCode(pool, id, patch),
-    remove: (id) => deleteCode(pool, id),
+    update: (id, userId, patch) => updateCode(pool, id, userId, patch),
+    remove: (id, userId) => deleteCode(pool, id, userId),
   };
 }

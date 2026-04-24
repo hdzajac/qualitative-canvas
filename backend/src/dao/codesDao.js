@@ -72,17 +72,35 @@ export async function createCode(pool, { id, fileId, startOffset, endOffset, tex
   return mapCode(r.rows[0]);
 }
 
-export async function updateCode(pool, id, { startOffset, endOffset, text, codeName, position, size, style }) {
+export async function updateCode(pool, id, userId, { startOffset, endOffset, text, codeName, position, size, style }) {
   const r = await pool.query(
-    `UPDATE codes SET start_offset=COALESCE($2,start_offset), end_offset=COALESCE($3,end_offset),
-      text=COALESCE($4,text), code_name=COALESCE($5,code_name), position=COALESCE($6,position), size=COALESCE($7,size), style=COALESCE($8,style)
-     WHERE id=$1 RETURNING *`,
-    [id, startOffset, endOffset, text, codeName, position ?? null, size ?? null, style ?? null]
+    `UPDATE codes
+      SET start_offset=COALESCE($3,start_offset), end_offset=COALESCE($4,end_offset),
+          text=COALESCE($5,text), code_name=COALESCE($6,code_name), position=COALESCE($7,position),
+          size=COALESCE($8,size), style=COALESCE($9,style)
+     WHERE id=$1
+       AND EXISTS (
+         SELECT 1 FROM file_entries fe
+         JOIN project_members pm ON pm.project_id = fe.project_id
+         WHERE fe.id = codes.file_entry_id AND pm.user_id = $2
+       )
+     RETURNING *`,
+    [id, userId, startOffset, endOffset, text, codeName, position ?? null, size ?? null, style ?? null]
   );
   return r.rows[0] ? mapCode(r.rows[0]) : null;
 }
 
-export async function deleteCode(pool, id) {
-  const r = await pool.query('DELETE FROM codes WHERE id=$1 RETURNING id', [id]);
+export async function deleteCode(pool, id, userId) {
+  const r = await pool.query(
+    `DELETE FROM codes
+     WHERE id=$1
+       AND EXISTS (
+         SELECT 1 FROM file_entries fe
+         JOIN project_members pm ON pm.project_id = fe.project_id
+         WHERE fe.id = codes.file_entry_id AND pm.user_id = $2
+       )
+     RETURNING id`,
+    [id, userId]
+  );
   return Boolean(r.rows[0]);
 }

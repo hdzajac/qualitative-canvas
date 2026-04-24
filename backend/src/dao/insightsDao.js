@@ -32,16 +32,30 @@ export async function createInsight(pool, { id, name, themeIds, projectId, posit
   return mapInsight(r.rows[0]);
 }
 
-export async function updateInsight(pool, id, { name, themeIds, position, expanded, size, style }) {
+export async function updateInsight(pool, id, userId, { name, themeIds, position, expanded, size, style }) {
   const r = await pool.query(
-    `UPDATE insights SET name=COALESCE($2,name), theme_ids=COALESCE($3,theme_ids), position=COALESCE($4,position), expanded=COALESCE($5,expanded), size=COALESCE($6,size), style=COALESCE($7,style)
-     WHERE id=$1 RETURNING *`,
-    [id, name ?? null, Array.isArray(themeIds) ? themeIds : null, position ?? null, expanded ?? null, size ?? null, style ?? null]
+    `UPDATE insights
+      SET name=COALESCE($3,name), theme_ids=COALESCE($4,theme_ids), position=COALESCE($5,position),
+          expanded=COALESCE($6,expanded), size=COALESCE($7,size), style=COALESCE($8,style)
+     WHERE id=$1
+       AND EXISTS (
+         SELECT 1 FROM project_members WHERE project_id = insights.project_id AND user_id = $2
+       )
+     RETURNING *`,
+    [id, userId, name ?? null, Array.isArray(themeIds) ? themeIds : null, position ?? null, expanded ?? null, size ?? null, style ?? null]
   );
   return r.rows[0] ? mapInsight(r.rows[0]) : null;
 }
 
-export async function deleteInsight(pool, id) {
-  const r = await pool.query('DELETE FROM insights WHERE id=$1 RETURNING id', [id]);
+export async function deleteInsight(pool, id, userId) {
+  const r = await pool.query(
+    `DELETE FROM insights
+     WHERE id=$1
+       AND EXISTS (
+         SELECT 1 FROM project_members WHERE project_id = insights.project_id AND user_id = $2
+       )
+     RETURNING id`,
+    [id, userId]
+  );
   return Boolean(r.rows[0]);
 }
