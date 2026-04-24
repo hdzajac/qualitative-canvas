@@ -33,7 +33,7 @@ export default function LoginPage() {
     return (
         <div className="min-h-screen flex items-center justify-center bg-white px-4">
             <div className="w-full max-w-sm border-4 border-black p-8">
-                <h1 className="text-2xl font-extrabold uppercase tracking-wide mb-6">Sign In</h1>
+                <h1 className="text-2xl font-extrabold uppercase tracking-wide mb-6">Log In</h1>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-1">
                         <Label htmlFor="email">Email</Label>
@@ -69,7 +69,7 @@ export default function LoginPage() {
                         disabled={loading}
                         className="w-full border-2 border-black rounded-none uppercase tracking-wide bg-black text-white hover:bg-gray-900"
                     >
-                        {loading ? 'Signing in…' : 'Sign In'}
+                        {loading ? 'Logging in…' : 'Log In'}
                     </Button>
                 </form>
                 <p className="mt-6 text-sm text-center">

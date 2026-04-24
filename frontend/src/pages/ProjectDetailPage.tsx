@@ -4,16 +4,18 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     getProjectDetail, getProjectMembers, addProjectMember,
     updateProjectMember, removeProjectMember,
-    getHighlights, getThemes, getInsights, getFiles,
+    getHighlights, getThemes, getInsights, getFiles, listMedia,
     deleteProject,
     type ProjectMember,
 } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSelectedProject } from '@/hooks/useSelectedProject';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { FileText, Music } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function ProjectDetailPage() {
@@ -21,6 +23,7 @@ export default function ProjectDetailPage() {
     const navigate = useNavigate();
     const qc = useQueryClient();
     const { user } = useAuth();
+    const [, setSelectedProjectId] = useSelectedProject();
 
     const { data: project, isLoading: loadingProject } = useQuery({
         queryKey: ['project', projectId],
@@ -36,6 +39,7 @@ export default function ProjectDetailPage() {
     const { data: themes = [] } = useQuery({ queryKey: ['themes', projectId], queryFn: () => getThemes(projectId!), enabled: !!projectId });
     const { data: insights = [] } = useQuery({ queryKey: ['insights', projectId], queryFn: () => getInsights(projectId!), enabled: !!projectId });
     const { data: files = [] } = useQuery({ queryKey: ['files', projectId], queryFn: () => getFiles(projectId!), enabled: !!projectId });
+    const { data: mediaFiles = [] } = useQuery({ queryKey: ['media', projectId], queryFn: () => listMedia(projectId!), enabled: !!projectId });
 
     const isOwner = project?.role === 'owner';
 
@@ -104,7 +108,7 @@ export default function ProjectDetailPage() {
                 <h2 className="font-bold uppercase tracking-wide mb-3 text-sm border-b border-gray-200 pb-1">Overview</h2>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     {[
-                        { label: 'Documents', value: files.length },
+                        { label: 'Documents', value: files.length + mediaFiles.length },
                         { label: 'Codes', value: highlights.length },
                         { label: 'Themes', value: themes.length },
                         { label: 'Insights', value: insights.length },
@@ -115,6 +119,49 @@ export default function ProjectDetailPage() {
                         </div>
                     ))}
                 </div>
+            </section>
+
+            {/* Documents */}
+            <section>
+                <div className="flex items-center justify-between border-b border-gray-200 pb-1 mb-3">
+                    <h2 className="font-bold uppercase tracking-wide text-sm">Documents</h2>
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        className="border border-black rounded-none uppercase text-xs"
+                        onClick={() => {
+                            setSelectedProjectId(projectId!);
+                            navigate('/documents');
+                        }}
+                    >
+                        Open Documents →
+                    </Button>
+                </div>
+                {files.length === 0 && mediaFiles.length === 0 ? (
+                    <p className="text-sm text-muted-foreground italic">No documents yet.</p>
+                ) : (
+                    <ul className="divide-y divide-gray-100">
+                        {files.map(f => (
+                            <li key={f.id} className="flex items-center gap-2 py-2 text-sm">
+                                <FileText size={14} className="shrink-0 text-muted-foreground" />
+                                <span className="truncate">{f.filename}</span>
+                                <span className="ml-auto text-xs text-muted-foreground shrink-0">
+                                    {new Date(f.createdAt).toLocaleDateString()}
+                                </span>
+                            </li>
+                        ))}
+                        {mediaFiles.map(m => (
+                            <li key={m.id} className="flex items-center gap-2 py-2 text-sm">
+                                <Music size={14} className="shrink-0 text-muted-foreground" />
+                                <span className="truncate">{m.originalFilename}</span>
+                                <span className="ml-2 text-xs uppercase text-muted-foreground shrink-0">{m.status}</span>
+                                <span className="ml-auto text-xs text-muted-foreground shrink-0">
+                                    {new Date(m.createdAt).toLocaleDateString()}
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                )}
             </section>
 
             {/* Members */}

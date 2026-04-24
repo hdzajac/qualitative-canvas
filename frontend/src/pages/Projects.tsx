@@ -77,7 +77,7 @@ export default function Projects() {
 
   const onSelect = (p: Project) => {
     setSelectedProjectId(p.id);
-    navigate('/documents');
+    navigate(`/projects/${p.id}`);
   };
 
   const hasProjects = projects.length > 0;

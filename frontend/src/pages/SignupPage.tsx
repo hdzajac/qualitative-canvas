@@ -37,13 +37,13 @@ export default function SignupPage() {
                 <h1 className="text-2xl font-extrabold uppercase tracking-wide mb-6">Create Account</h1>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-1">
-                        <Label htmlFor="email">Email <span className="text-muted-foreground text-xs">(must be @ku.dk)</span></Label>
+                        <Label htmlFor="email">Email <span className="text-muted-foreground text-xs">(must end in ku.dk, e.g. @di.ku.dk)</span></Label>
                         <Input
                             id="email"
                             type="email"
                             value={email}
                             onChange={e => setEmail(e.target.value)}
-                            placeholder="you@ku.dk"
+                            placeholder="you@di.ku.dk"
                             autoComplete="email"
                             required
                         />
