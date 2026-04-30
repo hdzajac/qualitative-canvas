@@ -5,7 +5,7 @@ import multer from 'multer';
 import mediaServiceFactory from '../services/mediaService.js';
 import transcriptsServiceFactory from '../services/transcriptsService.js';
 
-const upload = multer({ dest: '/tmp' });
+const upload = multer({ dest: '/tmp', limits: { fileSize: 2 * 1024 * 1024 * 1024 } });
 
 export default function mediaRoutes(pool) {
   const router = Router();
@@ -78,7 +78,10 @@ export default function mediaRoutes(pool) {
     }
   }));
 
-  router.post('/', upload.single('file'), asyncHandler(async (req, res) => {
+  router.post('/', upload.single('file'), (err, req, res, next) => {
+    if (err?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'File too large. Maximum 2 GB allowed.' });
+    next(err);
+  }, asyncHandler(async (req, res) => {
     const schema = z.object({ projectId: z.string().uuid() });
     const parsed = schema.safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ error: parsed.error.message });

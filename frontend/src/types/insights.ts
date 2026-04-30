@@ -6,6 +6,7 @@ export interface Insight {
   themeIds: string[];
   projectId?: string;
   createdAt: string;
+  updatedAt?: string;
   position?: { x: number; y: number };
   expanded?: boolean;
   size?: Size;

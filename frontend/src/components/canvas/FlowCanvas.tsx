@@ -5,6 +5,8 @@ import {
     BackgroundVariant,
     Controls,
     useNodesState,
+    useViewport,
+    useReactFlow,
     type Node,
     type OnNodesChange,
     type OnNodeDrag,
@@ -14,6 +16,7 @@ import {
     applyNodeChanges,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { useCollaboration, type PeerInfo, type NodeLock } from '@/hooks/useCollaboration';
 
 import type { Highlight, Theme, Insight, Annotation, UploadedFile } from '@/types';
 import {
@@ -122,12 +125,47 @@ function buildNodes(
     onAnnotationDelete: (id: string) => void,
     onAnnotationColorChange: (id: string, color: string) => void,
     onRemoveFromTheme: (highlightId: string, themeId: string) => void,
+    onAnnotationResize: (id: string, w: number, h: number) => void,
+    /** Nodes currently being dragged by the local user — keep their live posMap position */
+    localDraggingIds: Set<string>,
+    /** Nodes locked by a remote peer — rendered with a ring and not interactable */
+    lockedBy: Map<string, NodeLock>,
+    currentUserId: string | undefined,
     prevNodes: Node[],
 ): Node[] {
     const fileById = new Map(files.map((f) => [f.id, f.filename ?? f.id]));
     const posMap = new Map(prevNodes.map((n) => [n.id, n.position]));
     const styleMap = new Map(prevNodes.map((n) => [n.id, n.style]));
     const selectedMap = new Map(prevNodes.map((n) => [n.id, n.selected ?? false]));
+
+    /** Returns extra node props when a remote peer holds the lock. */
+    function lockOverride(nodeId: string): Partial<Node> {
+        const lock = lockedBy.get(nodeId);
+        if (!lock || lock.userId === currentUserId) return {};
+        return {
+            draggable: false,
+            selectable: false,
+            style: { outline: `2px solid ${lock.color}`, outlineOffset: '2px' },
+            data: { lockedBy: lock } as Record<string, unknown>,
+        };
+    }
+
+    /**
+     * Resolve a node's position. Priority:
+     *  1. posMap — if the local user is actively dragging this node (smooth animation).
+     *  2. Server entity position — source of truth after any remote mutation/refetch.
+     *  3. posMap — preserves position when server has no stored value yet.
+     *  4. Layout default — first-render fallback.
+     */
+    function resolvePos(
+        nodeId: string,
+        serverPos: { x: number; y: number } | null | undefined,
+        layoutDefault: { x: number; y: number },
+    ): { x: number; y: number } {
+        if (localDraggingIds.has(nodeId)) return posMap.get(nodeId) ?? serverPos ?? layoutDefault;
+        if (serverPos) return serverPos;
+        return posMap.get(nodeId) ?? layoutDefault;
+    }
 
     // Build a reverse map: highlightId → [{ themeId, themeName, color }]
     const parentThemesMap = new Map<string, CodeCardParent[]>();
@@ -140,13 +178,13 @@ function buildNodes(
         });
     });
 
-    // Build a map of themeId → resolved position
+    // Build a map of themeId → resolved position (used to compute child offsets)
     const themePositionMap = new Map<string, { x: number; y: number }>();
     themes.forEach((t, idx) => {
         const nodeId = `theme:${t.id}`;
         themePositionMap.set(
             t.id,
-            posMap.get(nodeId) ?? { x: t.position?.x ?? 100 + (idx % 4) * 320, y: t.position?.y ?? 420 },
+            resolvePos(nodeId, t.position as { x: number; y: number } | null, { x: 100 + (idx % 4) * 320, y: 420 }),
         );
     });
 
@@ -157,14 +195,16 @@ function buildNodes(
         const parentThemes = parentThemesMap.get(h.id) ?? [];
 
         // Compute absolute position and relative offset from parent
-        let resolvedPos: { x: number; y: number };
         let relOffset: { dx: number; dy: number } = { dx: 0, dy: 0 };
         let parentNodeId: string | undefined;
+        let resolvedPos: { x: number; y: number };
 
-        if (posMap.has(nodeId)) {
+        if (localDraggingIds.has(nodeId) && posMap.has(nodeId)) {
             resolvedPos = posMap.get(nodeId)!;
         } else if (h.position) {
             resolvedPos = { x: h.position.x, y: h.position.y };
+        } else if (posMap.has(nodeId)) {
+            resolvedPos = posMap.get(nodeId)!;
         } else if (parentThemes.length > 0) {
             const firstParentId = parentThemes[0].themeId;
             const parentPos = themePositionMap.get(firstParentId)!;
@@ -180,7 +220,7 @@ function buildNodes(
             resolvedPos = { x: 100 + (idx % 5) * 260, y: 100 + Math.floor(idx / 5) * 180 };
         }
 
-        // Compute relative offset for group-drag (Phase 1)
+        // Compute relative offset for group-drag
         if (parentThemes.length > 0) {
             const firstParentId = parentThemes[0].themeId;
             parentNodeId = `theme:${firstParentId}`;
@@ -197,13 +237,15 @@ function buildNodes(
             parentThemes,
             onRemoveFromTheme: (themeId) => onRemoveFromTheme(h.id, themeId),
         };
+        const codeLock = lockOverride(nodeId);
         nodes.push({
             id: nodeId,
             type: 'code',
             selected: selectedMap.get(nodeId) ?? false,
             position: resolvedPos,
-            style: { width: DEFAULT_W },
-            data: { ...data, _relOffset: relOffset, _parentNodeId: parentNodeId } as unknown as Record<string, unknown>,
+            ...(codeLock.draggable !== undefined ? { draggable: codeLock.draggable, selectable: codeLock.selectable } : {}),
+            style: { width: DEFAULT_W, ...codeLock.style },
+            data: { ...data, _relOffset: relOffset, _parentNodeId: parentNodeId, ...codeLock.data } as unknown as Record<string, unknown>,
         });
     });
 
@@ -238,19 +280,26 @@ function buildNodes(
             onOpen: (id) => onOpen('theme', id),
             fieldRadius,
         };
+        const themeLock = lockOverride(nodeId);
+        const themeBaseStyle = styleMap.get(nodeId) ?? { width: t.size?.w ?? DEFAULT_W, height: t.size?.h ?? DEFAULT_H };
         nodes.push({
             id: nodeId,
             type: 'theme',
             selected: selectedMap.get(nodeId) ?? false,
             position: themePos,
-            style: styleMap.get(nodeId) ?? { width: t.size?.w ?? DEFAULT_W, height: t.size?.h ?? DEFAULT_H },
-            data: { ...data, _relOffset: relOffset, _parentNodeId: parentNodeId } as unknown as Record<string, unknown>,
+            ...(themeLock.draggable !== undefined ? { draggable: themeLock.draggable, selectable: themeLock.selectable } : {}),
+            style: { ...themeBaseStyle, ...themeLock.style },
+            data: { ...data, _relOffset: relOffset, _parentNodeId: parentNodeId, ...themeLock.data } as unknown as Record<string, unknown>,
         });
     });
 
     insights.forEach((i, idx) => {
         const nodeId = `insight:${i.id}`;
-        const insightPos = posMap.get(nodeId) ?? { x: i.position?.x ?? 100 + (idx % 3) * 380, y: i.position?.y ?? 760 };
+        const insightPos = resolvePos(
+            nodeId,
+            i.position as { x: number; y: number } | null,
+            { x: 100 + (idx % 3) * 380, y: 760 },
+        );
 
         // Compute child offsets for field radius
         const childOffsets = (i.themeIds ?? []).map((tId) => {
@@ -266,13 +315,16 @@ function buildNodes(
             onOpen: (id) => onOpen('insight', id),
             fieldRadius,
         };
+        const insightLock = lockOverride(nodeId);
+        const insightBaseStyle = styleMap.get(nodeId) ?? { width: i.size?.w ?? DEFAULT_W, height: i.size?.h ?? DEFAULT_H };
         nodes.push({
             id: nodeId,
             type: 'insight',
             selected: selectedMap.get(nodeId) ?? false,
             position: insightPos,
-            style: styleMap.get(nodeId) ?? { width: i.size?.w ?? DEFAULT_W, height: i.size?.h ?? DEFAULT_H },
-            data: data as unknown as Record<string, unknown>,
+            ...(insightLock.draggable !== undefined ? { draggable: insightLock.draggable, selectable: insightLock.selectable } : {}),
+            style: { ...insightBaseStyle, ...insightLock.style },
+            data: { ...data, ...insightLock.data } as unknown as Record<string, unknown>,
         });
     });
 
@@ -283,14 +335,18 @@ function buildNodes(
             onCommit: onAnnotationCommit,
             onDelete: onAnnotationDelete,
             onColorChange: onAnnotationColorChange,
+            onResize: onAnnotationResize,
         };
+        const annotationLock = lockOverride(nodeId);
+        const annotationBaseStyle = styleMap.get(nodeId) ?? { width: a.size?.w ?? DEFAULT_ANNOTATION_W, height: a.size?.h ?? DEFAULT_ANNOTATION_H };
         nodes.push({
             id: nodeId,
             type: 'annotation',
             selected: selectedMap.get(nodeId) ?? false,
-            position: posMap.get(nodeId) ?? { x: a.position?.x ?? 60 + (idx % 6) * 190, y: a.position?.y ?? 60 },
-            style: styleMap.get(nodeId) ?? { width: a.size?.w ?? DEFAULT_ANNOTATION_W, height: a.size?.h ?? DEFAULT_ANNOTATION_H },
-            data: data as unknown as Record<string, unknown>,
+            position: resolvePos(nodeId, a.position as { x: number; y: number } | null, { x: 60 + (idx % 6) * 190, y: 60 }),
+            ...(annotationLock.draggable !== undefined ? { draggable: annotationLock.draggable, selectable: annotationLock.selectable } : {}),
+            style: { ...annotationBaseStyle, ...annotationLock.style },
+            data: { ...data, ...annotationLock.data } as unknown as Record<string, unknown>,
         });
     });
 
@@ -379,6 +435,10 @@ interface FlowCanvasProps {
     onOpenEntity: (kind: string, id: string) => void;
     /** Called whenever the React Flow selection changes; receives the IDs of selected code nodes and theme nodes */
     onSelectionChange?: (selectedCodeIds: string[], selectedThemeIds: string[]) => void;
+    /** Current project ID — used to join the collab room. */
+    projectId?: string;
+    /** Current user ID — used to distinguish own locks from peer locks. */
+    userId?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -392,6 +452,8 @@ export function FlowCanvas({
     onUpdate,
     onOpenEntity,
     onSelectionChange,
+    projectId,
+    userId,
 }: FlowCanvasProps) {
     // Stable callbacks passed into node data — defined before node building
     const handleOpen = useCallback((kind: string, id: string) => {
@@ -419,6 +481,41 @@ export function FlowCanvas({
     // React Flow's OnNodeDrag third param is only the *dragged* nodes (multi-select subset),
     // so we cannot use it to look up arbitrary nodes like theme or insight cards.
     const nodesRef = useRef<Node[]>([]);
+
+    // Track which nodes the LOCAL user is actively dragging so buildNodes keeps their live position
+    // rather than overwriting with server data mid-drag.
+    const localDraggingIdsRef = useRef<Set<string>>(new Set());
+
+    // ─── Collaboration ────────────────────────────────────────────────────────
+    const containerRef = useRef<HTMLDivElement>(null);
+    const viewportRef = useRef({ x: 0, y: 0, zoom: 1 });
+
+    const onRemoteNodeMoves = useCallback(
+        (moves: Array<{ nodeId: string; position: { x: number; y: number } }>) => {
+            setNodes((nds) =>
+                nds.map((n) => {
+                    const move = moves.find((m) => m.nodeId === n.id);
+                    return move ? { ...n, position: move.position } : n;
+                })
+            );
+        },
+        [setNodes]
+    );
+
+    const { peers, lockedBy, emitCursorMove, emitDragStart, emitDragMove, emitDragEnd } =
+        useCollaboration({ projectId, userId, onRemoteNodeMoves });
+
+    const handleCanvasMouseMove = useCallback(
+        (e: React.MouseEvent<HTMLDivElement>) => {
+            if (!containerRef.current) return;
+            const rect = containerRef.current.getBoundingClientRect();
+            const { x: vpX, y: vpY, zoom } = viewportRef.current;
+            const worldX = (e.clientX - rect.left - vpX) / zoom;
+            const worldY = (e.clientY - rect.top - vpY) / zoom;
+            emitCursorMove(worldX, worldY);
+        },
+        [emitCursorMove]
+    );
 
     const handleAnnotationCommit = useCallback(
         async (id: string, text: string) => {
@@ -488,13 +585,31 @@ export function FlowCanvas({
         [themes, insights, setNodes, onUpdate]
     );
 
+    const handleAnnotationResize = useCallback(
+        async (id: string, w: number, h: number) => {
+            try {
+                await persistSize('annotation', id, { w, h });
+                setNodes((nds) =>
+                    nds.map((n) =>
+                        n.id === `annotation:${id}`
+                            ? { ...n, style: { ...n.style, width: w, height: h } }
+                            : n
+                    )
+                );
+            } catch {
+                toast.error('Failed to save size');
+            }
+        },
+        [setNodes]
+    );
+
     useEffect(() => {
         setNodes((prev) => {
-            const next = buildNodes(highlights, themes, insights, annotations, files, handleOpen, handleAnnotationCommit, handleAnnotationDelete, handleAnnotationColorChange, handleRemoveFromTheme, prev);
+            const next = buildNodes(highlights, themes, insights, annotations, files, handleOpen, handleAnnotationCommit, handleAnnotationDelete, handleAnnotationColorChange, handleRemoveFromTheme, handleAnnotationResize, localDraggingIdsRef.current, lockedBy, userId, prev);
             nodesRef.current = next;
             return next;
         });
-    }, [highlights, themes, insights, annotations, files, handleOpen, handleAnnotationCommit, handleAnnotationDelete, handleAnnotationColorChange, handleRemoveFromTheme, setNodes]);
+    }, [highlights, themes, insights, annotations, files, handleOpen, handleAnnotationCommit, handleAnnotationDelete, handleAnnotationColorChange, handleRemoveFromTheme, handleAnnotationResize, lockedBy, userId, setNodes]);
 
     // Debounce timer ref for position persistence
     const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -521,13 +636,15 @@ export function FlowCanvas({
                 return updated;
             });
 
-            // Persist position/size after drag ends or resize ends
+            // Persist position after drag ends.
+            // NOTE: do NOT handle 'dimensions' changes here — ReactFlow fires those on
+            // every render when it measures nodes. Annotation resize is persisted via
+            // onResizeEnd on the NodeResizer inside AnnotationNode instead.
             const positionCommits = changes.filter(
                 (c) => c.type === 'position' && !c.dragging
             );
-            const resizeCommits = changes.filter((c) => c.type === 'dimensions');
 
-            if (positionCommits.length === 0 && resizeCommits.length === 0) return;
+            if (positionCommits.length === 0) return;
 
             if (persistTimer.current) clearTimeout(persistTimer.current);
             persistTimer.current = setTimeout(() => {
@@ -541,16 +658,6 @@ export function FlowCanvas({
                         const id = node.id.slice(colonIdx + 1);
                         const pos = { x: node.position.x, y: node.position.y };
                         persistPosition(kind, id, pos).catch(() => toast.error('Failed to save position'));
-                    });
-                    resizeCommits.forEach((change) => {
-                        if (change.type !== 'dimensions') return;
-                        const node = nds.find((n) => n.id === change.id);
-                        if (!node || !node.measured) return;
-                        const colonIdx = node.id.indexOf(':');
-                        const kind = node.id.slice(0, colonIdx);
-                        const id = node.id.slice(colonIdx + 1);
-                        const size = { w: node.measured.width ?? DEFAULT_W, h: node.measured.height ?? DEFAULT_H };
-                        persistSize(kind, id, size).catch(() => toast.error('Failed to save size'));
                     });
                     return nds;
                 });
@@ -573,6 +680,11 @@ export function FlowCanvas({
             const colonIdx = draggedNode.id.indexOf(':');
             const draggedKind = draggedNode.id.slice(0, colonIdx);
             const draggedEntityId = draggedNode.id.slice(colonIdx + 1);
+
+            // Mark this node (and any children) as locally dragging so buildNodes
+            // preserves their live positions during any concurrent SSE refetch.
+            localDraggingIdsRef.current.add(draggedNode.id);
+            emitDragStart([draggedNode.id]);
 
             if (draggedKind !== 'theme' && draggedKind !== 'insight') {
                 groupDragRef.current = null;
@@ -622,6 +734,10 @@ export function FlowCanvas({
                 childRelOffsets,
             };
 
+            // Also mark all children as locally dragging and acquire their locks
+            childNodeIds.forEach((id) => localDraggingIdsRef.current.add(id));
+            emitDragStart(childNodeIds);
+
             // Light up the parent's own aura to signal the group is in motion
             setNodes((nds) =>
                 nds.map((n) =>
@@ -629,7 +745,7 @@ export function FlowCanvas({
                 )
             );
         },
-        [themes, insights, setNodes]
+        [themes, insights, setNodes, emitDragStart]
     );
 
     const onNodeDrag: OnNodeDrag = useCallback(
@@ -658,6 +774,16 @@ export function FlowCanvas({
                 });
                 setNodes((nds) => applyNodeChanges(childChanges, nds));
 
+                // Relay group live positions to peers
+                const groupMoves = [
+                    { nodeId: draggedNode.id, position: draggedNode.position },
+                    ...childNodeIds.map((id) => {
+                        const rel = childRelOffsets.get(id) ?? { dx: 0, dy: 0 };
+                        return { nodeId: id, position: { x: draggedNode.position.x + rel.dx, y: draggedNode.position.y + rel.dy } };
+                    }),
+                ];
+                emitDragMove(groupMoves);
+
                 // Animate proximity on nearby insight targets
                 if (draggedKind === 'theme') {
                     setNodes((nds) =>
@@ -681,6 +807,9 @@ export function FlowCanvas({
                 }
                 return;
             }
+
+            // Relay individual node live position to peers
+            emitDragMove([{ nodeId: draggedNode.id, position: draggedNode.position }]);
 
             // ── Proximity engine for non-group drags ──────────────────────────────
             if (draggedKind !== 'code' && draggedKind !== 'theme') return;
@@ -706,7 +835,7 @@ export function FlowCanvas({
                 })
             );
         },
-        [setNodes]
+        [setNodes, emitDragMove]
     );
 
     /**
@@ -724,6 +853,20 @@ export function FlowCanvas({
             const draggedKind = draggedNode.id.slice(0, colonIdx);
             const draggedEntityId = draggedNode.id.slice(colonIdx + 1);
 
+            // Release the local-dragging lock after the persist debounce (500ms) has fired,
+            // so the next buildNodes re-run trusts server data.
+            setTimeout(() => localDraggingIdsRef.current.delete(draggedNode.id), 600);
+            if (groupDragRef.current?.parentId === draggedNode.id) {
+                const childIds = groupDragRef.current.childNodeIds;
+                childIds.forEach((id) =>
+                    setTimeout(() => localDraggingIdsRef.current.delete(id), 600)
+                );
+                // Release peer locks for the whole group
+                emitDragEnd([draggedNode.id, ...childIds]);
+            } else {
+                emitDragEnd([draggedNode.id]);
+            }
+
             // ── Group drag completion ────────────────────────────────────────────────
             if (groupDragRef.current?.parentId === draggedNode.id) {
                 const { childNodeIds } = groupDragRef.current;
@@ -734,6 +877,7 @@ export function FlowCanvas({
                         .catch(() => toast.error('Failed to save position'));
                 });
                 groupDragRef.current = null;
+                // emitDragEnd for the group was already called above
                 // Clear the proximity boost injected at drag start
                 setNodes((nds) =>
                     nds.map((n) => {
@@ -998,11 +1142,11 @@ export function FlowCanvas({
                 onUpdate(); // re-sync state
             }
         },
-        [onUpdate]
+        [onUpdate, emitDragEnd]
     );
 
     return (
-        <div className="w-full h-full">
+        <div ref={containerRef} className="w-full h-full" onMouseMove={handleCanvasMouseMove}>
             <ReactFlow
                 nodes={nodes}
                 edges={[]}
@@ -1024,7 +1168,58 @@ export function FlowCanvas({
             >
                 <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#e5e7eb" />
                 <Controls showInteractive={false} />
+                {/* Collab: keep viewportRef in sync + render peer cursors */}
+                <ViewportTracker viewportRef={viewportRef} />
+                <PeerCursors peers={peers} />
             </ReactFlow>
+        </div>
+    );
+}
+
+// ─── Collaboration inner components (must be inside ReactFlow to use its context) ─
+
+function ViewportTracker({
+    viewportRef,
+}: {
+    viewportRef: React.MutableRefObject<{ x: number; y: number; zoom: number }>;
+}) {
+    const vp = useViewport();
+    viewportRef.current = vp;
+    return null;
+}
+
+function PeerCursors({ peers }: { peers: Map<string, PeerInfo> }) {
+    const { x: vpX, y: vpY, zoom } = useViewport();
+    return (
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            {Array.from(peers.values()).map((peer) => {
+                if (!peer.cursor) return null;
+                const sx = peer.cursor.x * zoom + vpX;
+                const sy = peer.cursor.y * zoom + vpY;
+                return (
+                    <div
+                        key={peer.userId}
+                        className="absolute flex items-start gap-0.5 pointer-events-none"
+                        style={{ left: sx, top: sy, zIndex: 9999 }}
+                    >
+                        <svg
+                            width="14"
+                            height="18"
+                            viewBox="0 0 14 18"
+                            fill={peer.color}
+                            style={{ filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.35))' }}
+                        >
+                            <path d="M0 0 L0 14 L3.5 10.5 L6 16 L8 15 L5.5 9.5 L10.5 9.5 Z" />
+                        </svg>
+                        <span
+                            className="text-white text-[9px] font-medium leading-none px-1 py-0.5 rounded-sm whitespace-nowrap"
+                            style={{ backgroundColor: peer.color, marginTop: '2px' }}
+                        >
+                            {peer.displayName}
+                        </span>
+                    </div>
+                );
+            })}
         </div>
     );
 }

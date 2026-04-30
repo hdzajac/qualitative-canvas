@@ -16,10 +16,11 @@ export interface AnnotationNodeData {
     onCommit: (id: string, text: string) => void;
     onDelete: (id: string) => void;
     onColorChange: (id: string, color: string) => void;
+    onResize: (id: string, w: number, h: number) => void;
 }
 
 function AnnotationNode({ data, selected }: NodeProps) {
-    const { annotation, onCommit, onDelete, onColorChange } = data as unknown as AnnotationNodeData;
+    const { annotation, onCommit, onDelete, onColorChange, onResize } = data as unknown as AnnotationNodeData;
     const [draft, setDraft] = useState(annotation.content ?? '');
     const [editing, setEditing] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -44,6 +45,12 @@ function AnnotationNode({ data, selected }: NodeProps) {
 
     return (
         <div className="w-full h-full relative">
+            <NodeResizer
+                isVisible={selected}
+                minWidth={100}
+                minHeight={60}
+                onResizeEnd={(_event, params) => onResize(annotation.id, params.width, params.height)}
+            />
             {/* Toolbar is now inside node bounds, not absolute -top-8 */}
             {selected && (
                 <div

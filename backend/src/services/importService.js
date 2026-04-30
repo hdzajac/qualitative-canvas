@@ -173,8 +173,9 @@ export default function importService(pool) {
       return oldIds.map(oldId => getNewId(oldId)).filter(id => id);
     };
 
+    const client = await pool.connect();
     try {
-      await pool.query('BEGIN');
+      await client.query('BEGIN');
 
       // 1. Import project
       const projectRows = parseCSV(csvFiles.project);
@@ -191,7 +192,7 @@ export default function importService(pool) {
       const baseNameMatch = projectName.match(/^(.+?)\s*\((\d+)\)$/);
       const baseName = baseNameMatch ? baseNameMatch[1] : projectName;
       
-      const existingResult = await pool.query(
+      const existingResult = await client.query(
         'SELECT name FROM projects WHERE name = $1 OR name ~ $2 ORDER BY name',
         [baseName, `^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(\\d+\\)$`]
       );
@@ -210,7 +211,7 @@ export default function importService(pool) {
         projectName = `${baseName} (${maxNumber + 1})`;
       }
 
-      await pool.query(
+      await client.query(
         'INSERT INTO projects (id, name, description, created_at, imported_at) VALUES ($1, $2, $3, COALESCE($4::timestamptz, now()), now())',
         [newProjectId, projectName, projectRow.description || null, projectRow.created_at || null]
       );
@@ -225,7 +226,7 @@ export default function importService(pool) {
         }
 
         const newFileId = getNewId(row.id);
-        await pool.query(
+        await client.query(
           'INSERT INTO files (id, project_id, filename, content, created_at) VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, now()))',
           [newFileId, newProjectId, row.filename.trim(), row.content || '', row.created_at || null]
         );
@@ -235,9 +236,10 @@ export default function importService(pool) {
       const mediaRows = parseCSV(csvFiles.media || '');
       for (const row of mediaRows) {
         const newMediaId = getNewId(row.id);
-        await pool.query(
+        await client.query(
           `INSERT INTO media_files (id, project_id, original_filename, mime_type, size_bytes, status, duration_sec, storage_path, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::timestamptz, now()))`,
+
           [
             newMediaId,
             newProjectId,
@@ -259,7 +261,7 @@ export default function importService(pool) {
         const newMediaId = getNewId(row.media_file_id);
         
         if (newMediaId) {
-          await pool.query(
+          await client.query(
             'INSERT INTO participants (id, media_file_id, name, color) VALUES ($1, $2, $3, $4)',
             [newParticipantId, newMediaId, row.name, row.color]
           );
@@ -274,9 +276,10 @@ export default function importService(pool) {
         const newParticipantId = getNewId(row.participant_id);
         
         if (newMediaId) {
-          await pool.query(
+          await client.query(
             `INSERT INTO transcript_segments (id, media_file_id, participant_id, idx, start_ms, end_ms, text, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, now()))`,
+
             [
               newSegmentId,
               newMediaId,
@@ -298,7 +301,7 @@ export default function importService(pool) {
         // Use same ID for file_entry as file (per migration 008 pattern)
         const newEntryId = newFileId;
         
-        await pool.query(
+        await client.query(
           'INSERT INTO file_entries (id, project_id, document_file_id, name, type, created_at) VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, now()))',
           [newEntryId, newProjectId, newFileId, row.filename, 'document', row.created_at || null]
         );
@@ -314,7 +317,7 @@ export default function importService(pool) {
         const newMediaId = getNewId(row.id);
         const newEntryId = uuidv4();
         
-        await pool.query(
+        await client.query(
           'INSERT INTO file_entries (id, project_id, media_file_id, name, type, created_at) VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, now()))',
           [newEntryId, newProjectId, newMediaId, row.original_filename, 'transcript', row.created_at || null]
         );
@@ -335,9 +338,10 @@ export default function importService(pool) {
           const position = reconstructPosition(row);
           const size = reconstructSize(row);
           
-          await pool.query(
+          await client.query(
             `INSERT INTO codes (id, file_entry_id, code_name, text, start_offset, end_offset, position, size, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::timestamptz, now()))`,
+
             [
               newCodeId,
               newFileEntryId,
@@ -361,9 +365,10 @@ export default function importService(pool) {
         const newCodeIds = mapIdArray(oldCodeIds);
         const position = reconstructPosition(row);
         
-        await pool.query(
+        await client.query(
           `INSERT INTO themes (id, project_id, name, code_ids, position, created_at)
            VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, now()))`,
+
           [
             newThemeId,
             newProjectId,
@@ -383,9 +388,10 @@ export default function importService(pool) {
         const newThemeIds = mapIdArray(oldThemeIds);
         const position = reconstructPosition(row);
         
-        await pool.query(
+        await client.query(
           `INSERT INTO insights (id, project_id, name, theme_ids, position, expanded, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamptz, now()))`,
+
           [
             newInsightId,
             newProjectId,
@@ -404,13 +410,13 @@ export default function importService(pool) {
         const newAnnotationId = getNewId(row.id);
         const position = reconstructPosition(row);
         
-        await pool.query(
+        await client.query(
           'INSERT INTO annotations (id, project_id, content, position, created_at) VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, now()))',
           [newAnnotationId, newProjectId, row.content, position, row.created_at || null]
         );
       }
 
-      await pool.query('COMMIT');
+      await client.query('COMMIT');
 
       return {
         success: true,
@@ -428,8 +434,10 @@ export default function importService(pool) {
       };
 
     } catch (error) {
-      await pool.query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw error;
+    } finally {
+      client.release();
     }
   }
 

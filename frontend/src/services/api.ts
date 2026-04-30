@@ -45,6 +45,14 @@ const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && impor
 
 const BASE_URL = `${API_BASE.replace(/\/$/, '')}/api`;
 
+/** Error thrown by the http helper, carrying the HTTP status code. */
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     credentials: 'include',
@@ -53,7 +61,7 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const msg = await res.text().catch(() => res.statusText);
-    throw new Error(msg || `HTTP ${res.status}`);
+    throw new ApiError(res.status, msg || `HTTP ${res.status}`);
   }
   // 204 No Content
   if (res.status === 204) return undefined as unknown as T;
@@ -104,7 +112,7 @@ export const getHighlights = (params?: { fileId?: string; projectId?: string }):
   return http<Highlight[]>(`/codes${qs}`);
 };
 
-export const updateHighlight = (id: string, updates: Partial<Highlight>): Promise<Highlight> =>
+export const updateHighlight = (id: string, updates: Partial<Highlight> & { ifUnmodifiedSince?: string }): Promise<Highlight> =>
   http<Highlight>(`/codes/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
 export const deleteHighlight = (id: string): Promise<void> =>
@@ -117,7 +125,7 @@ export const createTheme = (theme: Omit<Theme, 'id' | 'createdAt'>): Promise<The
 export const getThemes = (projectId?: string): Promise<Theme[]> =>
   http<Theme[]>(projectId ? `/themes?projectId=${encodeURIComponent(projectId)}` : '/themes');
 
-export const updateTheme = (id: string, updates: Partial<Theme>): Promise<Theme> =>
+export const updateTheme = (id: string, updates: Partial<Theme> & { ifUnmodifiedSince?: string }): Promise<Theme> =>
   http<Theme>(`/themes/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
 export const deleteTheme = (id: string): Promise<void> =>
@@ -130,7 +138,7 @@ export const createInsight = (insight: Omit<Insight, 'id' | 'createdAt'>): Promi
 export const getInsights = (projectId?: string): Promise<Insight[]> =>
   http<Insight[]>(projectId ? `/insights?projectId=${encodeURIComponent(projectId)}` : '/insights');
 
-export const updateInsight = (id: string, updates: Partial<Insight>): Promise<Insight> =>
+export const updateInsight = (id: string, updates: Partial<Insight> & { ifUnmodifiedSince?: string }): Promise<Insight> =>
   http<Insight>(`/insights/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
 export const deleteInsight = (id: string): Promise<void> =>
@@ -143,7 +151,7 @@ export const createAnnotation = (annotation: Omit<Annotation, 'id' | 'createdAt'
 export const getAnnotations = (projectId?: string): Promise<Annotation[]> =>
   http<Annotation[]>(projectId ? `/annotations?projectId=${encodeURIComponent(projectId)}` : '/annotations');
 
-export const updateAnnotation = (id: string, updates: Partial<Annotation>): Promise<Annotation> =>
+export const updateAnnotation = (id: string, updates: Partial<Annotation> & { ifUnmodifiedSince?: string }): Promise<Annotation> =>
   http<Annotation>(`/annotations/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
 
 export const deleteAnnotation = (id: string): Promise<void> =>

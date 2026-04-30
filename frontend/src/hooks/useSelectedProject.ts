@@ -1,4 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+
+// Maps SSE entityType values to the TanStack Query cache keys used in CanvasPage
+const ENTITY_QUERY_KEY: Record<string, string> = {
+  codes: 'highlights',
+  themes: 'themes',
+  insights: 'insights',
+  annotations: 'annotations',
+};
 
 const KEY = 'selectedProjectId';
 const EVENT = 'selected-project-changed' as const;
@@ -36,4 +45,35 @@ export function useSelectedProject(): [string | undefined, (id: string | undefin
   }, []);
 
   return [id, set];
+}
+
+/**
+ * Opens a single SSE connection to /api/projects/:projectId/events.
+ * On each entity-changed event, invalidates the matching TanStack Query cache entry.
+ *
+ * This replaces all refetchInterval polling on CanvasPage — the server pushes a
+ * tiny signal after every mutation and the client re-fetches only that entity type.
+ * EventSource reconnects automatically on network blips; no manual retry needed.
+ */
+export function useProjectEvents(projectId: string | null | undefined): void {
+  const qc = useQueryClient();
+
+  useEffect(() => {
+    if (!projectId) return;
+
+    const es = new EventSource(`/api/projects/${projectId}/events`, { withCredentials: true });
+
+    es.addEventListener('entity-changed', (e: MessageEvent) => {
+      try {
+        const { entityType } = JSON.parse(e.data) as { entityType: string };
+        const queryKey = ENTITY_QUERY_KEY[entityType] ?? entityType;
+        qc.invalidateQueries({ queryKey: [queryKey, projectId] });
+      } catch {
+        // malformed event — ignore
+      }
+    });
+
+    // onerror: EventSource auto-reconnects with exponential backoff — no action needed
+    return () => es.close();
+  }, [projectId, qc]);
 }

@@ -1,7 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { listSegmentsForMedia } from './segmentsDao.js';
-import { getMedia } from './mediaDao.js';
-import { createFile } from './filesDao.js';
+import { mapSegment } from './segmentsDao.js';
 
 function mapFinalized(r) {
   if (!r) return null;
@@ -51,54 +49,84 @@ export async function getFinalized(pool, mediaFileId) {
 }
 
 export async function finalizeTranscript(pool, mediaFileId) {
-  // Check media exists
-  const media = await getMedia(pool, mediaFileId);
-  if (!media) throw new Error('Media not found');
-  // Idempotent finalize - check if already done
-  const existing = await getFinalized(pool, mediaFileId);
-  if (existing && existing.fileId) return existing; // return existing mapping
-  
-  // Gather segments
-  const segments = await listSegmentsForMedia(pool, mediaFileId);
-  const originalCount = segments.length;
-  // Build transcript content
-  const lines = [];
-  function fmt(ms) {
-    const totalSec = Math.floor(ms / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    const mm = String(m).padStart(2,'0');
-    const hh = String(h).padStart(2,'0'); // ensure 00:MM:SS format
-    const ss = String(s).padStart(2,'0');
-    return `${hh}:${mm}:${ss}`;
-  }
-  for (const seg of segments) {
-    lines.push(`[${fmt(seg.startMs)} - ${fmt(seg.endMs)}] ${seg.text}`);
-  }
-  const content = lines.join('\n');
-  const fileId = uuidv4();
-  const filename = (media.originalFilename || 'transcript') + '.transcript.txt';
-  const file = await createFile(pool, { id: fileId, filename, content, projectId: media.projectId });
-  
-  // Check if a file_entry already exists for this media (finalized state)
-  const existingEntry = await pool.query(
-    'SELECT id FROM file_entries WHERE media_file_id = $1 AND type = $2',
-    [mediaFileId, 'transcript']
-  );
-  
-  if (existingEntry.rows.length === 0) {
-    // Create file_entry for the transcript (references media only, not the document file)
-    await pool.query(
-      'INSERT INTO file_entries (id, project_id, media_file_id, name, type) VALUES ($1, $2, $3, $4, $5)',
-      [uuidv4(), media.projectId, mediaFileId, filename, 'transcript']
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Lock the media row to serialise concurrent finalisation calls for the same media file.
+    const mediaLock = await client.query(
+      'SELECT id, project_id, original_filename, status FROM media_files WHERE id = $1 FOR UPDATE',
+      [mediaFileId]
     );
+    if (!mediaLock.rows[0]) {
+      await client.query('ROLLBACK');
+      throw new Error('Media not found');
+    }
+    const mediaRow = mediaLock.rows[0];
+
+    // Idempotent: if a file_entry already exists for this media, return it immediately.
+    const existingEntry = await client.query(
+      'SELECT id FROM file_entries WHERE media_file_id = $1 AND type = $2',
+      [mediaFileId, 'transcript']
+    );
+    if (existingEntry.rows.length > 0) {
+      await client.query('COMMIT');
+      // Delegate to the read-only getFinalized path (uses pool, outside the released client).
+      return getFinalized(pool, mediaFileId);
+    }
+
+    // Gather segments (read inside the lock so the count is consistent).
+    const segsResult = await client.query(
+      `SELECT ts.*, p.name AS participant_name
+       FROM transcript_segments ts
+       LEFT JOIN participants p ON p.id = ts.participant_id
+       WHERE ts.media_file_id = $1
+       ORDER BY ts.idx ASC`,
+      [mediaFileId]
+    );
+    const segments = segsResult.rows.map(mapSegment);
+    const originalCount = segments.length;
+
+    // Build transcript text content.
+    function fmt(ms) {
+      const totalSec = Math.floor(ms / 1000);
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+    const lines = segments.map(seg => `[${fmt(seg.startMs)} - ${fmt(seg.endMs)}] ${seg.text}`);
+    const content = lines.join('\n');
+
+    const fileId = uuidv4();
+    const filename = (mediaRow.original_filename || 'transcript') + '.transcript.txt';
+
+    // Insert the document file and the file_entry inside the same transaction.
+    await client.query(
+      'INSERT INTO files (id, project_id, filename, content) VALUES ($1, $2, $3, $4)',
+      [fileId, mediaRow.project_id, filename, content]
+    );
+
+    // ON CONFLICT requires the unique partial index added in migration 013.
+    await client.query(
+      `INSERT INTO file_entries (id, project_id, media_file_id, name, type)
+       VALUES ($1, $2, $3, $4, 'transcript')
+       ON CONFLICT (media_file_id) WHERE media_file_id IS NOT NULL DO NOTHING`,
+      [uuidv4(), mediaRow.project_id, mediaFileId, filename]
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      mediaFileId,
+      fileId,
+      finalizedAt: new Date().toISOString(),
+      originalSegmentCount: originalCount,
+    };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
   }
-  
-  return {
-    mediaFileId: mediaFileId,
-    fileId: fileId,
-    finalizedAt: new Date().toISOString(),
-    originalSegmentCount: originalCount
-  };
 }

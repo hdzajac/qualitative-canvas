@@ -5,6 +5,7 @@ export function mapCode(r) {
     id: r.id,
     fileId: r.file_entry_id || r.file_id, // Support both for backwards compatibility
     fileName: r.file_name || undefined, // Include the file/transcript name
+    projectId: r.project_id || undefined,
     startOffset: r.start_offset,
     endOffset: r.end_offset,
     text: r.text,
@@ -13,6 +14,7 @@ export function mapCode(r) {
     size: r.size || undefined,
     style: r.style || undefined,
     createdAt: r.created_at?.toISOString?.() ?? r.created_at,
+    updatedAt: r.updated_at?.toISOString?.() ?? r.updated_at ?? undefined,
   };
 }
 
@@ -66,26 +68,30 @@ export async function createCode(pool, { id, fileId, startOffset, endOffset, tex
   
   const r = await pool.query(
     `INSERT INTO codes (id, file_entry_id, file_id, start_offset, end_offset, text, code_name, position, size, style)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     RETURNING *, (SELECT project_id FROM file_entries WHERE id = $2) AS project_id`,
     [id, fileEntry.id, documentFileId, startOffset, endOffset, text, codeName, position ?? null, size ?? null, style ?? null]
   );
   return mapCode(r.rows[0]);
 }
 
-export async function updateCode(pool, id, userId, { startOffset, endOffset, text, codeName, position, size, style }) {
+export async function updateCode(pool, id, userId, { startOffset, endOffset, text, codeName, position, size, style, ifUnmodifiedSince }) {
   const r = await pool.query(
     `UPDATE codes
       SET start_offset=COALESCE($3,start_offset), end_offset=COALESCE($4,end_offset),
           text=COALESCE($5,text), code_name=COALESCE($6,code_name), position=COALESCE($7,position),
-          size=COALESCE($8,size), style=COALESCE($9,style)
+          size=COALESCE($8,size), style=COALESCE($9,style),
+          updated_at=now()
      WHERE id=$1
+       AND ($10::timestamptz IS NULL OR updated_at = $10)
        AND EXISTS (
          SELECT 1 FROM file_entries fe
          JOIN project_members pm ON pm.project_id = fe.project_id
          WHERE fe.id = codes.file_entry_id AND pm.user_id = $2
        )
-     RETURNING *`,
-    [id, userId, startOffset, endOffset, text, codeName, position ?? null, size ?? null, style ?? null]
+     RETURNING *, (SELECT project_id FROM file_entries WHERE id = codes.file_entry_id) AS project_id`,
+    [id, userId, startOffset, endOffset, text, codeName, position ?? null, size ?? null, style ?? null,
+     ifUnmodifiedSince ?? null]
   );
   return r.rows[0] ? mapCode(r.rows[0]) : null;
 }
@@ -99,8 +105,8 @@ export async function deleteCode(pool, id, userId) {
          JOIN project_members pm ON pm.project_id = fe.project_id
          WHERE fe.id = codes.file_entry_id AND pm.user_id = $2
        )
-     RETURNING id`,
+     RETURNING (SELECT project_id FROM file_entries WHERE id = codes.file_entry_id) AS project_id`,
     [id, userId]
   );
-  return Boolean(r.rows[0]);
+  return r.rows[0]?.project_id ?? null;
 }

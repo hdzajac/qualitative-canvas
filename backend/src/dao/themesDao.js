@@ -8,6 +8,7 @@ export function mapTheme(r) {
     size: r.size || undefined,
     style: r.style || undefined,
     createdAt: r.created_at?.toISOString?.() ?? r.created_at,
+    updatedAt: r.updated_at?.toISOString?.() ?? r.updated_at ?? undefined,
   };
 }
 
@@ -32,18 +33,21 @@ export async function createTheme(pool, { id, name, codeIds, highlightIds, proje
   return mapTheme(r.rows[0]);
 }
 
-export async function updateTheme(pool, id, userId, { name, codeIds, highlightIds, position, size, style }) {
+export async function updateTheme(pool, id, userId, { name, codeIds, highlightIds, position, size, style, ifUnmodifiedSince }) {
   const ids = Array.isArray(codeIds) ? codeIds : Array.isArray(highlightIds) ? highlightIds : null;
   const r = await pool.query(
     `UPDATE themes
       SET name=COALESCE($3,name), code_ids=COALESCE($4,code_ids), position=COALESCE($5,position),
-          size=COALESCE($6,size), style=COALESCE($7,style)
+          size=COALESCE($6,size), style=COALESCE($7,style),
+          updated_at=now()
      WHERE id=$1
+       AND ($8::timestamptz IS NULL OR updated_at = $8)
        AND EXISTS (
          SELECT 1 FROM project_members WHERE project_id = themes.project_id AND user_id = $2
        )
      RETURNING *`,
-    [id, userId, name ?? null, ids, position ?? null, size ?? null, style ?? null]
+    [id, userId, name ?? null, ids, position ?? null, size ?? null, style ?? null,
+     ifUnmodifiedSince ?? null]
   );
   return r.rows[0] ? mapTheme(r.rows[0]) : null;
 }
@@ -55,8 +59,8 @@ export async function deleteTheme(pool, id, userId) {
        AND EXISTS (
          SELECT 1 FROM project_members WHERE project_id = themes.project_id AND user_id = $2
        )
-     RETURNING id`,
+     RETURNING project_id`,
     [id, userId]
   );
-  return Boolean(r.rows[0]);
+  return r.rows[0]?.project_id ?? null;
 }

@@ -43,68 +43,46 @@ export async function deleteFileEntry(pool, id) {
   return Boolean(r.rows[0]);
 }
 
-// Helper: Get or create file entry for a media file (transcript)
+// Helper: Get or create file entry for a media file (transcript).
+// Uses an upsert (ON CONFLICT) to eliminate the SELECT-then-INSERT TOCTOU race.
 export async function ensureFileEntryForMedia(pool, mediaFileId) {
-  // Check if entry already exists
-  const existing = await pool.query(
-    'SELECT * FROM file_entries WHERE media_file_id = $1',
-    [mediaFileId]
-  );
-  if (existing.rows[0]) {
-    return mapFileEntry(existing.rows[0]);
-  }
-  
-  // Get media file info
   const mediaResult = await pool.query(
-    'SELECT id, project_id, original_filename, created_at FROM media_files WHERE id = $1',
+    'SELECT id, project_id, original_filename FROM media_files WHERE id = $1',
     [mediaFileId]
   );
   if (!mediaResult.rows[0]) {
     throw new Error('Media file not found');
   }
-  
   const media = mediaResult.rows[0];
-  
-  // Create file entry
-  return createFileEntry(pool, {
-    id: media.id, // Use same ID as media file
-    projectId: media.project_id,
-    documentFileId: null,
-    mediaFileId: media.id,
-    name: media.original_filename,
-    type: 'transcript',
-  });
+  // id = media.id (same as media file) so ON CONFLICT (id) handles concurrent inserts.
+  const r = await pool.query(
+    `INSERT INTO file_entries (id, project_id, media_file_id, name, type)
+     VALUES ($1, $2, $3, $4, 'transcript')
+     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+     RETURNING *`,
+    [media.id, media.project_id, media.id, media.original_filename]
+  );
+  return mapFileEntry(r.rows[0]);
 }
 
-// Helper: Get or create file entry for a document file
+// Helper: Get or create file entry for a document file.
+// Uses an upsert (ON CONFLICT) to eliminate the SELECT-then-INSERT TOCTOU race.
 export async function ensureFileEntryForDocument(pool, documentFileId) {
-  // Check if entry already exists
-  const existing = await pool.query(
-    'SELECT * FROM file_entries WHERE document_file_id = $1',
-    [documentFileId]
-  );
-  if (existing.rows[0]) {
-    return mapFileEntry(existing.rows[0]);
-  }
-  
-  // Get document file info
   const docResult = await pool.query(
-    'SELECT id, project_id, filename, created_at FROM files WHERE id = $1',
+    'SELECT id, project_id, filename FROM files WHERE id = $1',
     [documentFileId]
   );
   if (!docResult.rows[0]) {
     throw new Error('Document file not found');
   }
-  
   const doc = docResult.rows[0];
-  
-  // Create file entry
-  return createFileEntry(pool, {
-    id: doc.id, // Use same ID as document file
-    projectId: doc.project_id,
-    documentFileId: doc.id,
-    mediaFileId: null,
-    name: doc.filename,
-    type: 'document',
-  });
+  // id = doc.id (same as document file) so ON CONFLICT (id) handles concurrent inserts.
+  const r = await pool.query(
+    `INSERT INTO file_entries (id, project_id, document_file_id, name, type)
+     VALUES ($1, $2, $3, $4, 'document')
+     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+     RETURNING *`,
+    [doc.id, doc.project_id, doc.id, doc.filename]
+  );
+  return mapFileEntry(r.rows[0]);
 }

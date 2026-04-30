@@ -9,6 +9,7 @@ export interface Code { // was Highlight
   text: string;
   codeName: string;
   createdAt: string;
+  updatedAt?: string;
   position?: { x: number; y: number };
   size?: Size;
   style?: CardStyle;

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Highlight, Theme, Insight, Annotation, CardStyle, UploadedFile } from '../types';
 import { Button } from './ui/button';
 import { Trash2 } from 'lucide-react';
-import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation, deleteHighlight, deleteTheme, deleteInsight, deleteAnnotation, getFile } from '../services/api';
+import { createAnnotation, createTheme, createInsight, updateHighlight, updateTheme, updateInsight, updateAnnotation, deleteHighlight, deleteTheme, deleteInsight, deleteAnnotation, getFile, ApiError } from '../services/api';
 import { toast } from 'sonner';
 import { useSelectedProject } from '../hooks/useSelectedProject';
 import { NodeKind, Tool, NodeView, DEFAULTS, ResizeCorner, /* add subtype imports */ } from './canvas/CanvasTypes';
@@ -114,9 +114,16 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
       const nn = nodesRef.current.find((n: NodeView) => n.kind === 'annotation' && n.id === st.id) as AnnotationNodeView | undefined;
       if (!nn) return;
       try {
-        await updateAnnotation(nn.id, { position: { x: nn.x, y: nn.y }, size: { w: nn.w, h: nn.h } });
+        await updateAnnotation(nn.id, { position: { x: nn.x, y: nn.y }, size: { w: nn.w, h: nn.h }, ifUnmodifiedSince: nn.annotation?.updatedAt });
         onUpdate();
-      } catch { toast.error('Failed to save'); }
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          toast.warning('Someone else just edited this — refreshing...');
+          onUpdate();
+        } else {
+          toast.error('Failed to save');
+        }
+      }
     }
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -304,15 +311,20 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   const handleNodeMoveComplete = useCallback(async (movedNodes: NodeView[]) => {
     try {
       await Promise.all(movedNodes.map(async (n) => {
-        if (n.kind === 'code' && n.highlight) return updateHighlight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
-        if (n.kind === 'theme' && n.theme) return updateTheme(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
-        if (n.kind === 'insight' && n.insight) return updateInsight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
-        if (n.kind === 'annotation' && n.annotation) return updateAnnotation(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h } });
+        if (n.kind === 'code' && n.highlight) return updateHighlight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h }, ifUnmodifiedSince: n.highlight.updatedAt });
+        if (n.kind === 'theme' && n.theme) return updateTheme(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h }, ifUnmodifiedSince: n.theme.updatedAt });
+        if (n.kind === 'insight' && n.insight) return updateInsight(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h }, ifUnmodifiedSince: n.insight.updatedAt });
+        if (n.kind === 'annotation' && n.annotation) return updateAnnotation(n.id, { position: { x: n.x, y: n.y }, size: { w: n.w, h: n.h }, ifUnmodifiedSince: n.annotation.updatedAt });
       }));
       onUpdate();
     } catch (err) {
-      console.error(err);
-      toast.error('Failed to save');
+      if (err instanceof ApiError && err.status === 409) {
+        toast.warning('Someone else just edited this — refreshing...');
+        onUpdate();
+      } else {
+        console.error(err);
+        toast.error('Failed to save');
+      }
     }
   }, [onUpdate]);
 
@@ -691,22 +703,27 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
   const persistFontSize = async (n: NodeView, fs: number) => {
     try {
       if (n.kind === 'code') {
-        await updateHighlight(n.id, { style: { ...(n.highlight?.style || {}), fontSize: fs } });
+        await updateHighlight(n.id, { style: { ...(n.highlight?.style || {}), fontSize: fs }, ifUnmodifiedSince: n.highlight?.updatedAt });
         setNodes(prev => prev.map(nn => (nn.kind === 'code' && nn.id === n.id) ? { ...nn, highlight: { ...nn.highlight!, style: { ...(nn.highlight?.style || {}), fontSize: fs } } } : nn));
       } else if (n.kind === 'theme') {
-        await updateTheme(n.id, { style: { ...(n.theme?.style || {}), fontSize: fs } });
+        await updateTheme(n.id, { style: { ...(n.theme?.style || {}), fontSize: fs }, ifUnmodifiedSince: n.theme?.updatedAt });
         setNodes(prev => prev.map(nn => (nn.kind === 'theme' && nn.id === n.id) ? { ...nn, theme: { ...nn.theme!, style: { ...(nn.theme?.style || {}), fontSize: fs } } } : nn));
       } else if (n.kind === 'insight') {
-        await updateInsight(n.id, { style: { ...(n.insight?.style || {}), fontSize: fs } });
+        await updateInsight(n.id, { style: { ...(n.insight?.style || {}), fontSize: fs }, ifUnmodifiedSince: n.insight?.updatedAt });
         setNodes(prev => prev.map(nn => (nn.kind === 'insight' && nn.id === n.id) ? { ...nn, insight: { ...nn.insight!, style: { ...(nn.insight?.style || {}), fontSize: fs } } } : nn));
       } else if (n.kind === 'annotation') {
-        await updateAnnotation(n.id, { style: { ...(n.annotation?.style || {}), fontSize: fs } });
+        await updateAnnotation(n.id, { style: { ...(n.annotation?.style || {}), fontSize: fs }, ifUnmodifiedSince: n.annotation?.updatedAt });
         setNodes(prev => prev.map(nn => (nn.kind === 'annotation' && nn.id === n.id) ? { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), fontSize: fs } } } : nn));
       }
       toast.success('Saved');
       onUpdate();
-    } catch {
-      toast.error('Save failed');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.warning('Someone else just edited this — refreshing...');
+        onUpdate();
+      } else {
+        toast.error('Save failed');
+      }
     }
   };
 
@@ -845,28 +862,47 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
                   await deleteAnnotation(noteId);
                   toast.success('Text removed');
                 } else {
-                  await updateAnnotation(noteId, { content: trimmed });
+                  await updateAnnotation(noteId, { content: trimmed, ifUnmodifiedSince: n.annotation?.updatedAt });
                   toast.success('Saved');
                 }
                 onUpdate();
-              } catch {
-                toast.error('Save failed');
+              } catch (err) {
+                if (err instanceof ApiError && err.status === 409) {
+                  toast.warning('Someone else just edited this — refreshing...');
+                  onUpdate();
+                } else {
+                  toast.error('Save failed');
+                }
               }
             }}
             onApplyColor={async (noteId, color) => {
               try {
-                await updateAnnotation(noteId, { style: { ...(n.annotation?.style || {}), background: color } });
+                await updateAnnotation(noteId, { style: { ...(n.annotation?.style || {}), background: color }, ifUnmodifiedSince: n.annotation?.updatedAt });
                 setNodes(prev => prev.map(nn => (nn.kind === 'annotation' && nn.id === noteId) ? { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), background: color } } } : nn));
                 onUpdate();
-              } catch { toast.error('Save failed'); }
+              } catch (err) {
+                if (err instanceof ApiError && err.status === 409) {
+                  toast.warning('Someone else just edited this — refreshing...');
+                  onUpdate();
+                } else {
+                  toast.error('Save failed');
+                }
+              }
             }}
             onApplyFontSize={async (noteId, size) => {
               const currentBg = (n.annotation?.style && n.annotation.style.background) || '#FEF3C7';
               try {
-                await updateAnnotation(noteId, { style: { ...(n.annotation?.style || {}), background: currentBg, fontSize: size } });
+                await updateAnnotation(noteId, { style: { ...(n.annotation?.style || {}), background: currentBg, fontSize: size }, ifUnmodifiedSince: n.annotation?.updatedAt });
                 setNodes(prev => prev.map(nn => (nn.kind === 'annotation' && nn.id === noteId) ? { ...nn, annotation: { ...nn.annotation!, style: { ...(nn.annotation?.style || {}), background: currentBg, fontSize: size } } } : nn));
                 onUpdate();
-              } catch { toast.error('Save failed'); }
+              } catch (err) {
+                if (err instanceof ApiError && err.status === 409) {
+                  toast.warning('Someone else just edited this — refreshing...');
+                  onUpdate();
+                } else {
+                  toast.error('Save failed');
+                }
+              }
             }}
             onStartMove={(noteId, clientX, clientY, startNode) => {
               dragAnnoRef.current = { mode: 'move', id: noteId, startClient: { x: clientX, y: clientY }, startNode };
@@ -909,13 +945,20 @@ export const Canvas = ({ highlights, themes, insights, annotations, files, onUpd
             }}
             onSave={async () => {
               try {
-                if (n.kind === 'code') await updateHighlight(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.highlight?.style || {}), fontSize: getFontSize(n) } });
-                if (n.kind === 'theme') await updateTheme(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.theme?.style || {}), fontSize: getFontSize(n) } });
-                if (n.kind === 'insight') await updateInsight(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.insight?.style || {}), fontSize: getFontSize(n) } });
-                if (n.kind === 'annotation') await updateAnnotation(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.annotation?.style || {}), fontSize: getFontSize(n) } });
+                if (n.kind === 'code') await updateHighlight(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.highlight?.style || {}), fontSize: getFontSize(n) }, ifUnmodifiedSince: n.highlight?.updatedAt });
+                if (n.kind === 'theme') await updateTheme(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.theme?.style || {}), fontSize: getFontSize(n) }, ifUnmodifiedSince: n.theme?.updatedAt });
+                if (n.kind === 'insight') await updateInsight(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.insight?.style || {}), fontSize: getFontSize(n) }, ifUnmodifiedSince: n.insight?.updatedAt });
+                if (n.kind === 'annotation') await updateAnnotation(n.id, { size: { w: n.w, h: n.h }, style: { ...(n.annotation?.style || {}), fontSize: getFontSize(n) }, ifUnmodifiedSince: n.annotation?.updatedAt });
                 toast.success('Saved');
                 onUpdate();
-              } catch { toast.error('Save failed'); }
+              } catch (err) {
+                if (err instanceof ApiError && err.status === 409) {
+                  toast.warning('Someone else just edited this — refreshing...');
+                  onUpdate();
+                } else {
+                  toast.error('Save failed');
+                }
+              }
             }}
           />
         );

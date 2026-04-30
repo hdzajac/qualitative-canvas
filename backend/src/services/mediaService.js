@@ -62,26 +62,53 @@ export default function mediaService(pool) {
       return true;
     },
     async reset(id) {
-      const media = await getMedia(pool, id);
-      if (!media) throw new Error('Not found');
-      if (media.status === 'processing') throw new Error('Cannot reset while processing');
-      // Disallow reset if already finalized
-      const fr = await pool.query('SELECT 1 FROM transcripts_finalized WHERE media_file_id = $1', [id]);
-      if (fr.rows[0]) throw new Error('Cannot reset: transcript finalized');
-      // Delete segments
-      const del = await pool.query('DELETE FROM transcript_segments WHERE media_file_id = $1 RETURNING id', [id]);
-      // Mark media back to uploaded and clear errorMessage/duration
-      await pool.query(
-        `UPDATE media_files SET status = 'uploaded', error_message = NULL, duration_sec = NULL WHERE id = $1`,
-        [id]
-      );
-      // Optionally mark any jobs as reset (informational)
-      await pool.query(
-        `UPDATE transcription_jobs SET status = 'reset', completed_at = now() WHERE media_file_id = $1 AND status IN ('done','error','queued','processing')`,
-        [id]
-      );
-      console.log('[media] Reset transcription for media', id, 'removedSegments=', del.rowCount);
-      return { segmentsDeleted: del.rowCount };
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        // Lock the media row first to prevent concurrent worker lease/reset races.
+        const lockRes = await client.query(
+          'SELECT id, status FROM media_files WHERE id = $1 FOR UPDATE',
+          [id]
+        );
+        if (!lockRes.rows[0]) {
+          await client.query('ROLLBACK');
+          throw new Error('Not found');
+        }
+        if (lockRes.rows[0].status === 'processing') {
+          await client.query('ROLLBACK');
+          throw new Error('Cannot reset while processing');
+        }
+
+        // Cancel any queued jobs so the worker cannot pick them up after the reset.
+        await client.query(
+          `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now()
+           WHERE media_file_id = $1 AND status = 'queued'`,
+          [id]
+        );
+        const del = await client.query(
+          'DELETE FROM transcript_segments WHERE media_file_id = $1 RETURNING id',
+          [id]
+        );
+        await client.query(
+          `UPDATE media_files SET status = 'uploaded', error_message = NULL, duration_sec = NULL WHERE id = $1`,
+          [id]
+        );
+        await client.query(
+          `UPDATE transcription_jobs SET status = 'reset', completed_at = now()
+           WHERE media_file_id = $1 AND status IN ('done','error','processing')`,
+          [id]
+        );
+
+        await client.query('COMMIT');
+        console.log('[media] Reset transcription for media', id, 'removedSegments=', del.rowCount);
+        return { segmentsDeleted: del.rowCount };
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
     },
   };
 }

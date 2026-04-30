@@ -1,4 +1,6 @@
 import { useMutation, useQueryClient, type UseMutationOptions } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { ApiError } from '@/services/api';
 
 type OptimisticUpdateFn<TData, TVariables> = (
   oldData: TData | undefined,
@@ -58,6 +60,13 @@ export function useOptimisticMutation<TData = unknown, TError = Error, TVariable
       // Rollback to previous data on error
       if (context?.previousData !== undefined) {
         queryClient.setQueryData<TData>(queryKey, context.previousData);
+      }
+
+      // 409 Conflict: another user modified the entity — refresh rather than showing stale data
+      if (error instanceof ApiError && error.status === 409) {
+        toast.warning('Someone else just edited this — refreshing...');
+        queryClient.invalidateQueries({ queryKey });
+        return;
       }
 
       // Call custom error handler

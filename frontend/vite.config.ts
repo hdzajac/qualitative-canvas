@@ -3,30 +3,45 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
-// https://vitejs.dev/config/
+const API_URL = process.env.VITE_API_URL;
+
 export default defineConfig(({ mode }) => ({
   server: {
     host: "0.0.0.0",
     port: 3000,
-    proxy: process.env.VITE_API_URL ? undefined : {
-      '/api': {
-        target: 'http://localhost:5002',
-        changeOrigin: true,
-      }
-    }
+    proxy: API_URL
+      ? undefined
+      : {
+          "/api": {
+            target: "http://localhost:5002",
+            changeOrigin: true,
+          },
+          "/socket.io": {
+            target: "http://localhost:5002",
+            changeOrigin: true,
+            ws: true,
+          },
+        },
   },
   preview: {
     host: "0.0.0.0",
     port: 3000,
     allowedHosts: process.env.VITE_ALLOWED_HOSTS
-      ? process.env.VITE_ALLOWED_HOSTS.split(',').map((h: string) => h.trim())
+      ? process.env.VITE_ALLOWED_HOSTS.split(",").map((h: string) => h.trim())
       : undefined,
-    proxy: process.env.VITE_API_URL ? undefined : {
-      '/api': {
-        target: 'http://localhost:5002',
-        changeOrigin: true,
-      }
-    }
+    proxy: API_URL
+      ? undefined
+      : {
+          "/api": {
+            target: "http://localhost:5002",
+            changeOrigin: true,
+          },
+          "/socket.io": {
+            target: "http://localhost:5002",
+            changeOrigin: true,
+            ws: true,
+          },
+        },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {

@@ -25,15 +25,16 @@ export async function runMigrations(targetPool = pool) {
     if (applied.has(file)) continue;
     const full = path.join(migrationsDir, file);
     const sql = await fs.readFile(full, 'utf8');
-    await pool.query('BEGIN');
+    const client = await targetPool.connect();
     try {
-      await targetPool.query(sql);
+      await client.query('BEGIN');
+      await client.query(sql);
       // ON CONFLICT DO NOTHING makes migration idempotent under concurrent test startups
-      await targetPool.query('INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING', [file]);
-      await targetPool.query('COMMIT');
+      await client.query('INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING', [file]);
+      await client.query('COMMIT');
       console.log(`Applied migration: ${file}`);
     } catch (err) {
-      await targetPool.query('ROLLBACK');
+      await client.query('ROLLBACK');
       // If another process applied it concurrently, ignore duplicate key error and continue
       if (err.code === '23505') {
         console.warn(`Migration already applied concurrently: ${file}`);
@@ -41,6 +42,8 @@ export async function runMigrations(targetPool = pool) {
       }
       console.error(`Failed migration ${file}:`, err);
       throw err;
+    } finally {
+      client.release();
     }
   }
 }

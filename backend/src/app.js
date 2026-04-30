@@ -23,6 +23,7 @@ import { requireAuth } from './middleware/requireAuth.js';
 import { requireWorkerOrAuth } from './middleware/requireWorkerOrAuth.js';
 import { requireProjectAccess } from './middleware/requireProjectAccess.js';
 import { runMigrations } from './db/migrate.js';
+import { subscribeToProject } from './services/projectEvents.js';
 
 dotenv.config();
 
@@ -71,6 +72,9 @@ export function buildApp() {
     exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'Content-Disposition']
   }));
 
+  // Exempt SSE stream from per-request rate limit — it is one long-lived connection, not a poll
+  app.use('/api/projects/:projectId/events', (_req, _res, next) => next());
+
   // Rate limit — global
   const limiter = rateLimit({ windowMs: 60_000, max: 600 });
   app.use(limiter);
@@ -115,6 +119,32 @@ export function buildApp() {
   app.use('/api/media/:mediaId/participants', requireWorkerOrAuth, participantsRoutes(pool));
   app.use('/api/export', requireAuth, exportRoutes(pool));
   app.use('/api/import', requireAuth, importRoutes(pool));
+
+  // ── SSE: real-time canvas event stream (one long-lived connection per client) ─
+  app.get('/api/projects/:projectId/events', requireAuth, projectGuard, (req, res) => {
+    const { projectId } = req.params;
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // disable nginx output buffering
+    res.flushHeaders();
+
+    // Immediate heartbeat so the client knows the connection is live
+    res.write('event: connected\ndata: {}\n\n');
+
+    // Keep-alive ping every 25 s (browser SSE timeout is ~30 s)
+    const ping = setInterval(() => { try { res.write(':ping\n\n'); } catch {} }, 25_000);
+
+    const unsub = subscribeToProject(projectId, (msg) => {
+      try { res.write(`event: entity-changed\ndata: ${JSON.stringify(msg)}\n\n`); } catch {}
+    });
+
+    req.on('close', () => {
+      clearInterval(ping);
+      unsub();
+    });
+  });
 
   // Simple metrics endpoint (for observability) — requires authentication
   app.get('/api/metrics', requireAuth, async (_req, res) => {

@@ -11,30 +11,62 @@ export default function jobsService(pool) {
       return job;
     },
     get: (id) => getJob(pool, id),
-  getLatestForMedia: (mediaId) => getLatestJobForMedia(pool, mediaId),
+    getLatestForMedia: (mediaId) => getLatestJobForMedia(pool, mediaId),
+
     async leaseOne() {
-      const job = await leaseNextQueuedJob(pool);
-      if (job) {
-        // Mark media as processing
-        await updateMedia(pool, job.mediaFileId, { status: 'processing' });
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const job = await leaseNextQueuedJob(client);
+        if (job) {
+          await updateMedia(client, job.mediaFileId, { status: 'processing' });
+        }
+        await client.query('COMMIT');
+        return job;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
       }
-      return job;
     },
+
     async complete(jobId) {
-      const job = await setJobStatus(pool, jobId, { status: 'done', setCompleted: true });
-      if (job) {
-        await updateMedia(pool, job.mediaFileId, { status: 'done' });
-        // Create file entry for this transcript so it can be coded
-        const { ensureFileEntryForMedia } = await import('../dao/fileEntriesDao.js');
-        await ensureFileEntryForMedia(pool, job.mediaFileId);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const job = await setJobStatus(client, jobId, { status: 'done', setCompleted: true });
+        if (job) {
+          await updateMedia(client, job.mediaFileId, { status: 'done' });
+          const { ensureFileEntryForMedia } = await import('../dao/fileEntriesDao.js');
+          await ensureFileEntryForMedia(client, job.mediaFileId);
+        }
+        await client.query('COMMIT');
+        return job;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
       }
-      return job;
     },
+
     async fail(jobId, errorMessage) {
-      const job = await setJobStatus(pool, jobId, { status: 'error', errorMessage, setCompleted: true });
-      if (job) await updateMedia(pool, job.mediaFileId, { status: 'error', errorMessage });
-      return job;
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const job = await setJobStatus(client, jobId, { status: 'error', errorMessage, setCompleted: true });
+        if (job) await updateMedia(client, job.mediaFileId, { status: 'error', errorMessage });
+        await client.query('COMMIT');
+        return job;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
     },
+
     async progress(jobId, { processedMs, totalMs, etaSeconds }) {
       const job = await setJobProgress(pool, jobId, { processedMs, totalMs, etaSeconds });
       return job;

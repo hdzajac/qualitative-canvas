@@ -5,6 +5,7 @@ export interface Annotation {
   content: string;
   position: { x: number; y: number };
   createdAt: string;
+  updatedAt?: string;
   projectId?: string;
   size?: Size;
   style?: CardStyle;

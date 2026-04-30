@@ -6,6 +6,8 @@ import { FlowCanvas } from '@/components/canvas/FlowCanvas';
 import { CanvasEntityPanel } from '@/components/canvas/CanvasEntityPanel';
 import type { NodeKind, NodeView } from '@/components/canvas/CanvasTypes';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
+import { useProjectEvents } from '@/hooks/useSelectedProject';
+import { useAuth } from '@/contexts/AuthContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ThemeCreator } from '@/components/ThemeCreator';
@@ -14,6 +16,10 @@ import { InsightCreator } from '@/components/InsightCreator';
 export default function CanvasV2Page() {
     const qc = useQueryClient();
     const [projectId] = useSelectedProject();
+    const { user } = useAuth();
+
+    // Real-time: invalidate TanStack Query caches when peers mutate entities
+    useProjectEvents(projectId);
 
     const filesQ = useQuery({
         queryKey: ['files', projectId],
@@ -278,6 +284,8 @@ export default function CanvasV2Page() {
                 onUpdate={handleUpdate}
                 onOpenEntity={handleOpenEntity}
                 onSelectionChange={handleSelectionChange}
+                projectId={projectId ?? undefined}
+                userId={user?.id}
             />
             <CanvasEntityPanel
                 entity={openEntity}

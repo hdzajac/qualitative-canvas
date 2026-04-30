@@ -7,7 +7,6 @@ import NotFound from "./pages/NotFound";
 import Projects from "./pages/Projects";
 import Documents from "./pages/Documents";
 import DocumentDetail from "./pages/DocumentDetail";
-import CanvasPage from "./pages/CanvasPage";
 import CanvasV2Page from "./pages/CanvasV2Page";
 import Themes from "./pages/Themes";
 import Insights from "./pages/Insights";
@@ -142,7 +141,6 @@ function AppRoutes() {
             <Route path="/insights" element={<ErrorBoundary><Insights /></ErrorBoundary>} />
             <Route path="/analysis" element={<ErrorBoundary><Analysis /></ErrorBoundary>} />
             <Route path="/canvas" element={<ErrorBoundary><CanvasV2Page /></ErrorBoundary>} />
-            <Route path="/canvas-legacy" element={<ErrorBoundary><CanvasPage /></ErrorBoundary>} />
           </Route>
         </Route>
         <Route path="*" element={<NotFound />} />
