@@ -29,6 +29,14 @@ except Exception as e:  # pragma: no cover
 
 load_dotenv()
 
+# Worker secret — must match WORKER_SECRET on the backend
+WORKER_SECRET = os.getenv('WORKER_SECRET', '')
+
+# Single session with the auth header pre-applied for every backend call
+_session = requests.Session()
+if WORKER_SECRET:
+    _session.headers.update({'X-Worker-Secret': WORKER_SECRET})
+
 # Base configuration (can be auto-adjusted below)
 # Support multiple backends: provide comma-separated BASE_URLS or WORKER_BASE_URLS.
 BASE_URL = os.getenv('BASE_URL', 'http://backend:5000/api')
@@ -84,7 +92,7 @@ def resolve_base_url(original: str) -> str:
     # Try original URL with very short timeout to catch DNS errors quickly
     original_reachable = False
     try:
-        r = requests.get(f"{original.rstrip('/')}/health", timeout=0.5)
+        r = _session.get(f"{original.rstrip('/')}/health", timeout=0.5)
         if r.ok:
             original_reachable = True
     except Exception as e:
@@ -96,7 +104,7 @@ def resolve_base_url(original: str) -> str:
     
     # Original failed, try fallback
     try:
-        r2 = requests.get(f"{fallback.rstrip('/')}/health", timeout=1.0)
+        r2 = _session.get(f"{fallback.rstrip('/')}/health", timeout=1.0)
         if r2.ok:
             log_info(f"Auto-fallback: using {fallback} instead of {original}")
             return fallback
@@ -122,7 +130,7 @@ BASE_URLS = build_base_list()
 def lease_job(base_url: str):
     url = f"{base_url}/transcribe-jobs/lease"
     t0 = time.perf_counter()
-    resp = requests.post(url, timeout=15)
+    resp = _session.post(url, timeout=15)
     dur = int((time.perf_counter() - t0) * 1000)
     if resp.status_code == 204:
         log_debug(f"LEASE 204 in {dur}ms url={url}")
@@ -136,7 +144,7 @@ def lease_job(base_url: str):
 def complete_job(base_url: str, job_id):
     url = f"{base_url}/transcribe-jobs/{job_id}/complete"
     t0 = time.perf_counter()
-    resp = requests.post(url, timeout=30)
+    resp = _session.post(url, timeout=30)
     dur = int((time.perf_counter() - t0) * 1000)
     if not resp.ok:
         log_error(f"COMPLETE {resp.status_code} in {dur}ms url={url} body={resp.text[:400]}")
@@ -147,7 +155,7 @@ def complete_job(base_url: str, job_id):
 def fail_job(base_url: str, job_id, message: str):
     url = f"{base_url}/transcribe-jobs/{job_id}/error"
     t0 = time.perf_counter()
-    resp = requests.post(url, json={"errorMessage": message[:500]}, timeout=30)
+    resp = _session.post(url, json={"errorMessage": message[:500]}, timeout=30)
     dur = int((time.perf_counter() - t0) * 1000)
     if not resp.ok:
         log_error(f"ERROR {resp.status_code} in {dur}ms url={url} body={resp.text[:400]}")
@@ -168,7 +176,7 @@ def patch_progress(base_url: str, job_id, processed_ms=None, total_ms=None, eta_
         return None
     try:
         t0 = time.perf_counter()
-        r = requests.patch(url, json=payload, timeout=10)
+        r = _session.patch(url, json=payload, timeout=10)
         dur = int((time.perf_counter() - t0) * 1000)
         if not r.ok:
             log_warn(f"PROGRESS {r.status_code} in {dur}ms url={url} body={r.text[:200]}")
@@ -182,13 +190,13 @@ def patch_progress(base_url: str, job_id, processed_ms=None, total_ms=None, eta_
 def fetch_media(base_url: str, meta):
     url = f"{base_url}/media/{meta['mediaFileId']}"
     t0 = time.perf_counter()
-    r = requests.get(url, timeout=30)
+    r = _session.get(url, timeout=30)
     dur = int((time.perf_counter() - t0) * 1000)
     r.raise_for_status()
     media = r.json()
     content_url = f"{base_url}/media/{media['id']}/download"
     t1 = time.perf_counter()
-    data = requests.get(content_url, timeout=60)
+    data = _session.get(content_url, timeout=60)
     dur2 = int((time.perf_counter() - t1) * 1000)
     data.raise_for_status()
     log_debug(f"FETCH media {media['id']} meta={r.status_code} {dur}ms download={data.status_code} {dur2}ms bytes={len(data.content)}")
@@ -259,7 +267,7 @@ def post_segments(base_url: str, media_id, segments):
     url = f"{base_url}/media/{media_id}/segments/bulk"
     payload = { 'segments': segments }
     t0 = time.perf_counter()
-    r = requests.post(url, json=payload, timeout=60)
+    r = _session.post(url, json=payload, timeout=60)
     dur = int((time.perf_counter() - t0) * 1000)
     if not r.ok:
         # Log first segment as sample to help diagnose shape issues
@@ -365,7 +373,7 @@ def transcribe_real(base_url: str, media, text_content, job, total_ms_hint=None)
     Honors job.model and job.languageHint when provided.
     """
     # Re-fetch binary (content may have been decoded earlier, but we need bytes for audio)
-    audio_bytes = requests.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
+    audio_bytes = _session.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
     with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as tmp:
         tmp.write(audio_bytes)
         tmp.flush()
@@ -510,7 +518,7 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
     if pipeline is None or not callable(getattr(pipeline, '__call__', None)):
         log_error("Diarization pipeline is invalid or not callable")
         return
-    audio_bytes = requests.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
+    audio_bytes = _session.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
     # Write original bytes then transcode to 16k mono WAV to ensure readable format
     src_path = None
     wav_path = None
@@ -580,7 +588,7 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
         # Still merge consecutive runs even when auto-assign is disabled
         # (merges unassigned segments — null participantId matches null)
         try:
-            mr = requests.post(
+            mr = _session.post(
                 f"{base_url}/media/{media['id']}/segments/merge-speaker-runs",
                 json={"gapThresholdMs": MERGE_GAP_MS, "maxDurationMs": MERGE_MAX_MS},
                 timeout=60,
@@ -595,7 +603,7 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
         return
     try:
         # Fetch existing participants
-        r = requests.get(f"{base_url}/media/{media['id']}/participants", timeout=20)
+        r = _session.get(f"{base_url}/media/{media['id']}/participants", timeout=20)
         r.raise_for_status()
         participants = r.json() or []
         # Determine first-seen order of labels for stable numbering
@@ -613,7 +621,7 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
             if not existing:
                 display_index = (first_seen.get(label, len(label_to_part)) or 0) + 1
                 display_name = f"Participant {display_index}"
-                cr = requests.post(
+                cr = _session.post(
                     f"{base_url}/media/{media['id']}/participants",
                     json={"name": display_name, "canonicalKey": label},
                     timeout=20,
@@ -630,7 +638,7 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
             start_ms = int(segment.start * 1000)
             end_ms = int(segment.end * 1000)
             try:
-                ar = requests.post(
+                ar = _session.post(
                     f"{base_url}/media/{media['id']}/segments/assign-participant",
                     json={"participantId": pid, "startMs": start_ms, "endMs": end_ms},
                     timeout=30,
@@ -643,7 +651,7 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
 
         # Fill any remaining unassigned segments by nearest diarization turn label
         try:
-            seg_r = requests.get(f"{base_url}/media/{media['id']}/segments", timeout=30)
+            seg_r = _session.get(f"{base_url}/media/{media['id']}/segments", timeout=30)
             seg_r.raise_for_status()
             seg_list = seg_r.json() or []
             unassigned = [s for s in seg_list if not s.get('participantId')]
@@ -676,7 +684,7 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
                     if not seg_ids:
                         continue
                     try:
-                        br = requests.post(
+                        br = _session.post(
                             f"{base_url}/media/{media['id']}/segments/assign-participant",
                             json={"participantId": pid, "segmentIds": seg_ids},
                             timeout=60,
@@ -690,7 +698,7 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
             log_warn(f"post-assign fill failed: {e}")
         # Merge consecutive same-speaker runs to reduce fragmentation
         try:
-            mr = requests.post(
+            mr = _session.post(
                 f"{base_url}/media/{media['id']}/segments/merge-speaker-runs",
                 json={"gapThresholdMs": MERGE_GAP_MS, "maxDurationMs": MERGE_MAX_MS},
                 timeout=60,

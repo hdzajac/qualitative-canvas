@@ -15,6 +15,19 @@ export default defineConfig(({ mode }) => ({
       }
     }
   },
+  preview: {
+    host: "0.0.0.0",
+    port: 3000,
+    allowedHosts: process.env.VITE_ALLOWED_HOSTS
+      ? process.env.VITE_ALLOWED_HOSTS.split(',').map((h: string) => h.trim())
+      : undefined,
+    proxy: process.env.VITE_API_URL ? undefined : {
+      '/api': {
+        target: 'http://localhost:5002',
+        changeOrigin: true,
+      }
+    }
+  },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {
     alias: {

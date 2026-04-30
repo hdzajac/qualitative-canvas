@@ -13,12 +13,7 @@ ARG VITE_API_URL
 ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
-FROM node:20 AS runner
-WORKDIR /app
-ENV NODE_ENV=production
-# Copy only what's needed to serve
-COPY --from=deps /app/node_modules ./node_modules
-COPY package*.json ./
-COPY --from=builder /app/dist ./dist
-EXPOSE 3000
-CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "3000"]
+FROM nginx:1.27-alpine AS runner
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80

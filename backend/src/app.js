@@ -108,11 +108,11 @@ export function buildApp() {
   app.use('/api/themes', requireAuth, projectGuard, themesRoutes(pool));
   app.use('/api/insights', requireAuth, projectGuard, insightsRoutes(pool));
   app.use('/api/annotations', requireAuth, projectGuard, annotationsRoutes(pool));
-  app.use('/api/media', requireAuth, projectGuard, mediaRoutes(pool));
+  app.use('/api/media', requireWorkerOrAuth, projectGuard, mediaRoutes(pool));
   // Transcription: UI calls require user auth; worker calls require worker secret OR user auth
   app.use('/api', requireWorkerOrAuth, transcriptionRoutes(pool));
-  app.use('/api/media/:mediaId/segments', requireAuth, segmentsRoutes(pool));
-  app.use('/api/media/:mediaId/participants', requireAuth, participantsRoutes(pool));
+  app.use('/api/media/:mediaId/segments', requireWorkerOrAuth, segmentsRoutes(pool));
+  app.use('/api/media/:mediaId/participants', requireWorkerOrAuth, participantsRoutes(pool));
   app.use('/api/export', requireAuth, exportRoutes(pool));
   app.use('/api/import', requireAuth, importRoutes(pool));
 

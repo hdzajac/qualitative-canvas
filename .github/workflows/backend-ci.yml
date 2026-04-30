@@ -2,9 +2,9 @@ name: Backend CI
 
 on:
   push:
-    branches: [ whisper ]
+    branches: [ main, whisper ]
   pull_request:
-    branches: [ whisper ]
+    branches: [ main, whisper ]
 
 jobs:
   test:
