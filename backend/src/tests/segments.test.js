@@ -4,8 +4,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { app, init } from '../app.js';
 import pool from '../db/pool.js';
 import { deleteMediaDeep } from './testCleanup.js';
+import { createTestUser } from './testAuth.js';
 
-let mediaId; let projectId; let segmentId1; let segmentId2; let participantId;
+let mediaId; let projectId; let segmentId1; let segmentId2; let participantId; let authCookie;
 
 async function insertSegment({ id, idx, startMs, endMs, text, participantId: pid }) {
   await pool.query(
@@ -17,13 +18,15 @@ async function insertSegment({ id, idx, startMs, endMs, text, participantId: pid
 
 beforeAll(async () => {
   await init();
+  ({ cookie: authCookie } = await createTestUser());
   // Create project
-  const proj = await request(app).post('/api/projects').send({ name: 'SegProj' });
+  const proj = await request(app).post('/api/projects').set('Cookie', authCookie).send({ name: 'SegProj' });
   expect(proj.status).toBe(201);
   projectId = proj.body.id;
   // Upload media
   const res = await request(app)
     .post('/api/media')
+    .set('Cookie', authCookie)
     .attach('file', Buffer.from('dummy'), 'dummy.txt')
     .field('projectId', projectId);
   expect(res.status).toBe(201);
@@ -47,7 +50,7 @@ afterAll(async () => {
 
 describe('Segments retrieval & update', () => {
   it('lists segments for a media file', async () => {
-    const res = await request(app).get(`/api/media/${mediaId}/segments`);
+    const res = await request(app).get(`/api/media/${mediaId}/segments`).set('Cookie', authCookie);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThanOrEqual(2);
@@ -59,6 +62,7 @@ describe('Segments retrieval & update', () => {
   it('updates segment text and participant', async () => {
     const res = await request(app)
       .put(`/api/media/${mediaId}/segments/${segmentId1}`)
+      .set('Cookie', authCookie)
       .send({ text: 'Hello updated', participantId });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: segmentId1, text: 'Hello updated', participantId });

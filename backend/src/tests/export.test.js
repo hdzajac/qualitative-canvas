@@ -3,25 +3,35 @@
  * Tests CSV generation and export functionality
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { init, buildApp } from '../app.js';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { app, init } from '../app.js';
 import pool from '../db/pool.js';
 import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
+import { createTestUser } from './testAuth.js';
 
 describe('Export Service', () => {
-  let app;
   let projectId;
+  let authCookie;
+  let userId;
+
+  beforeAll(async () => {
+    await init();
+    ({ cookie: authCookie, userId } = await createTestUser());
+  });
 
   beforeEach(async () => {
-    await init();
-    app = buildApp();
 
     // Create test project with data
     projectId = uuidv4();
     await pool.query(
       'INSERT INTO projects (id, name, description) VALUES ($1, $2, $3)',
       [projectId, 'Test Export Project', 'Project for testing export']
+    );
+    // Grant test user access
+    await pool.query(
+      "INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, 'owner')",
+      [projectId, userId]
     );
 
     // Create a test file
@@ -77,6 +87,7 @@ describe('Export Service', () => {
   it('should export project as ZIP', async () => {
     const response = await request(app)
       .get(`/api/export/projects/${projectId}/export?format=zip`)
+      .set('Cookie', authCookie)
       .buffer(true)
       .parse((res, callback) => {
         res.setEncoding('binary');
@@ -99,6 +110,7 @@ describe('Export Service', () => {
   it('should export single CSV entity', async () => {
     const response = await request(app)
       .get(`/api/export/projects/${projectId}/export?format=csv&entity=codes`)
+      .set('Cookie', authCookie)
       .expect(200);
 
     expect(response.headers['content-type']).toContain('text/csv');
@@ -110,12 +122,14 @@ describe('Export Service', () => {
     const fakeId = '00000000-0000-0000-0000-000000000000';
     await request(app)
       .get(`/api/export/projects/${fakeId}/export?format=zip`)
+      .set('Cookie', authCookie)
       .expect(404);
   });
 
   it('should include UTF-8 BOM in CSV', async () => {
     const response = await request(app)
       .get(`/api/export/projects/${projectId}/export?format=csv&entity=codes`)
+      .set('Cookie', authCookie)
       .expect(200);
 
     // UTF-8 BOM should be at the start
@@ -139,6 +153,7 @@ describe('Export Service', () => {
 
     const response = await request(app)
       .get(`/api/export/projects/${projectId}/export?format=csv&entity=codes`)
+      .set('Cookie', authCookie)
       .expect(200);
 
     // Check that special characters are properly escaped
@@ -149,6 +164,7 @@ describe('Export Service', () => {
   it('should flatten JSONB position fields', async () => {
     const response = await request(app)
       .get(`/api/export/projects/${projectId}/export?format=csv&entity=codes`)
+      .set('Cookie', authCookie)
       .expect(200);
 
     // Headers should include flattened fields
@@ -166,10 +182,15 @@ describe('Export Service', () => {
       'INSERT INTO projects (id, name) VALUES ($1, $2)',
       [emptyProjectId, 'Empty Project']
     );
+    await pool.query(
+      "INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, 'owner')",
+      [emptyProjectId, userId]
+    );
 
     try {
       const response = await request(app)
         .get(`/api/export/projects/${emptyProjectId}/export?format=csv&entity=codes`)
+        .set('Cookie', authCookie)
         .expect(200);
 
       // Should return only headers
@@ -182,6 +203,7 @@ describe('Export Service', () => {
   it('should join array fields with semicolons', async () => {
     const response = await request(app)
       .get(`/api/export/projects/${projectId}/export?format=csv&entity=themes`)
+      .set('Cookie', authCookie)
       .expect(200);
 
     // Theme should have code_ids joined with semicolons

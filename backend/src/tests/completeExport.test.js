@@ -4,27 +4,34 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { init, buildApp } from '../app.js';
+import { app, init } from '../app.js';
 import pool from '../db/pool.js';
 import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
 import AdmZip from 'adm-zip';
+import { createTestUser } from './testAuth.js';
 
 describe('Complete Project Export', () => {
-  let app;
   let projectId;
   let fileId;
   let mediaId;
+  let authCookie;
+  let userId;
 
   beforeAll(async () => {
     await init();
-    app = buildApp();
+    ({ cookie: authCookie, userId } = await createTestUser());
 
     // Create test project with full data
     projectId = uuidv4();
     await pool.query(
       'INSERT INTO projects (id, name, description) VALUES ($1, $2, $3)',
       [projectId, 'Complete Test Project', 'Project with documents and media']
+    );
+    // Grant test user access
+    await pool.query(
+      "INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, 'owner')",
+      [projectId, userId]
     );
 
     // Create a document file
@@ -107,6 +114,7 @@ describe('Complete Project Export', () => {
   it('should export complete project as ZIP with CSVs and VTTs', async () => {
     const response = await request(app)
       .get(`/api/export/projects/${projectId}/export?format=zip`)
+      .set('Cookie', authCookie)
       .responseType('blob')
       .buffer(true)
       .parse((res, callback) => {
@@ -165,6 +173,7 @@ describe('Complete Project Export', () => {
   it('should verify CSV content in export', async () => {
     const response = await request(app)
       .get(`/api/export/projects/${projectId}/export?format=zip`)
+      .set('Cookie', authCookie)
       .buffer(true)
       .parse((res, callback) => {
         res.setEncoding('binary');
@@ -210,10 +219,15 @@ describe('Complete Project Export', () => {
       'INSERT INTO projects (id, name) VALUES ($1, $2)',
       [emptyProjectId, 'No Media Project']
     );
+    await pool.query(
+      "INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, 'owner')",
+      [emptyProjectId, userId]
+    );
 
     try {
       const response = await request(app)
         .get(`/api/export/projects/${emptyProjectId}/export?format=zip`)
+        .set('Cookie', authCookie)
         .buffer(true)
         .parse((res, callback) => {
           res.setEncoding('binary');

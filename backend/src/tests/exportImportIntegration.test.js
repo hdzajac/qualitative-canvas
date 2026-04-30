@@ -4,19 +4,21 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { init, buildApp } from '../app.js';
+import { app, init } from '../app.js';
 import pool from '../db/pool.js';
 import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
 import AdmZip from 'adm-zip';
+import { createTestUser } from './testAuth.js';
 
 describe('Export-Import Integration', () => {
-  let app;
   let originalProjectId;
+  let authCookie;
+  let userId;
 
   beforeAll(async () => {
     await init();
-    app = buildApp();
+    ({ cookie: authCookie, userId } = await createTestUser());
   });
 
   afterAll(async () => {
@@ -29,6 +31,10 @@ describe('Export-Import Integration', () => {
     await pool.query(
       'INSERT INTO projects (id, name, description) VALUES ($1, $2, $3)',
       [originalProjectId, 'Export-Import Test', 'Testing full cycle']
+    );
+    await pool.query(
+      "INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, 'owner')",
+      [originalProjectId, userId]
     );
 
     // Create a document file
@@ -73,6 +79,7 @@ describe('Export-Import Integration', () => {
     // === STEP 1: Export the project ===
     const exportResponse = await request(app)
       .get(`/api/export/projects/${originalProjectId}/export?format=zip`)
+      .set('Cookie', authCookie)
       .buffer(true)
       .parse((res, callback) => {
         res.setEncoding('binary');
@@ -98,6 +105,7 @@ describe('Export-Import Integration', () => {
     // === STEP 2: Import the exported ZIP ===
     const importResponse = await request(app)
       .post('/api/import/projects')
+      .set('Cookie', authCookie)
       .attach('file', exportResponse.body, 'export-test.zip')
       .expect(201);
 
@@ -156,6 +164,7 @@ describe('Export-Import Integration', () => {
     // === STEP 4: Export the imported project and verify it's identical ===
     const reExportResponse = await request(app)
       .get(`/api/export/projects/${newProjectId}/export?format=zip`)
+      .set('Cookie', authCookie)
       .buffer(true)
       .parse((res, callback) => {
         res.setEncoding('binary');
@@ -186,6 +195,10 @@ describe('Export-Import Integration', () => {
       'INSERT INTO projects (id, name, description) VALUES ($1, $2, $3)',
       [projectId1, 'Cycle Test', 'Multi-cycle test']
     );
+    await pool.query(
+      "INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, 'owner')",
+      [projectId1, userId]
+    );
 
     const fileId = uuidv4();
     await pool.query(
@@ -208,6 +221,7 @@ describe('Export-Import Integration', () => {
     // Export cycle 1
     const export1 = await request(app)
       .get(`/api/export/projects/${projectId1}/export?format=zip`)
+      .set('Cookie', authCookie)
       .buffer(true)
       .parse((res, callback) => {
         res.setEncoding('binary');
@@ -220,6 +234,7 @@ describe('Export-Import Integration', () => {
     // Import to create project 2
     const import1 = await request(app)
       .post('/api/import/projects')
+      .set('Cookie', authCookie)
       .attach('file', export1.body, 'cycle1.zip')
       .expect(201);
 
@@ -228,6 +243,7 @@ describe('Export-Import Integration', () => {
     // Export project 2
     const export2 = await request(app)
       .get(`/api/export/projects/${projectId2}/export?format=zip`)
+      .set('Cookie', authCookie)
       .buffer(true)
       .parse((res, callback) => {
         res.setEncoding('binary');
@@ -240,6 +256,7 @@ describe('Export-Import Integration', () => {
     // Import to create project 3
     const import2 = await request(app)
       .post('/api/import/projects')
+      .set('Cookie', authCookie)
       .attach('file', export2.body, 'cycle2.zip')
       .expect(201);
 

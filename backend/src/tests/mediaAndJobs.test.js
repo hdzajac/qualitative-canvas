@@ -7,6 +7,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { cleanupTempTestMedia } from './cleanupTempFiles.js';
 import { deleteMediaDeep, deleteFiles } from './testCleanup.js';
+import { createTestUser } from './testAuth.js';
 
 // Helper: create a temp file to upload
 async function createTempMedia(content = 'fake media data') {
@@ -17,12 +18,13 @@ async function createTempMedia(content = 'fake media data') {
   return filePath;
 }
 
-let mediaId; let jobId; let projectId;
+let mediaId; let jobId; let projectId; let authCookie;
 
 beforeAll(async () => {
   await init();
+  ({ cookie: authCookie } = await createTestUser());
   // Create a project to satisfy foreign key
-  const res = await request(app).post('/api/projects').send({ name: 'TestProj' });
+  const res = await request(app).post('/api/projects').set('Cookie', authCookie).send({ name: 'TestProj' });
   projectId = res.body.id;
 });
 
@@ -38,6 +40,7 @@ describe('Media upload & listing', () => {
     const tmpFile = await createTempMedia('hello audio');
     const res = await request(app)
       .post('/api/media')
+      .set('Cookie', authCookie)
       .attach('file', tmpFile)
       .field('projectId', projectId);
     expect(res.status).toBe(201);
@@ -47,7 +50,7 @@ describe('Media upload & listing', () => {
   });
 
   it('lists media files', async () => {
-    const res = await request(app).get('/api/media');
+    const res = await request(app).get('/api/media').set('Cookie', authCookie);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.find(m => m.id === mediaId)).toBeTruthy();
@@ -58,6 +61,7 @@ describe('Transcription jobs lifecycle', () => {
   it('creates a transcription job', async () => {
     const res = await request(app)
       .post(`/api/media/${mediaId}/transcribe`)
+      .set('Cookie', authCookie)
       .send({ model: 'faster-whisper-small', languageHint: 'en' });
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ mediaFileId: mediaId, status: 'queued' });
@@ -65,18 +69,18 @@ describe('Transcription jobs lifecycle', () => {
   });
 
   it('leases next queued job', async () => {
-    const res = await request(app).post('/api/transcribe-jobs/lease');
+    const res = await request(app).post('/api/transcribe-jobs/lease').set('Cookie', authCookie);
     // Could be 204 if already leased OR could lease a different earlier job from another test file
     expect([200, 204]).toContain(res.status);
     // Fetch our specific job to see its status
-    const check = await request(app).get(`/api/transcribe-jobs/${jobId}`);
+    const check = await request(app).get(`/api/transcribe-jobs/${jobId}`).set('Cookie', authCookie);
     expect(check.status).toBe(200);
     // Accept either queued (not yet leased because another older job was taken) or processing/done
     expect(['queued', 'processing', 'done']).toContain(check.body.status);
   });
 
   it('marks job complete', async () => {
-    const res = await request(app).post(`/api/transcribe-jobs/${jobId}/complete`);
+    const res = await request(app).post(`/api/transcribe-jobs/${jobId}/complete`).set('Cookie', authCookie);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ status: 'done' });
     // Also mark media status done to allow finalization (some flows may auto-update media status elsewhere)
@@ -85,7 +89,7 @@ describe('Transcription jobs lifecycle', () => {
   });
 
   it('fetches job status', async () => {
-    const res = await request(app).get(`/api/transcribe-jobs/${jobId}`);
+    const res = await request(app).get(`/api/transcribe-jobs/${jobId}`).set('Cookie', authCookie);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: jobId, status: 'done' });
   });
@@ -100,17 +104,17 @@ describe('Transcription jobs lifecycle', () => {
     expect(s1.rows[0].id).toBeTruthy();
     expect(s2.rows[0].id).toBeTruthy();
     // First finalize
-    const first = await request(app).post(`/api/media/${mediaId}/finalize`).send();
+    const first = await request(app).post(`/api/media/${mediaId}/finalize`).set('Cookie', authCookie).send();
     expect(first.status).toBe(201);
     expect(first.body).toMatchObject({ mediaFileId: mediaId, originalSegmentCount: 2 });
     const fileId = first.body.fileId;
     expect(fileId).toBeTruthy();
     // Second finalize should be idempotent (return 201? or 200?). We keep 201 for simplicity but mapping unchanged.
-    const second = await request(app).post(`/api/media/${mediaId}/finalize`).send();
+    const second = await request(app).post(`/api/media/${mediaId}/finalize`).set('Cookie', authCookie).send();
     expect([200,201]).toContain(second.status); // accept either if route semantics evolve
     expect(second.body).toMatchObject({ mediaFileId: mediaId, fileId });
     // Fetch file content
-  const fileRes = await request(app).get(`/api/files/${fileId}`);
+  const fileRes = await request(app).get(`/api/files/${fileId}`).set('Cookie', authCookie);
     expect(fileRes.status).toBe(200);
     expect(fileRes.body.content).toContain('Hello world');
     expect(fileRes.body.content).toContain('Second line');

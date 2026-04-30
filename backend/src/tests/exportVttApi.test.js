@@ -5,16 +5,20 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { app } from '../app.js';
+import { app, init } from '../app.js';
 import pool from '../db/pool.js';
+import { createTestUser } from './testAuth.js';
 
 describe('VTT Export API', () => {
   let testProjectId;
   let testMediaId;
   let testMediaIdNoTranscript;
   let testParticipantId;
+  let authCookie;
 
   beforeAll(async () => {
+    await init();
+    ({ cookie: authCookie } = await createTestUser());
     // Create test project
     const projectResult = await pool.query(
       'INSERT INTO projects (id, name) VALUES (gen_random_uuid(), $1) RETURNING id',
@@ -67,7 +71,8 @@ describe('VTT Export API', () => {
   describe('GET /api/export/media/:mediaId/transcript/vtt', () => {
     it('should export VTT using correct column name original_filename', async () => {
       const res = await request(app)
-        .get(`/api/export/media/${testMediaId}/transcript/vtt`);
+        .get(`/api/export/media/${testMediaId}/transcript/vtt`)
+        .set('Cookie', authCookie);
 
       expect(res.status).toBe(200);
       expect(res.headers['content-type']).toContain('text/vtt');
@@ -76,7 +81,8 @@ describe('VTT Export API', () => {
 
     it('should generate valid WebVTT content', async () => {
       const res = await request(app)
-        .get(`/api/export/media/${testMediaId}/transcript/vtt`);
+        .get(`/api/export/media/${testMediaId}/transcript/vtt`)
+        .set('Cookie', authCookie);
 
       expect(res.status).toBe(200);
       expect(res.text).toContain('WEBVTT');
@@ -88,6 +94,7 @@ describe('VTT Export API', () => {
     it('should include participant voice tags in tagged format', async () => {
       const res = await request(app)
         .get(`/api/export/media/${testMediaId}/transcript/vtt`)
+        .set('Cookie', authCookie)
         .query({ format: 'tagged' });
 
       expect(res.status).toBe(200);
@@ -98,6 +105,7 @@ describe('VTT Export API', () => {
     it('should include participant names without tags in plain format', async () => {
       const res = await request(app)
         .get(`/api/export/media/${testMediaId}/transcript/vtt`)
+        .set('Cookie', authCookie)
         .query({ format: 'plain' });
 
       expect(res.status).toBe(200);
@@ -107,7 +115,8 @@ describe('VTT Export API', () => {
 
     it('should include proper timestamps', async () => {
       const res = await request(app)
-        .get(`/api/export/media/${testMediaId}/transcript/vtt`);
+        .get(`/api/export/media/${testMediaId}/transcript/vtt`)
+        .set('Cookie', authCookie);
 
       expect(res.status).toBe(200);
       expect(res.text).toContain('00:00:00.000 --> 00:00:02.500');
@@ -118,7 +127,8 @@ describe('VTT Export API', () => {
     it('should return 404 for non-existent media', async () => {
       const fakeId = '00000000-0000-0000-0000-000000000000';
       const res = await request(app)
-        .get(`/api/export/media/${fakeId}/transcript/vtt`);
+        .get(`/api/export/media/${fakeId}/transcript/vtt`)
+        .set('Cookie', authCookie);
 
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('Media file not found');
@@ -126,7 +136,8 @@ describe('VTT Export API', () => {
 
     it('should return 404 for media without transcript', async () => {
       const res = await request(app)
-        .get(`/api/export/media/${testMediaIdNoTranscript}/transcript/vtt`);
+        .get(`/api/export/media/${testMediaIdNoTranscript}/transcript/vtt`)
+        .set('Cookie', authCookie);
 
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('No transcript found for this media file');
@@ -134,7 +145,8 @@ describe('VTT Export API', () => {
 
     it('should return 400 for invalid UUID', async () => {
       const res = await request(app)
-        .get('/api/export/media/not-a-uuid/transcript/vtt');
+        .get('/api/export/media/not-a-uuid/transcript/vtt')
+        .set('Cookie', authCookie);
 
       expect(res.status).toBe(400);
     });
@@ -155,7 +167,8 @@ describe('VTT Export API', () => {
       );
 
       const res = await request(app)
-        .get(`/api/export/media/${specialMediaId}/transcript/vtt`);
+        .get(`/api/export/media/${specialMediaId}/transcript/vtt`)
+        .set('Cookie', authCookie);
 
       expect(res.status).toBe(200);
       expect(res.text).toContain('WEBVTT');

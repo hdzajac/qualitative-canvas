@@ -4,20 +4,24 @@ import { v4 as uuidv4 } from 'uuid';
 import { app, init } from '../app.js';
 import pool from '../db/pool.js';
 import { deleteMediaDeep } from './testCleanup.js';
+import { createTestUser } from './testAuth.js';
 
-let mediaId; let projectId; let jobId;
+let mediaId; let projectId; let jobId; let authCookie;
 
 beforeAll(async () => {
   await init();
-  const proj = await request(app).post('/api/projects').send({ name: 'BulkProj' });
+  ({ cookie: authCookie } = await createTestUser());
+  const proj = await request(app).post('/api/projects').set('Cookie', authCookie).send({ name: 'BulkProj' });
   projectId = proj.body.id;
   const upload = await request(app)
     .post('/api/media')
+    .set('Cookie', authCookie)
     .attach('file', Buffer.from('dummybulk'), 'dummy.txt')
     .field('projectId', projectId);
   mediaId = upload.body.id;
   const job = await request(app)
     .post(`/api/media/${mediaId}/transcribe`)
+    .set('Cookie', authCookie)
     .send({ model: 'test-model' });
   jobId = job.body.id;
 });
@@ -31,10 +35,11 @@ describe('Bulk segment insert', () => {
     ];
     const res = await request(app)
       .post(`/api/media/${mediaId}/segments/bulk`)
+      .set('Cookie', authCookie)
       .send({ segments: segs });
     expect(res.status).toBe(201);
     expect(res.body.count).toBe(3);
-    const list = await request(app).get(`/api/media/${mediaId}/segments`);
+    const list = await request(app).get(`/api/media/${mediaId}/segments`).set('Cookie', authCookie);
     expect(list.status).toBe(200);
     expect(list.body.length).toBe(3);
     expect(list.body[1]).toMatchObject({ idx: 1, text: 'Two' });

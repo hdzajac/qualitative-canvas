@@ -4,19 +4,20 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { init, buildApp } from '../app.js';
+import { app, init } from '../app.js';
 import pool from '../db/pool.js';
 import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
 import archiver from 'archiver';
 import { Readable } from 'stream';
+import { createTestUser } from './testAuth.js';
 
 describe('Project Import', () => {
-  let app;
+  let authCookie;
 
   beforeAll(async () => {
     await init();
-    app = buildApp();
+    ({ cookie: authCookie } = await createTestUser());
   });
 
   afterAll(async () => {
@@ -80,6 +81,7 @@ ${uuidv4()},${oldProjectId},"Test annotation",100,100,2024-01-15T10:05:00.000Z`
     // Import the project
     const response = await request(app)
       .post('/api/import/projects')
+      .set('Cookie', authCookie)
       .attach('file', zipBuffer, 'test-import.zip')
       .expect(201);
 
@@ -171,6 +173,7 @@ ${oldSegmentId2},${oldMediaId},${oldParticipantId2},1,2000,4500,"Hi! How are you
 
     const response = await request(app)
       .post('/api/import/projects')
+      .set('Cookie', authCookie)
       .attach('file', zipBuffer, 'media-import.zip')
       .expect(201);
 
@@ -225,6 +228,7 @@ ${oldSegmentId2},${oldMediaId},${oldParticipantId2},1,2000,4500,"Hi! How are you
 
     const response = await request(app)
       .post('/api/import/validate')
+      .set('Cookie', authCookie)
       .attach('file', zipBuffer, 'incomplete.zip')
       .expect(200);
 
@@ -236,6 +240,7 @@ ${oldSegmentId2},${oldMediaId},${oldParticipantId2},1,2000,4500,"Hi! How are you
   it('should reject non-ZIP files', async () => {
     const response = await request(app)
       .post('/api/import/projects')
+      .set('Cookie', authCookie)
       .attach('file', Buffer.from('not a zip'), 'test.txt')
       .expect(500);
 
@@ -252,6 +257,7 @@ ${oldSegmentId2},${oldMediaId},${oldParticipantId2},1,2000,4500,"Hi! How are you
 
     const response = await request(app)
       .post('/api/import/projects')
+      .set('Cookie', authCookie)
       .attach('file', zipBuffer, 'incomplete.zip')
       .expect(400);
 
@@ -296,6 +302,7 @@ ${oldInsightId},${oldProjectId},"Combined Insight","${oldThemeId1};${oldThemeId2
 
     const response = await request(app)
       .post('/api/import/projects')
+      .set('Cookie', authCookie)
       .attach('file', zipBuffer, 'complex.zip')
       .expect(201);
 
@@ -343,6 +350,7 @@ ${oldInsightId},${oldProjectId},"Combined Insight","${oldThemeId1};${oldThemeId2
     const zip1 = await createImportZip(csvFiles);
     const response1 = await request(app)
       .post('/api/import/projects')
+      .set('Cookie', authCookie)
       .attach('file', zip1, 'export.zip')
       .expect(201);
 
@@ -355,6 +363,7 @@ ${oldInsightId},${oldProjectId},"Combined Insight","${oldThemeId1};${oldThemeId2
     const zip2 = await createImportZip(csvFiles);
     const response2 = await request(app)
       .post('/api/import/projects')
+      .set('Cookie', authCookie)
       .attach('file', zip2, 'export.zip')
       .expect(201);
 
@@ -367,6 +376,7 @@ ${oldInsightId},${oldProjectId},"Combined Insight","${oldThemeId1};${oldThemeId2
     const zip3 = await createImportZip(csvFiles);
     const response3 = await request(app)
       .post('/api/import/projects')
+      .set('Cookie', authCookie)
       .attach('file', zip3, 'export.zip')
       .expect(201);
 
