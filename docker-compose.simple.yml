@@ -38,6 +38,8 @@ services:
       PORT: 5002
       NODE_ENV: production
       SESSION_SECRET: default-secret-change-in-production
+      WORKER_SECRET: ${WORKER_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
     volumes:
       - media_files:/app/data/media
     ports:
@@ -61,7 +63,8 @@ services:
     depends_on:
       - backend
     environment:
-      BACKEND_URL: http://backend:5002
+      BASE_URL: http://backend:5002/api
+      WORKER_SECRET: ${WORKER_SECRET}
       POLL_INTERVAL: 5
       LOG_LEVEL: INFO
 
