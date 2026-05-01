@@ -11,10 +11,12 @@ export interface ThemeCardData {
     proximity?: number;
     /** Computed field ring radius in px, passed from FlowCanvas buildNodes */
     fieldRadius?: number;
+    /** Set when a remote peer holds a drag-lock on this node */
+    lockedBy?: { userId: string; displayName: string; color: string };
 }
 
 function ThemeCard({ data, selected }: NodeProps) {
-    const { theme, label, onOpen, proximity = 0, fieldRadius } = data as unknown as ThemeCardData;
+    const { theme, label, onOpen, proximity = 0, fieldRadius, lockedBy } = data as unknown as ThemeCardData;
     const memberCount = (theme.highlightIds ?? []).length;
 
     return (
@@ -30,6 +32,7 @@ function ThemeCard({ data, selected }: NodeProps) {
             onOpen={onOpen}
             showSourceHandle
             footerLabel={label}
+            lockedBy={lockedBy}
         />
     );
 }

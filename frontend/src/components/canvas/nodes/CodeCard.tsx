@@ -21,10 +21,12 @@ export interface CodeCardData {
     /** Themes this code currently belongs to — drives the membership strip + context menu */
     parentThemes?: CodeCardParent[];
     onRemoveFromTheme?: (themeId: string) => void;
+    /** Set when a remote peer holds a drag-lock on this node */
+    lockedBy?: { userId: string; displayName: string; color: string };
 }
 
 function CodeCard({ data, selected }: NodeProps) {
-    const { highlight, fileName, onOpen, parentThemes = [], onRemoveFromTheme } = data as unknown as CodeCardData;
+    const { highlight, fileName, onOpen, parentThemes = [], onRemoveFromTheme, lockedBy } = data as unknown as CodeCardData;
 
     const handleOpen = useCallback(
         (e: React.MouseEvent) => {
@@ -40,12 +42,21 @@ function CodeCard({ data, selected }: NodeProps) {
             style={{
                 width: '100%',
                 minHeight: 72,
-                border: selected ? '3px solid #2563eb' : '1.5px solid #111827',
+                border: lockedBy ? `2px solid ${lockedBy.color}` : selected ? '3px solid #2563eb' : '1.5px solid #111827',
                 boxShadow: selected
                     ? '0 6px 14px rgba(0,0,0,0.25)'
                     : '0 3px 6px rgba(0,0,0,0.06)',
             }}
         >
+            {/* Peer lock badge */}
+            {lockedBy && (
+                <div
+                    className="absolute -top-5 left-0 text-white text-[9px] font-medium px-1 py-0.5 whitespace-nowrap pointer-events-none"
+                    style={{ backgroundColor: lockedBy.color, borderRadius: '2px', zIndex: 10 }}
+                >
+                    {lockedBy.displayName}
+                </div>
+            )}
             {/* Left accent strip — always blue; membership shown via badge pills below */}
             <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-600" />
 

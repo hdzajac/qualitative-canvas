@@ -25,6 +25,8 @@ export interface ParentCardProps {
     children?: React.ReactNode;
     /** Optional sub-label rendered at the bottom */
     footerLabel?: string;
+    /** Set when a remote peer holds a drag-lock on this node */
+    lockedBy?: { userId: string; displayName: string; color: string };
 }
 
 function ParentCard({
@@ -40,6 +42,7 @@ function ParentCard({
     showSourceHandle = false,
     children,
     footerLabel,
+    lockedBy,
 }: ParentCardProps) {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -73,7 +76,7 @@ function ParentCard({
             style={{
                 width: '100%',
                 height: '100%',
-                border: selected ? `3px solid ${accentColor}` : '1.5px solid #111827',
+                border: lockedBy ? `2px solid ${lockedBy.color}` : selected ? `3px solid ${accentColor}` : '1.5px solid #111827',
                 boxShadow: selected
                     ? '0 6px 14px rgba(0,0,0,0.25)'
                     : '0 3px 6px rgba(0,0,0,0.06)',
@@ -87,6 +90,15 @@ function ParentCard({
                 isFlashing={isFlashing}
                 color={accentColor}
             />
+            {/* Peer lock badge */}
+            {lockedBy && (
+                <div
+                    className="absolute -top-5 left-0 text-white text-[9px] font-medium px-1 py-0.5 whitespace-nowrap pointer-events-none"
+                    style={{ backgroundColor: lockedBy.color, borderRadius: '2px', zIndex: 10 }}
+                >
+                    {lockedBy.displayName}
+                </div>
+            )}
             {/* Left accent strip */}
             <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${accentClass}`} />
 

@@ -17,10 +17,12 @@ export interface AnnotationNodeData {
     onDelete: (id: string) => void;
     onColorChange: (id: string, color: string) => void;
     onResize: (id: string, w: number, h: number) => void;
+    /** Set when a remote peer holds a drag-lock on this node */
+    lockedBy?: { userId: string; displayName: string; color: string };
 }
 
 function AnnotationNode({ data, selected }: NodeProps) {
-    const { annotation, onCommit, onDelete, onColorChange, onResize } = data as unknown as AnnotationNodeData;
+    const { annotation, onCommit, onDelete, onColorChange, onResize, lockedBy } = data as unknown as AnnotationNodeData;
     const [draft, setDraft] = useState(annotation.content ?? '');
     const [editing, setEditing] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -45,6 +47,15 @@ function AnnotationNode({ data, selected }: NodeProps) {
 
     return (
         <div className="w-full h-full relative">
+            {/* Peer lock badge */}
+            {lockedBy && (
+                <div
+                    className="absolute -top-5 left-0 text-white text-[9px] font-medium px-1 py-0.5 whitespace-nowrap pointer-events-none"
+                    style={{ backgroundColor: lockedBy.color, borderRadius: '2px', zIndex: 10 }}
+                >
+                    {lockedBy.displayName}
+                </div>
+            )}
             <NodeResizer
                 isVisible={selected}
                 minWidth={100}
@@ -82,7 +93,7 @@ function AnnotationNode({ data, selected }: NodeProps) {
                 className="w-full h-full overflow-hidden"
                 style={{
                     background: bg,
-                    border: selected ? '1.5px solid #6b7280' : '1px solid #d1d5db',
+                    border: lockedBy ? `2px solid ${lockedBy.color}` : selected ? '1.5px solid #6b7280' : '1px solid #d1d5db',
                     boxShadow: selected ? '0 4px 12px rgba(0,0,0,0.15)' : '0 2px 4px rgba(0,0,0,0.08)',
                     fontSize,
                 }}

@@ -10,10 +10,12 @@ export interface InsightCardData {
     proximity?: number;
     /** Computed field ring radius in px, passed from FlowCanvas buildNodes */
     fieldRadius?: number;
+    /** Set when a remote peer holds a drag-lock on this node */
+    lockedBy?: { userId: string; displayName: string; color: string };
 }
 
 function InsightCard({ data, selected }: NodeProps) {
-    const { insight, onOpen, proximity = 0, fieldRadius } = data as unknown as InsightCardData;
+    const { insight, onOpen, proximity = 0, fieldRadius, lockedBy } = data as unknown as InsightCardData;
     const memberCount = (insight.themeIds ?? []).length;
     return (
         <ParentCard
@@ -27,6 +29,7 @@ function InsightCard({ data, selected }: NodeProps) {
             selected={selected}
             onOpen={onOpen}
             showSourceHandle={false}
+            lockedBy={lockedBy}
         />
     );
 }

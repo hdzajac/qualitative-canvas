@@ -128,6 +128,8 @@ function buildNodes(
     onAnnotationResize: (id: string, w: number, h: number) => void,
     /** Nodes currently being dragged by the local user — keep their live posMap position */
     localDraggingIds: Set<string>,
+    /** Positions pinned after drag-end — override stale server data until the PATCH confirms */
+    pinnedPositions: Map<string, { x: number; y: number }>,
     /** Nodes locked by a remote peer — rendered with a ring and not interactable */
     lockedBy: Map<string, NodeLock>,
     currentUserId: string | undefined,
@@ -163,6 +165,9 @@ function buildNodes(
         layoutDefault: { x: number; y: number },
     ): { x: number; y: number } {
         if (localDraggingIds.has(nodeId)) return posMap.get(nodeId) ?? serverPos ?? layoutDefault;
+        // Use a pinned position (set at drag-end) while the server hasn't confirmed the new position yet.
+        const pinned = pinnedPositions.get(nodeId);
+        if (pinned) return pinned;
         if (serverPos) return serverPos;
         return posMap.get(nodeId) ?? layoutDefault;
     }
@@ -485,6 +490,9 @@ export function FlowCanvas({
     // Track which nodes the LOCAL user is actively dragging so buildNodes keeps their live position
     // rather than overwriting with server data mid-drag.
     const localDraggingIdsRef = useRef<Set<string>>(new Set());
+    // Pin the final dropped position until the server confirms it, preventing a visible
+    // jump when a stale GET refetch arrives before the PATCH round-trip completes.
+    const pinnedPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
     // ─── Collaboration ────────────────────────────────────────────────────────
     const containerRef = useRef<HTMLDivElement>(null);
@@ -605,7 +613,7 @@ export function FlowCanvas({
 
     useEffect(() => {
         setNodes((prev) => {
-            const next = buildNodes(highlights, themes, insights, annotations, files, handleOpen, handleAnnotationCommit, handleAnnotationDelete, handleAnnotationColorChange, handleRemoveFromTheme, handleAnnotationResize, localDraggingIdsRef.current, lockedBy, userId, prev);
+            const next = buildNodes(highlights, themes, insights, annotations, files, handleOpen, handleAnnotationCommit, handleAnnotationDelete, handleAnnotationColorChange, handleRemoveFromTheme, handleAnnotationResize, localDraggingIdsRef.current, pinnedPositionsRef.current, lockedBy, userId, prev);
             nodesRef.current = next;
             return next;
         });
@@ -749,7 +757,17 @@ export function FlowCanvas({
     );
 
     const onNodeDrag: OnNodeDrag = useCallback(
-        (_, draggedNode) => {
+        (event, draggedNode) => {
+            // Emit cursor position during drag — React Flow captures pointer events so
+            // the container's onMouseMove stops firing while a node is being dragged.
+            if (containerRef.current) {
+                const rect = containerRef.current.getBoundingClientRect();
+                const { x: vpX, y: vpY, zoom } = viewportRef.current;
+                const worldX = (event.clientX - rect.left - vpX) / zoom;
+                const worldY = (event.clientY - rect.top - vpY) / zoom;
+                emitCursorMove(worldX, worldY);
+            }
+
             const colonIdx = draggedNode.id.indexOf(':');
             const draggedKind = draggedNode.id.slice(0, colonIdx);
 
@@ -835,7 +853,7 @@ export function FlowCanvas({
                 })
             );
         },
-        [setNodes, emitDragMove]
+        [setNodes, emitDragMove, emitCursorMove]
     );
 
     /**
@@ -853,14 +871,21 @@ export function FlowCanvas({
             const draggedKind = draggedNode.id.slice(0, colonIdx);
             const draggedEntityId = draggedNode.id.slice(colonIdx + 1);
 
-            // Release the local-dragging lock after the persist debounce (500ms) has fired,
-            // so the next buildNodes re-run trusts server data.
-            setTimeout(() => localDraggingIdsRef.current.delete(draggedNode.id), 600);
+            // Clear active-drag guard immediately — pinnedPositionsRef holds the final
+            // position for 3 s so stale GET refetches cannot cause a visible jump.
+            localDraggingIdsRef.current.delete(draggedNode.id);
+            pinnedPositionsRef.current.set(draggedNode.id, draggedNode.position);
+            setTimeout(() => pinnedPositionsRef.current.delete(draggedNode.id), 3000);
             if (groupDragRef.current?.parentId === draggedNode.id) {
                 const childIds = groupDragRef.current.childNodeIds;
-                childIds.forEach((id) =>
-                    setTimeout(() => localDraggingIdsRef.current.delete(id), 600)
-                );
+                childIds.forEach((id) => {
+                    localDraggingIdsRef.current.delete(id);
+                    const child = nodesRef.current.find((n) => n.id === id);
+                    if (child) {
+                        pinnedPositionsRef.current.set(id, child.position);
+                        setTimeout(() => pinnedPositionsRef.current.delete(id), 3000);
+                    }
+                });
                 // Release peer locks for the whole group
                 emitDragEnd([draggedNode.id, ...childIds]);
             } else {
@@ -1147,6 +1172,21 @@ export function FlowCanvas({
 
     return (
         <div ref={containerRef} className="w-full h-full" onMouseMove={handleCanvasMouseMove}>
+            {/* Peer presence strip — top-right, outside ReactFlow to avoid viewport transforms */}
+            {peers.size > 0 && (
+                <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 pointer-events-none">
+                    {Array.from(peers.values()).map((peer) => (
+                        <div
+                            key={peer.userId}
+                            className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold shadow"
+                            style={{ backgroundColor: peer.color, border: '2px solid white' }}
+                            title={peer.displayName}
+                        >
+                            {peer.displayName.slice(0, 2).toUpperCase()}
+                        </div>
+                    ))}
+                </div>
+            )}
             <ReactFlow
                 nodes={nodes}
                 edges={[]}
