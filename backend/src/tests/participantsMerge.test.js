@@ -86,7 +86,15 @@ describe('assign-participant by segmentIds', () => {
       ],
     });
     expect(ins.status).toBe(201);
-    const [segA, segB, segC] = ins.body;
+    expect(ins.body.count).toBe(3);
+    // bulk returns { count } not segments — fetch to get IDs
+    const segs = await request(app).get(`/api/media/${mediaId}/segments`).set('Cookie', authCookie);
+    const segA = segs.body.find(s => s.text === 'Seg A');
+    const segB = segs.body.find(s => s.text === 'Seg B');
+    const segC = segs.body.find(s => s.text === 'Seg C');
+    expect(segA).toBeTruthy();
+    expect(segB).toBeTruthy();
+    expect(segC).toBeTruthy();
 
     // Assign only segA and segC by id
     const res = await request(app)
@@ -112,7 +120,11 @@ describe('assign-participant by segmentIds', () => {
     const ins = await request(app).post(`/api/media/${mediaId}/segments/bulk`).set('Cookie', authCookie).send({
       segments: [{ idx: 20, startMs: 10000, endMs: 10500, text: 'Clearable' }],
     });
-    const [seg] = ins.body;
+    expect(ins.body.count).toBe(1);
+    // bulk returns { count } not segments — fetch to get ID
+    const segsAfterBulk = await request(app).get(`/api/media/${mediaId}/segments`).set('Cookie', authCookie);
+    const seg = segsAfterBulk.body.find(s => s.text === 'Clearable');
+    expect(seg).toBeTruthy();
 
     // Assign
     await request(app)
