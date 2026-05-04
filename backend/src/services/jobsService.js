@@ -38,8 +38,6 @@ export default function jobsService(pool) {
         const job = await setJobStatus(client, jobId, { status: 'done', setCompleted: true });
         if (job) {
           await updateMedia(client, job.mediaFileId, { status: 'done' });
-          const { ensureFileEntryForMedia } = await import('../dao/fileEntriesDao.js');
-          await ensureFileEntryForMedia(client, job.mediaFileId);
         }
         await client.query('COMMIT');
         return job;
