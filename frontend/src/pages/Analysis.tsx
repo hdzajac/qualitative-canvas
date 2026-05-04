@@ -391,11 +391,11 @@ export default function AnalysisPage() {
             <div className="flex items-center justify-between">
                 <h1 className="text-xl font-extrabold uppercase tracking-wide">Analysis</h1>
                 <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                    <Button size="sm" onClick={handleCreateThemeFromSelection}>
+                    <Button size="sm" variant="outline" className="border-2 border-emerald-600 rounded-none bg-emerald-50 uppercase tracking-wide text-xs text-emerald-700 hover:bg-emerald-100" onClick={handleCreateThemeFromSelection}>
                         <Plus className="w-4 h-4 mr-1" />
                         {selectedCodes.length > 0 ? `Create Theme (${selectedCodes.length})` : 'New Theme'}
                     </Button>
-                    <Button size="sm" onClick={handleCreateInsightFromSelection}>
+                    <Button size="sm" variant="outline" className="border-2 border-amber-500 rounded-none bg-amber-50 uppercase tracking-wide text-xs text-amber-700 hover:bg-amber-100" onClick={handleCreateInsightFromSelection}>
                         <Plus className="w-4 h-4 mr-1" />
                         {selectedThemes.length > 0 ? `Create Insight (${selectedThemes.length})` : 'New Insight'}
                     </Button>

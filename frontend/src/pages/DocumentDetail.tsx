@@ -1,4 +1,4 @@
-import { useRef, useMemo, useEffect, useState } from 'react';
+import { useRef, useMemo, useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { getFile, getHighlights, getProjects, getMedia, listSegments, listParticipants, updateSegment, deleteSegment, getMediaDownloadUrl, createParticipant, updateParticipant, deleteParticipantApi, getParticipantSegmentCounts, mergeParticipants, mergeSpeakerRuns, deleteHighlight } from '@/services/api';
@@ -25,8 +25,40 @@ function DocumentView({ fileId }: { fileId: string }) {
     const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects });
 
     const viewerRef = useRef<DocumentViewerHandle>(null);
+    const gutterRef = useRef<HTMLDivElement>(null);
     const sortedHighlights = useMemo(() => [...highlights].sort((a, b) => a.startOffset - b.startOffset), [highlights]);
     const [pendingDeleteHighlightId, setPendingDeleteHighlightId] = useState<string | null>(null);
+    const [chipTops, setChipTops] = useState<Map<string, number>>(new Map());
+
+    useEffect(() => {
+        const CHIP_H = 44;
+        const GAP = 4;
+        const compute = () => {
+            if (!viewerRef.current || !gutterRef.current) return;
+            const gutterAbsTop = gutterRef.current.getBoundingClientRect().top + window.scrollY;
+            let cursor = 0;
+            const next = new Map<string, number>();
+            for (const h of sortedHighlights) {
+                const absY = viewerRef.current.getTopForOffset(h.startOffset);
+                if (absY === null) continue;
+                const natural = absY - gutterAbsTop;
+                const top = Math.max(natural, cursor);
+                next.set(h.id, top);
+                cursor = top + CHIP_H + GAP;
+            }
+            setChipTops(next);
+        };
+        const t = window.setTimeout(compute, 150);
+        window.addEventListener('resize', compute);
+        return () => { window.clearTimeout(t); window.removeEventListener('resize', compute); };
+    }, [sortedHighlights]);
+
+    const gutterMinHeight = useMemo(() => {
+        const CHIP_H = 44;
+        if (chipTops.size === 0) return sortedHighlights.length * 52;
+        const tops = Array.from(chipTops.values());
+        return tops.length === 0 ? 0 : Math.max(...tops) + CHIP_H + 20;
+    }, [chipTops, sortedHighlights.length]);
 
     if (!file) return <div className="text-sm text-neutral-600">Loading document...</div>;
 
@@ -59,48 +91,53 @@ function DocumentView({ fileId }: { fileId: string }) {
             </Breadcrumb>
 
             <div className="border-2 border-black p-4">
-                <h2 className="text-base md:text-lg font-bold uppercase tracking-wide mb-2">Document</h2>
-                <DocumentViewer
-                    ref={viewerRef}
-                    fileId={file.id}
-                    content={file.content}
-                    highlights={highlights}
-                    onHighlightCreated={() => refetchHighlights()}
-                    isVtt={/\.(vtt|transcript\.txt)$/i.test(file.filename)}
-                    framed={false}
-                    readOnly={false}
-                    enableSelectionActions={true}
-                    rightPanel={(
-                        <div className="pl-4 border-l-2 border-black">
-                            <div className="text-xs font-semibold uppercase text-neutral-600 tracking-wide mb-2">Codes</div>
-                            <div className="space-y-2">
-                                {sortedHighlights.map((h) => (
+                <h2 className="text-base md:text-lg font-bold uppercase tracking-wide mb-4">Document</h2>
+                <div className="flex gap-4 items-start">
+                    <div className="flex-1 min-w-0">
+                        <DocumentViewer
+                            ref={viewerRef}
+                            fileId={file.id}
+                            content={file.content}
+                            highlights={highlights}
+                            onHighlightCreated={() => refetchHighlights()}
+                            isVtt={/\.(vtt|transcript\.txt)$/i.test(file.filename)}
+                            framed={false}
+                            readOnly={false}
+                            enableSelectionActions={true}
+                        />
+                    </div>
+                    <div
+                        ref={gutterRef}
+                        className="relative flex-shrink-0 w-48"
+                        style={{ minHeight: gutterMinHeight }}
+                    >
+                        {sortedHighlights.map((h) => {
+                            const top = chipTops.get(h.id);
+                            if (top === undefined) return null;
+                            return (
+                                <div key={h.id} className="absolute left-0 right-0" style={{ top }}>
                                     <div
-                                        key={h.id}
-                                        className="text-[11px] leading-tight px-2 py-1 bg-primary/10 border border-primary/30 rounded cursor-pointer hover:bg-primary/20 group relative"
+                                        className="text-[11px] leading-tight px-2 py-1 bg-primary/10 border-l-2 border-primary/60 cursor-pointer hover:bg-primary/20 group relative"
                                         onClick={() => viewerRef.current?.scrollToOffset(h.startOffset)}
                                         title={h.text}
                                     >
-                                        <div className="font-semibold text-primary truncate pr-6">{h.codeName || 'Code'}</div>
-                                        <div className="text-neutral-700 truncate">{h.text || ''}</div>
+                                        <div className="font-semibold text-primary truncate pr-5">{h.codeName || 'Code'}</div>
+                                        <div className="text-neutral-500 truncate text-[10px]">{h.text || ''}</div>
                                         <button
-                                            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-100 rounded"
-                                            onClick={async (e) => {
-                                                e.stopPropagation();
-                                                setPendingDeleteHighlightId(h.id);
-                                            }}
+                                            className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-red-100 rounded"
+                                            onClick={(e) => { e.stopPropagation(); setPendingDeleteHighlightId(h.id); }}
                                             title="Delete code"
                                         >
-                                            <svg className="w-3 h-3 text-neutral-600 hover:text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            <svg className="w-3 h-3 text-neutral-400 hover:text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                             </svg>
                                         </button>
                                     </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                />
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
             </div>
 
             <ConfirmDialog
@@ -211,6 +248,8 @@ function MediaView({ mediaId }: { mediaId: string }) {
         onError: () => toast.error('Failed to merge segments'),
     });
 
+    const [participantsPanelOpen, setParticipantsPanelOpen] = useState(false);
+
     if (!media) return <div className="text-sm text-neutral-600">Loading transcript...</div>;
 
     const projectName = projects.find(p => p.id === media.projectId)?.name || 'Project';
@@ -242,39 +281,82 @@ function MediaView({ mediaId }: { mediaId: string }) {
             </Breadcrumb>
 
             <div className="border-2 border-black p-4">
-                <h2 className="text-base md:text-lg font-bold uppercase tracking-wide mb-2">{media.originalFilename}</h2>
+                <div className="flex items-center gap-3 mb-4">
+                    <h2 className="text-base md:text-lg font-bold uppercase tracking-wide flex-1 min-w-0 truncate">{media.originalFilename}</h2>
+                    {media.status === 'done' && segments.length > 0 && (
+                        <div className="flex gap-2 flex-shrink-0">
+                            <button
+                                className="brutal-button px-3 py-1 text-xs disabled:opacity-50"
+                                onClick={() => mergeRunsMut.mutate()}
+                                disabled={mergeRunsMut.isPending}
+                                title="Merge consecutive same-speaker lines (≤800ms gap, ≤30s max)"
+                            >
+                                {mergeRunsMut.isPending ? 'Merging…' : 'Merge segments'}
+                            </button>
+                            <button className="brutal-button px-3 py-1 text-xs" onClick={() => setParticipantsPanelOpen(true)}>
+                                Participants
+                            </button>
+                        </div>
+                    )}
+                </div>
                 {media.status === 'done' && segments.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-6 items-start">
-                        <AudioProvider>
-                            <TranscriptWithAudio
-                                mediaId={mediaId}
-                                audioUrl={audioUrl}
-                                segments={segments}
-                                participants={participants}
-                                counts={counts}
-                                newPart={newPart}
-                                onNewPartChange={setNewPart}
-                                onCreateParticipant={() => createPartMut.mutate()}
-                                onUpdateParticipant={(partId, name) => updatePartMut.mutate({ partId, name })}
-                                onDeleteParticipant={(partId) => deletePartMut.mutate(partId)}
-                                mergeSource={mergeSource}
-                                mergeTarget={mergeTarget}
-                                onMergeSourceChange={setMergeSource}
-                                onMergeTargetChange={setMergeTarget}
-                                onMergeParticipants={() => mergeMut.mutate()}
-                                isMergingParticipants={mergeMut.isPending}
-                                isSavingParticipant={updatePartMut.isPending}
-                                onMergeSegmentRuns={() => mergeRunsMut.mutate()}
-                                isMergingSegmentRuns={mergeRunsMut.isPending}
-                            />
-                        </AudioProvider>
-                    </div>
+                    <AudioProvider>
+                        <TranscriptWithAudio
+                            mediaId={mediaId}
+                            audioUrl={audioUrl}
+                            segments={segments}
+                            participants={participants}
+                            counts={counts}
+                            newPart={newPart}
+                            onNewPartChange={setNewPart}
+                            onCreateParticipant={() => createPartMut.mutate()}
+                            onUpdateParticipant={(partId, name) => updatePartMut.mutate({ partId, name })}
+                            onDeleteParticipant={(partId) => deletePartMut.mutate(partId)}
+                            mergeSource={mergeSource}
+                            mergeTarget={mergeTarget}
+                            onMergeSourceChange={setMergeSource}
+                            onMergeTargetChange={setMergeTarget}
+                            onMergeParticipants={() => mergeMut.mutate()}
+                            isMergingParticipants={mergeMut.isPending}
+                            isSavingParticipant={updatePartMut.isPending}
+                            onMergeSegmentRuns={() => mergeRunsMut.mutate()}
+                            isMergingSegmentRuns={mergeRunsMut.isPending}
+                        />
+                    </AudioProvider>
                 ) : (
                     <div className="text-sm text-neutral-600">
                         {media.status === 'processing' ? 'Transcription in progress...' : 'No transcript available yet.'}
                     </div>
                 )}
             </div>
+
+            <Sheet open={participantsPanelOpen} onOpenChange={setParticipantsPanelOpen}>
+                <SheetContent side="right" className="rounded-none border-l-4 border-black sm:max-w-sm">
+                    <SheetHeader>
+                        <SheetTitle className="uppercase tracking-wide">Participants</SheetTitle>
+                    </SheetHeader>
+                    <div className="mt-4">
+                        <ParticipantPanel
+                            participants={participants}
+                            counts={counts}
+                            newPart={newPart}
+                            onNewPartChange={setNewPart}
+                            onCreate={() => createPartMut.mutate()}
+                            merging={{
+                                source: mergeSource,
+                                target: mergeTarget,
+                                setSource: setMergeSource,
+                                setTarget: setMergeTarget,
+                                onMerge: () => mergeMut.mutate(),
+                                isMerging: mergeMut.isPending
+                            }}
+                            onDelete={(partId) => deletePartMut.mutate(partId)}
+                            onSave={(partId, name) => updatePartMut.mutate({ partId, name })}
+                            isSaving={updatePartMut.isPending}
+                        />
+                    </div>
+                </SheetContent>
+            </Sheet>
         </>
     );
 }
@@ -328,10 +410,24 @@ function TranscriptWithAudio({
     const deleteQueueRef = useRef<Set<string>>(new Set());
     const [pendingDeleteCodeId, setPendingDeleteCodeId] = useState<string | null>(null);
     const [isFlushingDeleteQueue, setIsFlushingDeleteQueue] = useState(false);
+    const [editModeEnabled, setEditModeEnabled] = useState(false);
 
     useEffect(() => {
         setSrc(audioUrl);
     }, [audioUrl, setSrc]);
+
+    useEffect(() => {
+        const handleKey = (e: KeyboardEvent) => {
+            const target = e.target as HTMLElement | null;
+            if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+            if (e.key === 'e' || e.key === 'E') {
+                e.preventDefault();
+                setEditModeEnabled(v => !v);
+            }
+        };
+        document.addEventListener('keydown', handleKey);
+        return () => document.removeEventListener('keydown', handleKey);
+    }, []);
 
     // Cleanup: Actually delete segments when component unmounts or when user performs another action
     useEffect(() => {
@@ -442,8 +538,8 @@ function TranscriptWithAudio({
         }
     };
 
-    // Sidepanel state
-    const [participantsPanelOpen, setParticipantsPanelOpen] = useState(false);
+    const gutterRef = useRef<HTMLDivElement>(null);
+    const [codeChipTops, setCodeChipTops] = useState<Map<string, number>>(new Map());
 
     // Fetch real codes/highlights for this transcript (mediaId)
     const { data: codes = [] } = useQuery({
@@ -454,175 +550,217 @@ function TranscriptWithAudio({
 
     const transcriptContainerRef = useRef<HTMLDivElement>(null);
 
-    // Build a map of character offset to segment index
-    const offsetToSegmentMap = useMemo(() => {
-        const map: Array<{ startOffset: number; endOffset: number; segmentId: string; idx: number }> = [];
-        let currentOffset = 0;
-        segments.forEach((seg, idx) => {
-            // Each segment includes participant name prefix if present
+    // Global offset map — mirrors how TranscriptViewer computes offsets for multi-segment codes
+    const globalOffsetMap = useMemo(() => {
+        const map: Array<{ startGlobal: number; endGlobal: number; seg: TranscriptSegment }> = [];
+        let cur = 0;
+        for (const seg of segments) {
             const prefix = seg.participantName ? `${seg.participantName}: ` : '';
-            const fullText = prefix + seg.text + '\n'; // Add newline between segments
-            const startOffset = currentOffset;
-            const endOffset = currentOffset + fullText.length;
-            map.push({ startOffset, endOffset, segmentId: seg.id, idx });
-            currentOffset = endOffset;
-        });
+            const fullText = prefix + seg.text + '\n';
+            map.push({ startGlobal: cur, endGlobal: cur + fullText.length, seg });
+            cur += fullText.length;
+        }
         return map;
     }, [segments]);
 
-    // Sort codes by their position in the transcript (by segment index, then by offset within segment)
+    // Returns the first segment a code touches.
+    // Multi-segment codes (text contains \n) use global cumulative offsets.
+    // Single-segment codes use local offsets within seg.text — matched by text content.
+    const findSegmentForCode = useCallback((code: Highlight) => {
+        if (code.text.includes('\n')) {
+            // Multi-segment: startOffset is a global cumulative offset
+            const entry = globalOffsetMap.find(
+                ({ startGlobal, endGlobal }) => code.startOffset >= startGlobal && code.startOffset < endGlobal
+            );
+            return entry?.seg ?? null;
+        }
+        // Single-segment: startOffset is local to seg.text
+        for (const seg of segments) {
+            const prefix = seg.participantName ? `${seg.participantName}: ` : '';
+            const codeBody = code.text.startsWith(prefix) ? code.text.slice(prefix.length) : code.text;
+            const len = codeBody.length;
+            if (len > 0 && seg.text.slice(code.startOffset, code.startOffset + len) === codeBody) return seg;
+        }
+        // Fallback: substring match
+        for (const seg of segments) {
+            const prefix = seg.participantName ? `${seg.participantName}: ` : '';
+            const codeBody = code.text.startsWith(prefix) ? code.text.slice(prefix.length) : code.text;
+            if (codeBody.length > 0 && seg.text.includes(codeBody)) return seg;
+        }
+        return null;
+    }, [segments, globalOffsetMap]);
+
     const sortedCodes = useMemo(() => {
         return [...codes].sort((a, b) => {
-            // Find which segment each code belongs to
-            const segA = offsetToSegmentMap.find(seg => a.startOffset >= seg.startOffset && a.startOffset < seg.endOffset);
-            const segB = offsetToSegmentMap.find(seg => b.startOffset >= seg.startOffset && b.startOffset < seg.endOffset);
-
-            if (!segA) return 1;  // Put codes without segments at the end
-            if (!segB) return -1;
-
-            // First sort by segment index (order in transcript)
-            if (segA.idx !== segB.idx) {
-                return segA.idx - segB.idx;
-            }
-
-            // If in same segment, sort by offset
+            const segA = findSegmentForCode(a);
+            const segB = findSegmentForCode(b);
+            const idxA = segA ? segments.findIndex(s => s.id === segA.id) : Infinity;
+            const idxB = segB ? segments.findIndex(s => s.id === segB.id) : Infinity;
+            if (idxA !== idxB) return idxA - idxB;
             return a.startOffset - b.startOffset;
         });
-    }, [codes, offsetToSegmentMap]);
+    }, [codes, findSegmentForCode, segments]);
 
-    // Determine which segments have codes (for highlighting)
     const highlightedSegmentIds = useMemo(() => {
         const ids = new Set<string>();
-        codes.forEach(code => {
-            // Find which segment(s) this code overlaps with
-            offsetToSegmentMap.forEach(seg => {
-                const codeStart = code.startOffset;
-                const codeEnd = code.endOffset;
-                const segStart = seg.startOffset;
-                const segEnd = seg.endOffset;
-                // Check if code overlaps with this segment
-                if (codeStart < segEnd && codeEnd > segStart) {
-                    ids.add(seg.segmentId);
+        for (const code of codes) {
+            if (code.text.includes('\n')) {
+                // Multi-segment: mark every segment the code's global range overlaps
+                for (const { startGlobal, endGlobal, seg } of globalOffsetMap) {
+                    if (code.startOffset < endGlobal && code.endOffset > startGlobal) {
+                        ids.add(seg.id);
+                    }
                 }
-            });
-        });
+            } else {
+                const seg = findSegmentForCode(code);
+                if (seg) ids.add(seg.id);
+            }
+        }
         return ids;
-    }, [codes, offsetToSegmentMap]);
+    }, [codes, findSegmentForCode, globalOffsetMap]);
+
+    useEffect(() => {
+        const CHIP_H = 44;
+        const GAP = 4;
+        const compute = () => {
+            if (!gutterRef.current) return;
+            const gutterAbsTop = gutterRef.current.getBoundingClientRect().top + window.scrollY;
+            let cursor = 0;
+            const next = new Map<string, number>();
+            for (const code of sortedCodes) {
+                const seg = findSegmentForCode(code);
+                if (!seg) continue;
+                const segEl = document.querySelector(`[data-segment-id="${seg.id}"]`);
+                if (!segEl) continue;
+                const segAbsTop = segEl.getBoundingClientRect().top + window.scrollY;
+                const natural = segAbsTop - gutterAbsTop;
+                const top = Math.max(natural, cursor);
+                next.set(code.id, top);
+                cursor = top + CHIP_H + GAP;
+            }
+            setCodeChipTops(next);
+        };
+        const t = window.setTimeout(compute, 150);
+        window.addEventListener('resize', compute);
+        return () => { window.clearTimeout(t); window.removeEventListener('resize', compute); };
+    }, [sortedCodes, findSegmentForCode]);
+
+    const codeGutterMinHeight = useMemo(() => {
+        const CHIP_H = 44;
+        const tops = Array.from(codeChipTops.values());
+        return tops.length === 0 ? sortedCodes.length * 52 : Math.max(...tops) + CHIP_H + 20;
+    }, [codeChipTops, sortedCodes.length]);
 
     return (
-        <div className="relative space-y-3 pb-24">
-            {/* Top right controls */}
-            <div className="absolute right-0 top-0 flex gap-2 z-20">
+        <div className="space-y-3 pb-24">
+            <div className="flex justify-end mb-1">
                 <button
-                    className="brutal-button px-3 py-1 text-xs disabled:opacity-50"
-                    onClick={onMergeSegmentRuns}
-                    disabled={isMergingSegmentRuns}
-                    title="Merge consecutive same-speaker lines (≤800ms gap, ≤30s max)"
+                    onClick={() => setEditModeEnabled(v => !v)}
+                    className={`flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide border-2 transition-colors ${editModeEnabled
+                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                        : 'border-neutral-300 bg-white text-neutral-400'
+                        }`}
+                    title="Toggle edit mode (E)"
                 >
-                    {isMergingSegmentRuns ? 'Merging…' : 'Merge segments'}
-                </button>
-                <button className="brutal-button px-3 py-1 text-xs" onClick={() => setParticipantsPanelOpen(true)}>
-                    Participants
+                    <span className={`w-1.5 h-1.5 rounded-full ${editModeEnabled ? 'bg-indigo-500' : 'bg-neutral-300'}`} />
+                    {editModeEnabled ? 'Editing' : 'View only'}
+                    <kbd className="opacity-50 text-[9px] ml-0.5">E</kbd>
                 </button>
             </div>
-            <TranscriptViewer
-                fileId={mediaId}
-                segments={segments.map(s => ({
-                    id: s.id,
-                    startMs: s.startMs,
-                    endMs: s.endMs,
-                    text: s.text,
-                    participantId: s.participantId,
-                    participantName: s.participantName,
-                }))}
-                currentTimeMs={currentTimeMs}
-                canPlay={true}
-                readOnly={false}
-                framed={false}
-                containerRef={transcriptContainerRef}
-                highlightedSegments={highlightedSegmentIds}
-                onHighlightCreated={() => {
-                    qc.invalidateQueries({ queryKey: ['highlights', mediaId] });
-                }}
-                rightPanel={(
-                    <div className="pl-4 border-l-2 border-black">
-                        <div className="text-xs font-semibold uppercase text-neutral-600 tracking-wide mb-2">Codes</div>
-                        <div className="space-y-2">
-                            {sortedCodes.map((code) => {
-                                // Find which segment this code belongs to
-                                const startSegmentInfo = offsetToSegmentMap.find(seg =>
-                                    code.startOffset >= seg.startOffset && code.startOffset < seg.endOffset
+            <div className="flex gap-4 items-start">
+                <div className="flex-1 min-w-0">
+                    <TranscriptViewer
+                        fileId={mediaId}
+                        segments={segments.map(s => ({
+                            id: s.id,
+                            startMs: s.startMs,
+                            endMs: s.endMs,
+                            text: s.text,
+                            participantId: s.participantId,
+                            participantName: s.participantName,
+                        }))}
+                        currentTimeMs={currentTimeMs}
+                        canPlay={true}
+                        readOnly={false}
+                        framed={false}
+                        containerRef={transcriptContainerRef}
+                        highlightedSegments={highlightedSegmentIds}
+                        onHighlightCreated={() => {
+                            qc.invalidateQueries({ queryKey: ['highlights', mediaId] });
+                        }}
+                        onPlaySegment={(startMs, _endMs) => {
+                            playSegment(startMs, null);
+                        }}
+                        participants={participants.map(p => ({ id: p.id, name: p.name }))}
+                        onAssignParticipant={async (segmentId, participantId) => {
+                            await qc.cancelQueries({ queryKey: ['segments', mediaId] });
+                            const prev = qc.getQueryData<TranscriptSegment[]>(['segments', mediaId]);
+                            if (prev) {
+                                qc.setQueryData<TranscriptSegment[]>(['segments', mediaId],
+                                    prev.map(s => s.id === segmentId
+                                        ? { ...s, participantId, participantName: participants.find(p => p.id === participantId)?.name || null }
+                                        : s
+                                    )
                                 );
-
-                                return (
-                                    <div
-                                        key={code.id}
-                                        className="text-[11px] leading-tight px-2 py-1 bg-primary/10 border border-primary/30 rounded cursor-pointer hover:bg-primary/20 group relative"
-                                        onClick={() => {
-                                            if (startSegmentInfo) {
-                                                const segElement = document.querySelector(`[data-segment-id="${startSegmentInfo.segmentId}"]`) as HTMLElement;
-                                                if (segElement) {
-                                                    segElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                                    // Add blink animation
-                                                    segElement.classList.add('segment-blink');
-                                                    // Remove after animation completes
-                                                    setTimeout(() => {
-                                                        segElement.classList.remove('segment-blink');
-                                                    }, 3000);
-                                                }
+                            }
+                            try {
+                                const seg = (prev || []).find(s => s.id === segmentId);
+                                if (seg) await updateSegment(mediaId, segmentId, { participantId });
+                            } finally {
+                                qc.invalidateQueries({ queryKey: ['segments', mediaId] });
+                                qc.invalidateQueries({ queryKey: ['participantCounts', mediaId] });
+                            }
+                        }}
+                        onUpdateSegmentText={handleUpdateSegmentText}
+                        onDeleteSegment={handleDeleteSegment}
+                        deletedSegmentIds={deletedSegmentIds}
+                        autoScrollEnabled={autoScrollEnabled}
+                        autoScrollMode={autoScrollMode}
+                        editModeEnabled={editModeEnabled}
+                    />
+                </div>
+                <div
+                    ref={gutterRef}
+                    className="relative flex-shrink-0 w-48"
+                    style={{ minHeight: codeGutterMinHeight }}
+                >
+                    {sortedCodes.map((code) => {
+                        const top = codeChipTops.get(code.id);
+                        if (top === undefined) return null;
+                        const seg = findSegmentForCode(code);
+                        return (
+                            <div key={code.id} className="absolute left-0 right-0" style={{ top }}>
+                                <div
+                                    className="text-[11px] leading-tight px-2 py-1 bg-primary/10 border-l-2 border-primary/60 cursor-pointer hover:bg-primary/20 group relative"
+                                    onClick={() => {
+                                        if (seg) {
+                                            const segEl = document.querySelector(`[data-segment-id="${seg.id}"]`) as HTMLElement;
+                                            if (segEl) {
+                                                segEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                segEl.classList.add('segment-blink');
+                                                setTimeout(() => segEl.classList.remove('segment-blink'), 3000);
                                             }
-                                        }}
-                                        title={code.text}
+                                        }
+                                    }}
+                                    title={code.text}
+                                >
+                                    <div className="font-semibold text-primary truncate pr-5">{code.codeName || 'Code'}</div>
+                                    <div className="text-neutral-500 truncate text-[10px]">{code.text || ''}</div>
+                                    <button
+                                        className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-red-100 rounded"
+                                        onClick={(e) => { e.stopPropagation(); setPendingDeleteCodeId(code.id); }}
+                                        title="Delete code"
                                     >
-                                        <div className="font-semibold text-primary truncate pr-6">{code.codeName || 'Code'}</div>
-                                        <div className="text-neutral-700 truncate">{code.text || ''}</div>
-                                        <button
-                                            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-100 rounded"
-                                            onClick={async (e) => {
-                                                e.stopPropagation();
-                                                setPendingDeleteCodeId(code.id);
-                                            }}
-                                            title="Delete code"
-                                        >
-                                            <svg className="w-3 h-3 text-neutral-600 hover:text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                            </svg>
-                                        </button>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
-                onPlaySegment={(startMs, _endMs) => {
-                    playSegment(startMs, null);
-                }}
-                participants={participants.map(p => ({ id: p.id, name: p.name }))}
-                onAssignParticipant={async (segmentId, participantId) => {
-                    await qc.cancelQueries({ queryKey: ['segments', mediaId] });
-                    const prev = qc.getQueryData<TranscriptSegment[]>(['segments', mediaId]);
-                    if (prev) {
-                        qc.setQueryData<TranscriptSegment[]>(['segments', mediaId],
-                            prev.map(s => s.id === segmentId
-                                ? { ...s, participantId, participantName: participants.find(p => p.id === participantId)?.name || null }
-                                : s
-                            )
+                                        <svg className="w-3 h-3 text-neutral-400 hover:text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
                         );
-                    }
-                    try {
-                        const seg = (prev || []).find(s => s.id === segmentId);
-                        if (seg) await updateSegment(mediaId, segmentId, { participantId });
-                    } finally {
-                        qc.invalidateQueries({ queryKey: ['segments', mediaId] });
-                        qc.invalidateQueries({ queryKey: ['participantCounts', mediaId] });
-                    }
-                }}
-                onUpdateSegmentText={handleUpdateSegmentText}
-                onDeleteSegment={handleDeleteSegment}
-                deletedSegmentIds={deletedSegmentIds}
-                autoScrollEnabled={autoScrollEnabled}
-                autoScrollMode={autoScrollMode}
-            />
+                    })}
+                </div>
+            </div>
             {audioUrl && (
                 <AudioBar
                     autoScrollEnabled={autoScrollEnabled}
@@ -631,35 +769,6 @@ function TranscriptWithAudio({
                     onCycleAutoScrollMode={() => setAutoScrollMode(m => (m === 'pin' ? 'center' : 'pin'))}
                 />
             )}
-            {/* Participants popup */}
-            <Sheet open={participantsPanelOpen} onOpenChange={setParticipantsPanelOpen}>
-                <SheetContent side="right" className="rounded-none border-l-4 border-black sm:max-w-sm">
-                    <SheetHeader>
-                        <SheetTitle className="uppercase tracking-wide">Participants</SheetTitle>
-                    </SheetHeader>
-                    <div className="mt-4">
-                        <ParticipantPanel
-                            participants={participants}
-                            counts={counts}
-                            newPart={newPart}
-                            onNewPartChange={onNewPartChange}
-                            onCreate={onCreateParticipant}
-                            merging={{
-                                source: mergeSource,
-                                target: mergeTarget,
-                                setSource: onMergeSourceChange,
-                                setTarget: onMergeTargetChange,
-                                onMerge: onMergeParticipants,
-                                isMerging: isMergingParticipants
-                            }}
-                            onDelete={onDeleteParticipant}
-                            onSave={onUpdateParticipant}
-                            isSaving={isSavingParticipant}
-                        />
-                    </div>
-                </SheetContent>
-            </Sheet>
-
             <ConfirmDialog
                 open={!!pendingDeleteCodeId}
                 title="Delete this code?"

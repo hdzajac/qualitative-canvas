@@ -68,6 +68,49 @@ describe('Transcription jobs lifecycle', () => {
     jobId = res.body.id;
   });
 
+  it('stores numSpeakers when provided', async () => {
+    // Upload a second media file to avoid interfering with the shared mediaId job state
+    const tmpFile = await createTempMedia('speaker test audio');
+    const uploadRes = await request(app)
+      .post('/api/media')
+      .set('Cookie', authCookie)
+      .attach('file', tmpFile)
+      .field('projectId', projectId);
+    const speakerMediaId = uploadRes.body.id;
+
+    const res = await request(app)
+      .post(`/api/media/${speakerMediaId}/transcribe`)
+      .set('Cookie', authCookie)
+      .send({ numSpeakers: 3 });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ mediaFileId: speakerMediaId, numSpeakers: 3, status: 'queued' });
+
+    // Verify it round-trips through the GET endpoint
+    const get = await request(app).get(`/api/transcribe-jobs/${res.body.id}`).set('Cookie', authCookie);
+    expect(get.status).toBe(200);
+    expect(get.body.numSpeakers).toBe(3);
+
+    // Cleanup
+    await pool.query('DELETE FROM transcription_jobs WHERE media_file_id = $1', [speakerMediaId]);
+    await pool.query('DELETE FROM media_files WHERE id = $1', [speakerMediaId]);
+  });
+
+  it('rejects numSpeakers outside 1–20 range', async () => {
+    const res = await request(app)
+      .post(`/api/media/${mediaId}/transcribe`)
+      .set('Cookie', authCookie)
+      .send({ numSpeakers: 99 });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects numSpeakers of 0', async () => {
+    const res = await request(app)
+      .post(`/api/media/${mediaId}/transcribe`)
+      .set('Cookie', authCookie)
+      .send({ numSpeakers: 0 });
+    expect(res.status).toBe(400);
+  });
+
   it('leases next queued job', async () => {
     const res = await request(app).post('/api/transcribe-jobs/lease').set('Cookie', authCookie);
     // Could be 204 if already leased OR could lease a different earlier job from another test file
@@ -92,6 +135,66 @@ describe('Transcription jobs lifecycle', () => {
     const res = await request(app).get(`/api/transcribe-jobs/${jobId}`).set('Cookie', authCookie);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: jobId, status: 'done' });
+  });
+
+  it('returns 404 for unknown job id', async () => {
+    const res = await request(app).get(`/api/transcribe-jobs/${uuidv4()}`).set('Cookie', authCookie);
+    expect(res.status).toBe(404);
+  });
+
+  it('marks a job as failed with an error message', async () => {
+    // Create a fresh media + job to test the error path without touching the shared jobId
+    const tmpFile = await createTempMedia('error test audio');
+    const uploadRes = await request(app)
+      .post('/api/media')
+      .set('Cookie', authCookie)
+      .attach('file', tmpFile)
+      .field('projectId', projectId);
+    const errMediaId = uploadRes.body.id;
+    const jobRes = await request(app)
+      .post(`/api/media/${errMediaId}/transcribe`)
+      .set('Cookie', authCookie)
+      .send({});
+    const errJobId = jobRes.body.id;
+
+    const res = await request(app)
+      .post(`/api/transcribe-jobs/${errJobId}/error`)
+      .set('Cookie', authCookie)
+      .send({ errorMessage: 'Whisper model failed' });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: errJobId, status: 'error', errorMessage: 'Whisper model failed' });
+
+    // Cleanup
+    await pool.query('DELETE FROM transcription_jobs WHERE id = $1', [errJobId]);
+    await pool.query('DELETE FROM media_files WHERE id = $1', [errMediaId]);
+  });
+
+  it('rejects error endpoint with missing errorMessage', async () => {
+    const res = await request(app)
+      .post(`/api/transcribe-jobs/${jobId}/error`)
+      .set('Cookie', authCookie)
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('returns latest job for a media file', async () => {
+    const res = await request(app).get(`/api/media/${mediaId}/latest-job`).set('Cookie', authCookie);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: jobId, mediaFileId: mediaId });
+  });
+
+  it('returns 404 for latest-job on media with no jobs', async () => {
+    const tmpFile = await createTempMedia('no-job media');
+    const uploadRes = await request(app)
+      .post('/api/media')
+      .set('Cookie', authCookie)
+      .attach('file', tmpFile)
+      .field('projectId', projectId);
+    const noJobMediaId = uploadRes.body.id;
+    const res = await request(app).get(`/api/media/${noJobMediaId}/latest-job`).set('Cookie', authCookie);
+    expect(res.status).toBe(404);
+    // Cleanup
+    await pool.query('DELETE FROM media_files WHERE id = $1', [noJobMediaId]);
   });
 
   it('finalizes transcript (idempotent)', async () => {

@@ -76,6 +76,11 @@ export const MediaUpload = ({ projectId, onUploaded, label = 'Upload audio/video
         startTranscription(pendingMedia, undefined);
     };
 
+    const handleDialogCancel = () => {
+        if (starting) return;
+        setPendingMedia(null);
+    };
+
     return (
         <>
             <Button type="button" disabled={uploading || !projectId} onClick={() => inputRef.current?.click()} className="brutal-button h-8 px-3">
@@ -90,16 +95,17 @@ export const MediaUpload = ({ projectId, onUploaded, label = 'Upload audio/video
                 disabled={uploading}
             />
 
-            <Dialog open={!!pendingMedia} onOpenChange={(open) => { if (!open && !starting) handleDialogSkip(); }}>
+            {/* onOpenChange: closing via Escape/backdrop cancels without starting transcription */}
+            <Dialog open={!!pendingMedia} onOpenChange={(open) => { if (!open) handleDialogCancel(); }}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Start transcription</DialogTitle>
                         <DialogDescription>
-                            Optionally specify how many speakers are in this recording. This helps the diarization model assign speech to the correct participants.
+                            Optionally specify how many speakers are in this recording. This is a hint — the model may detect slightly more or fewer if your recording differs.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="py-2 space-y-2">
-                        <Label htmlFor="num-speakers">Number of speakers (optional, 1–20)</Label>
+                        <Label htmlFor="num-speakers">Suggested number of speakers (optional, 1–20)</Label>
                         <Input
                             id="num-speakers"
                             type="number"
@@ -113,6 +119,9 @@ export const MediaUpload = ({ projectId, onUploaded, label = 'Upload audio/video
                         />
                     </div>
                     <DialogFooter>
+                        <Button variant="ghost" onClick={handleDialogCancel} disabled={starting}>
+                            Cancel
+                        </Button>
                         <Button variant="outline" onClick={handleDialogSkip} disabled={starting}>
                             Skip
                         </Button>

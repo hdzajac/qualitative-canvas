@@ -28,6 +28,8 @@ export interface TranscriptSegmentProps {
     onAssignParticipant?: (segmentId: string, participantId: string | null) => void;
     onUpdateText?: (segmentId: string, newText: string) => void;
     onDeleteSegment?: (segmentId: string) => void;
+    onHighlightCreated?: () => void;
+    editModeEnabled?: boolean; // When true, single click enters edit; otherwise requires double-click
 }
 
 function formatTime(ms: number): string {
@@ -63,6 +65,8 @@ export function TranscriptSegment({
     onAssignParticipant,
     onUpdateText,
     onDeleteSegment,
+    onHighlightCreated,
+    editModeEnabled = false,
 }: TranscriptSegmentProps) {
     const [popoverOpen, setPopoverOpen] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -92,7 +96,7 @@ export function TranscriptSegment({
         readOnly,
         enableSelectionActions: !disableSelectionActions, // Disable when multi-segment selection is active
         textPrefix: participantName ? `${participantName}: ` : '', // Include participant name in the code
-        onHighlightCreated: () => { },
+        onHighlightCreated: onHighlightCreated ?? (() => { }),
         startEditSelectedBlock: () => { },
         getContainer: () => textContainerRef.current,
     });
@@ -128,6 +132,12 @@ export function TranscriptSegment({
     };
 
     const handleTextClick = () => {
+        if (!readOnly && onUpdateText && editModeEnabled) {
+            setIsEditing(true);
+        }
+    };
+
+    const handleTextDoubleClick = () => {
         if (!readOnly && onUpdateText) {
             setIsEditing(true);
         }
@@ -304,7 +314,8 @@ export function TranscriptSegment({
                 ) : (
                     <span
                         onClick={handleTextClick}
-                        className={`text-sm leading-snug text-neutral-800 transition-colors ${isActive ? 'bg-indigo-50' : ''} ${isHighlighted ? 'bg-primary/10 border-l-2 border-primary/40 pl-1' : ''} ${!readOnly && onUpdateText ? 'cursor-text hover:bg-neutral-50 rounded px-1 -mx-1' : ''}`}
+                        onDoubleClick={handleTextDoubleClick}
+                        className={`text-sm leading-snug text-neutral-800 transition-colors ${isActive ? 'bg-indigo-50' : ''} ${isHighlighted ? 'bg-primary/10 border-l-2 border-primary/40 pl-1' : ''} ${!readOnly && onUpdateText ? 'select-text hover:bg-neutral-50 rounded px-1 -mx-1' : ''}`}
                         style={{ userSelect: !readOnly ? 'text' : undefined }}
                     >
                         {editedText}

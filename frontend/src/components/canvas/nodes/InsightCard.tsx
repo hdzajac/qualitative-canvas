@@ -21,8 +21,11 @@ function InsightCard({ data, selected }: NodeProps) {
         <ParentCard
             id={insight.id}
             label={insight.name ?? 'Untitled'}
-            accentColor="#f59e0b"
-            accentClass="bg-amber-400"
+            accentColor="#d97706"
+            typeLabel="Insight"
+            cardRadius="12px"
+            stripBg="#fef3c7"
+            stripText="#78350f"
             memberCount={memberCount}
             fieldRadius={fieldRadius ?? (180 + memberCount * 15)}
             proximity={proximity}

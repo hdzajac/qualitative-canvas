@@ -1,5 +1,6 @@
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
+import { v4 as uuidv4 } from 'uuid';
 import { app, init } from '../app.js';
 import { deleteMediaDeep } from './testCleanup.js';
 import { createTestUser } from './testAuth.js';
@@ -69,6 +70,74 @@ describe('Participants merge', () => {
     expect(postCounts.status).toBe(200);
     const afterC1 = postCounts.body.find(c => c.participantId === p1.id)?.count || 0;
     expect(afterC1).toBe(3);
+  });
+});
+
+describe('assign-participant by segmentIds', () => {
+  it('assigns a participant to specific segment ids', async () => {
+    // Create fresh participants and segments for this test
+    const pa = await request(app).post(`/api/media/${mediaId}/participants`).set('Cookie', authCookie).send({ name: 'Target' });
+    const targetId = pa.body.id;
+    const ins = await request(app).post(`/api/media/${mediaId}/segments/bulk`).set('Cookie', authCookie).send({
+      segments: [
+        { idx: 10, startMs: 5000, endMs: 5500, text: 'Seg A' },
+        { idx: 11, startMs: 5500, endMs: 6000, text: 'Seg B' },
+        { idx: 12, startMs: 6000, endMs: 6500, text: 'Seg C' },
+      ],
+    });
+    expect(ins.status).toBe(201);
+    const [segA, segB, segC] = ins.body;
+
+    // Assign only segA and segC by id
+    const res = await request(app)
+      .post(`/api/media/${mediaId}/segments/assign-participant`)
+      .set('Cookie', authCookie)
+      .send({ participantId: targetId, segmentIds: [segA.id, segC.id] });
+    expect(res.status).toBe(200);
+
+    // Verify assignment: fetch segments and check
+    const list = await request(app).get(`/api/media/${mediaId}/segments`).set('Cookie', authCookie);
+    const updated = list.body.filter(s => s.id === segA.id || s.id === segC.id);
+    const untouched = list.body.find(s => s.id === segB.id);
+    for (const s of updated) {
+      expect(s.participantId).toBe(targetId);
+    }
+    expect(untouched.participantId).toBeFalsy();
+  });
+
+  it('clears participant assignment when participantId is null', async () => {
+    // Create a participant and a segment, assign, then clear
+    const pb = await request(app).post(`/api/media/${mediaId}/participants`).set('Cookie', authCookie).send({ name: 'ToRemove' });
+    const pbId = pb.body.id;
+    const ins = await request(app).post(`/api/media/${mediaId}/segments/bulk`).set('Cookie', authCookie).send({
+      segments: [{ idx: 20, startMs: 10000, endMs: 10500, text: 'Clearable' }],
+    });
+    const [seg] = ins.body;
+
+    // Assign
+    await request(app)
+      .post(`/api/media/${mediaId}/segments/assign-participant`)
+      .set('Cookie', authCookie)
+      .send({ participantId: pbId, segmentIds: [seg.id] });
+
+    // Clear by passing null
+    const res = await request(app)
+      .post(`/api/media/${mediaId}/segments/assign-participant`)
+      .set('Cookie', authCookie)
+      .send({ participantId: null, segmentIds: [seg.id] });
+    expect(res.status).toBe(200);
+
+    const list = await request(app).get(`/api/media/${mediaId}/segments`).set('Cookie', authCookie);
+    const cleared = list.body.find(s => s.id === seg.id);
+    expect(cleared.participantId).toBeFalsy();
+  });
+
+  it('returns 400 when neither segmentIds nor time range is provided', async () => {
+    const res = await request(app)
+      .post(`/api/media/${mediaId}/segments/assign-participant`)
+      .set('Cookie', authCookie)
+      .send({ participantId: uuidv4() });
+    expect(res.status).toBe(400);
   });
 });
 

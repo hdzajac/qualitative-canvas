@@ -79,7 +79,16 @@ export default function CanvasV2Page() {
     const [showInsightDialog, setShowInsightDialog] = useState(false);
     const [selectedCodeIds, setSelectedCodeIds] = useState<string[]>([]);
     const [selectedThemeIds, setSelectedThemeIds] = useState<string[]>([]);
+    const [hiddenKinds, setHiddenKinds] = useState<Set<string>>(new Set());
 
+    const toggleKindVisibility = useCallback((kind: string) => {
+        setHiddenKinds((prev) => {
+            const next = new Set(prev);
+            if (next.has(kind)) next.delete(kind);
+            else next.add(kind);
+            return next;
+        });
+    }, []);
     const fileNameById = useMemo(() => {
         const m = new Map<string, string>();
         files.forEach((f) => m.set(f.id, f.filename));
@@ -186,6 +195,40 @@ export default function CanvasV2Page() {
                 >
                     + Add Note
                 </Button>
+
+                {/* Divider */}
+                <div className="w-px bg-gray-300 self-stretch" />
+
+                {/* Visibility toggles */}
+                {(
+                    [
+                        { kind: 'code', label: 'Codes', color: 'text-blue-700' },
+                        { kind: 'theme', label: 'Themes', color: 'text-emerald-700' },
+                        { kind: 'insight', label: 'Insights', color: 'text-amber-700' },
+                        { kind: 'annotation', label: 'Notes', color: 'text-gray-700' },
+                    ] as const
+                ).map(({ kind, label, color }) => {
+                    const hidden = hiddenKinds.has(kind);
+                    return (
+                        <button
+                            key={kind}
+                            title={hidden ? `Show ${label}` : `Hide ${label}`}
+                            aria-pressed={!hidden}
+                            onClick={() => toggleKindVisibility(kind)}
+                            className={`flex items-center gap-1 px-2 py-1 border rounded-none text-xs uppercase tracking-wide transition-colors ${hidden
+                                    ? 'border-gray-300 bg-gray-100 text-gray-400 line-through'
+                                    : `border-gray-400 bg-white ${color}`
+                                }`}
+                        >
+                            {hidden ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                            )}
+                            {label}
+                        </button>
+                    );
+                })}
             </div>
 
             <Dialog open={showThemeDialog} onOpenChange={(open) => {
@@ -262,7 +305,7 @@ export default function CanvasV2Page() {
                 projectId={projectId ?? undefined}
                 userId={user?.id}
                 getNewCardPositionRef={getNewCardPositionRef}
-                getNewCardPositionRef={getNewCardPositionRef}
+                hiddenKinds={hiddenKinds}
             />
             <CanvasEntityPanel
                 entity={openEntity}

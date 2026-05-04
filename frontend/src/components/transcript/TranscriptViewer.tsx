@@ -37,6 +37,7 @@ export interface TranscriptViewerProps {
     autoScrollEnabled?: boolean;
     autoScrollMode?: 'center' | 'pin';
     onHighlightCreated?: () => void; // Callback when a new code/highlight is created
+    editModeEnabled?: boolean;
 }
 
 /**
@@ -60,6 +61,7 @@ export function TranscriptViewer({
     onDeleteSegment,
     deletedSegmentIds,
     onHighlightCreated,
+    editModeEnabled = false,
     autoScrollEnabled = true,
     autoScrollMode = 'pin',
 }: TranscriptViewerProps) {
@@ -279,6 +281,8 @@ export function TranscriptViewer({
                                     onAssignParticipant={onAssignParticipant}
                                     onUpdateText={onUpdateSegmentText}
                                     onDeleteSegment={onDeleteSegment}
+                                    onHighlightCreated={onHighlightCreated}
+                                    editModeEnabled={editModeEnabled}
                                 />
                             ))
                         )}

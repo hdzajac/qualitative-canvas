@@ -23,8 +23,11 @@ function ThemeCard({ data, selected }: NodeProps) {
         <ParentCard
             id={theme.id}
             label={theme.name ?? 'Untitled'}
-            accentColor="#10b981"
-            accentClass="bg-emerald-500"
+            accentColor="#059669"
+            typeLabel="Theme"
+            cardRadius="4px"
+            stripBg="#d1fae5"
+            stripText="#065f46"
             memberCount={memberCount}
             fieldRadius={fieldRadius ?? (180 + memberCount * 15)}
             proximity={proximity}

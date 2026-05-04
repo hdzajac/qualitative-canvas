@@ -57,8 +57,18 @@ function CodeCard({ data, selected }: NodeProps) {
                     {lockedBy.displayName}
                 </div>
             )}
-            {/* Left accent strip — always blue; membership shown via badge pills below */}
-            <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-600" />
+            {/* Left accent strip */}
+            <div
+                className="absolute left-0 top-0 bottom-0 flex items-center justify-center overflow-hidden"
+                style={{ width: 18, backgroundColor: '#dbeafe' }}
+            >
+                <span
+                    className="font-bold select-none pointer-events-none"
+                    style={{ color: '#1e3a8a', fontSize: 7, letterSpacing: '0.12em', writingMode: 'vertical-rl', transform: 'rotate(180deg)', textTransform: 'uppercase' }}
+                >
+                    Code
+                </span>
+            </div>
 
             {/* Open icon */}
             <button
@@ -71,7 +81,7 @@ function CodeCard({ data, selected }: NodeProps) {
 
             {/* Title — grows to fit full code name */}
             <div
-                className="flex-1 pl-4 pr-6 pt-2 pb-1 text-gray-900 text-sm leading-snug"
+                className="flex-1 pl-6 pr-6 pt-2 pb-1 text-gray-900 text-sm leading-snug"
                 style={{ wordBreak: 'break-word' }}
             >
                 {highlight.codeName || 'Untitled'}
@@ -79,7 +89,7 @@ function CodeCard({ data, selected }: NodeProps) {
 
             {/* Bottom row: filename */}
             {fileName && (
-                <div className="pl-4 pr-2 pb-1 overflow-hidden">
+                <div className="pl-6 pr-2 pb-1 overflow-hidden">
                     <span
                         className="text-gray-400 block overflow-hidden whitespace-nowrap text-ellipsis"
                         style={{ fontSize: 11 }}

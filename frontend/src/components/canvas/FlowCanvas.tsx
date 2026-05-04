@@ -447,6 +447,11 @@ interface FlowCanvasProps {
      * to world coordinates — use this to place newly created cards in the visible area.
      */
     getNewCardPositionRef?: React.MutableRefObject<(() => { x: number; y: number }) | null>;
+    /**
+     * Set of node kinds to hide. When a kind is in this set, nodes of that kind are not rendered.
+     * Valid values: 'code' | 'theme' | 'insight' | 'annotation'
+     */
+    hiddenKinds?: Set<string>;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -463,6 +468,7 @@ export function FlowCanvas({
     projectId,
     userId,
     getNewCardPositionRef,
+    hiddenKinds,
 }: FlowCanvasProps) {
     // Stable callbacks passed into node data — defined before node building
     const handleOpen = useCallback((kind: string, id: string) => {
@@ -490,6 +496,9 @@ export function FlowCanvas({
     // React Flow's OnNodeDrag third param is only the *dragged* nodes (multi-select subset),
     // so we cannot use it to look up arbitrary nodes like theme or insight cards.
     const nodesRef = useRef<Node[]>([]);
+    // Ref-stable copy of hiddenKinds so the buildNodes effect can read it without adding it as a dep
+    const hiddenKindsRef = useRef<Set<string> | undefined>(hiddenKinds);
+    useEffect(() => { hiddenKindsRef.current = hiddenKinds; }, [hiddenKinds]);
 
     // Track which nodes the LOCAL user is actively dragging so buildNodes keeps their live position
     // rather than overwriting with server data mid-drag.
@@ -672,8 +681,13 @@ export function FlowCanvas({
     useEffect(() => {
         setNodes((prev) => {
             const next = buildNodes(highlights, themes, insights, annotations, files, handleOpen, handleAnnotationCommit, handleAnnotationDelete, handleAnnotationColorChange, handleRemoveFromTheme, handleAnnotationResize, localDraggingIdsRef.current, pinnedPositionsRef.current, remotePositionsRef.current, lockedBy, userId, prev);
-            nodesRef.current = next;
-            return next;
+            // Re-apply hidden flag to preserve visibility state across rebuilds
+            const hk = hiddenKindsRef.current;
+            const withHidden = hk && hk.size > 0
+                ? next.map((n) => hk.has(n.type ?? '') ? { ...n, hidden: true } : n)
+                : next;
+            nodesRef.current = withHidden;
+            return withHidden;
         });
     }, [highlights, themes, insights, annotations, files, handleOpen, handleAnnotationCommit, handleAnnotationDelete, handleAnnotationColorChange, handleRemoveFromTheme, handleAnnotationResize, lockedBy, userId, setNodes]);
 
