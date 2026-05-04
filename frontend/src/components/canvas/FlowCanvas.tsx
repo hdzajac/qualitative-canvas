@@ -531,6 +531,20 @@ export function FlowCanvas({
     const hiddenKindsRef = useRef<Set<string> | undefined>(hiddenKinds);
     useEffect(() => { hiddenKindsRef.current = hiddenKinds; }, [hiddenKinds]);
 
+    // When hiddenKinds changes independently of data, update hidden flags directly
+    // without waiting for the next data-driven buildNodes rebuild.
+    useEffect(() => {
+        setNodes((nds) => {
+            const updated = nds.map((n) => {
+                const shouldHide = !!hiddenKinds?.has(n.type ?? '');
+                if (shouldHide === !!(n.hidden)) return n;
+                return { ...n, hidden: shouldHide };
+            });
+            nodesRef.current = updated;
+            return updated;
+        });
+    }, [hiddenKinds, setNodes]);
+
     // Track code→theme and theme→insight memberships across rebuilds so we can detect when
     // a relationship was changed via the Analysis page (not via canvas drag).  Canvas-initiated
     // changes pre-update these refs to prevent the subsequent SSE refetch from triggering a
@@ -539,6 +553,11 @@ export function FlowCanvas({
     const prevThemeInsightsRef = useRef<Map<string, Set<string>>>(new Map()); // insightId → Set<themeId>
     // False until the first successful buildNodes run — skips repositioning on cold load.
     const hasHydratedRef = useRef(false);
+    // Canvas-initiated snap-ins: 'code:<id>|theme:<id>' or 'theme:<id>|insight:<id>'.
+    // Prevents the auto-reposition block from re-placing a node that was just snapped
+    // in via canvas drag (the pre-update of prevCodeThemesRef/prevThemeInsightsRef can be
+    // overwritten by an intermediate buildNodes run triggered before the API call resolves).
+    const canvasSnapInsRef = useRef<Set<string>>(new Set());
 
     // Track which nodes the LOCAL user is actively dragging so buildNodes keeps their live position
     // rather than overwriting with server data mid-drag.
@@ -739,6 +758,12 @@ export function FlowCanvas({
                 // Newly added codes — move them near the parent
                 currCodes.forEach((codeId) => {
                     if (prevCodes.has(codeId)) return;
+                    // Skip canvas-initiated snap-ins — position is already correct
+                    const snapKey = `code:${codeId}|theme:${theme.id}`;
+                    if (canvasSnapInsRef.current.has(snapKey)) {
+                        canvasSnapInsRef.current.delete(snapKey);
+                        return;
+                    }
                     const codeNode = nodesRef.current.find((n) => n.id === `code:${codeId}`);
                     if (!codeNode) return;
                     // Skip codes already inside the ring — these were dropped from the canvas
@@ -790,6 +815,12 @@ export function FlowCanvas({
                 // Newly added themes — move them near the insight
                 currThemes.forEach((themeId) => {
                     if (prevThemes.has(themeId)) return;
+                    // Skip canvas-initiated snap-ins — position is already correct
+                    const snapKey = `theme:${themeId}|insight:${insight.id}`;
+                    if (canvasSnapInsRef.current.has(snapKey)) {
+                        canvasSnapInsRef.current.delete(snapKey);
+                        return;
+                    }
                     const themeNode = nodesRef.current.find((n) => n.id === `theme:${themeId}`);
                     if (!themeNode) return;
                     const dist = Math.hypot(themeNode.position.x - parentPos.x, themeNode.position.y - parentPos.y);
@@ -1197,6 +1228,10 @@ export function FlowCanvas({
                         // Pre-update tracking ref so the SSE refetch doesn't re-trigger auto-placement
                         const snapInSet = prevCodeThemesRef.current.get(targetId);
                         if (snapInSet) snapInSet.add(draggedEntityId);
+                        // Robust guard: mark this as a canvas snap-in so the auto-reposition
+                        // block skips it even if the pre-update above gets overwritten by an
+                        // intermediate buildNodes run before the API call resolves.
+                        canvasSnapInsRef.current.add(`code:${draggedEntityId}|theme:${targetId}`);
 
                         // If the code already belongs to a different theme, remove it first
                         const existingParent = themes.find(
@@ -1259,6 +1294,10 @@ export function FlowCanvas({
                         // Pre-update tracking ref so SSE refetch doesn't re-trigger auto-placement
                         const snapInInsightSet = prevThemeInsightsRef.current.get(targetId);
                         if (snapInInsightSet) snapInInsightSet.add(draggedEntityId);
+                        // Robust guard: mark this as a canvas snap-in so the auto-reposition
+                        // block skips it even if the pre-update above gets overwritten by an
+                        // intermediate buildNodes run before the API call resolves.
+                        canvasSnapInsRef.current.add(`theme:${draggedEntityId}|insight:${targetId}`);
                         await updateInsight(targetId, { themeIds: newIds });
 
                         // Phase 4: Keep theme at drop position; record offset relative to insight
