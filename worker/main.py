@@ -559,11 +559,11 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
         t0 = time.perf_counter()
         pipeline_kwargs = {}
         if num_speakers is not None:
-            # Use as a soft hint rather than a hard constraint so pyannote can adapt
-            # if the recording has more or fewer actual speakers than the user suggested.
+            # Use the suggestion as a lower-bound hint only — no upper cap.
+            # This lets pyannote detect as many speakers as it actually finds while
+            # still being guided toward the expected minimum.
             pipeline_kwargs['min_speakers'] = max(1, num_speakers - 2)
-            pipeline_kwargs['max_speakers'] = num_speakers + 2
-            log_info(f"Diarization: hinting ~{num_speakers} speakers (min={pipeline_kwargs['min_speakers']}, max={pipeline_kwargs['max_speakers']})")
+            log_info(f"Diarization: hinting min={pipeline_kwargs['min_speakers']} speakers (suggested={num_speakers}, no upper cap)")
         diar = pipeline(final_wav_path or wav_path, **pipeline_kwargs)
         t_ms = int((time.perf_counter() - t0) * 1000)
         log_info(f"Diarization inference done in {t_ms}ms")
