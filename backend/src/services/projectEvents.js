@@ -31,6 +31,22 @@ export function emitEntityChanged(projectId, entityType) {
 }
 
 /**
+ * Broadcast a job state change (progress, complete, error) to all clients watching a project.
+ * The client uses this to invalidate the latestJob query for the relevant media file without polling.
+ *
+ * @param {string} projectId
+ * @param {string} mediaFileId
+ */
+export function emitJobProgress(projectId, mediaFileId) {
+  if (!projectId) return;
+  try {
+    bus.emit(`project:${projectId}`, { type: 'job-progress', mediaFileId });
+  } catch {
+    // never propagate to the caller
+  }
+}
+
+/**
  * Subscribe to entity events for a project.
  * Returns an unsubscribe function — call it when the SSE connection closes.
  *

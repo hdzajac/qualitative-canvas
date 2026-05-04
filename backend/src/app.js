@@ -75,8 +75,19 @@ export function buildApp() {
   // Exempt SSE stream from per-request rate limit — it is one long-lived connection, not a poll
   app.use('/api/projects/:projectId/events', (_req, _res, next) => next());
 
-  // Rate limit — global
-  const limiter = rateLimit({ windowMs: 60_000, max: 600 });
+  // Worker requests are authenticated by a shared secret; they must not be throttled
+  // by the browser-user rate limiter because diarization can trigger hundreds of
+  // legitimate API calls per minute on large files.
+  const workerSecret = process.env.WORKER_SECRET;
+  const isWorkerRequest = (req) =>
+    workerSecret && req.headers['x-worker-secret'] === workerSecret;
+
+  // Rate limit — global (skipped for authenticated worker requests)
+  const limiter = rateLimit({
+    windowMs: 60_000,
+    max: 600,
+    skip: (req) => isWorkerRequest(req),
+  });
   app.use(limiter);
 
   // Tighter rate limit on auth endpoints to prevent brute-force
@@ -137,7 +148,13 @@ export function buildApp() {
     const ping = setInterval(() => { try { res.write(':ping\n\n'); } catch {} }, 25_000);
 
     const unsub = subscribeToProject(projectId, (msg) => {
-      try { res.write(`event: entity-changed\ndata: ${JSON.stringify(msg)}\n\n`); } catch {}
+      try {
+        if (msg.type === 'entity-changed') {
+          res.write(`event: entity-changed\ndata: ${JSON.stringify(msg)}\n\n`);
+        } else if (msg.type === 'job-progress') {
+          res.write(`event: job-progress\ndata: ${JSON.stringify(msg)}\n\n`);
+        }
+      } catch {}
     });
 
     req.on('close', () => {

@@ -419,7 +419,7 @@ async function removeChildAndMaybeDeleteParent(
     themes: Theme[],
     insights: Insight[],
     setNodes: (updater: (nds: Node[]) => Node[]) => void,
-    onUpdate: () => void,
+    onUpdate: (entityType?: string) => void,
 ): Promise<void> {
     if (parentKind === 'theme') {
         const theme = themes.find((t) => t.id === parentId);
@@ -439,6 +439,7 @@ async function removeChildAndMaybeDeleteParent(
                 return n;
             })
         );
+        onUpdate('themes');
     } else {
         const insight = insights.find((i) => i.id === parentId);
         if (!insight) return;
@@ -453,8 +454,8 @@ async function removeChildAndMaybeDeleteParent(
                 return n;
             })
         );
+        onUpdate('insights');
     }
-    onUpdate();
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -465,7 +466,7 @@ interface FlowCanvasProps {
     insights: Insight[];
     annotations: Annotation[];
     files: UploadedFile[];
-    onUpdate: () => void;
+    onUpdate: (entityType?: string) => void;
     onOpenEntity: (kind: string, id: string) => void;
     /** Called whenever the React Flow selection changes; receives the IDs of selected code nodes and theme nodes */
     onSelectionChange?: (selectedCodeIds: string[], selectedThemeIds: string[]) => void;
@@ -660,7 +661,7 @@ export function FlowCanvas({
                 } else {
                     await updateAnnotation(id, { content: text.trim() });
                 }
-                onUpdate();
+                onUpdate('annotations');
             } catch {
                 toast.error('Save failed');
             }
@@ -674,7 +675,7 @@ export function FlowCanvas({
                 await apiDeleteAnnotation(id);
                 setNodes((nds) => nds.filter((n) => n.id !== `annotation:${id}`));
                 toast.success('Note deleted');
-                onUpdate();
+                onUpdate('annotations');
             } catch {
                 toast.error('Failed to delete note');
             }
@@ -1285,7 +1286,7 @@ export function FlowCanvas({
                         );
                         if (!existingParent) toast.success(`Added to "${theme.name ?? 'theme'}"`);
 
-                        onUpdate();
+                        onUpdate('themes');
                     } else if (draggedKind === 'theme' && targetKind === 'insight') {
                         const insight = insights.find((i) => i.id === targetId);
                         if (!insight) return;
@@ -1324,7 +1325,7 @@ export function FlowCanvas({
                         );
                         toast.success(`Added to "${insights.find(i => i.id === targetId)?.name ?? 'insight'}"`);
 
-                        onUpdate();
+                        onUpdate('insights');
                     }
                 } catch {
                     toast.error('Failed to group cards');

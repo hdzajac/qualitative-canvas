@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { createJob, getJob, leaseNextQueuedJob, setJobStatus, setJobProgress, getLatestJobForMedia } from '../dao/jobsDao.js';
 import { getMedia, updateMedia } from '../dao/mediaDao.js';
+import { emitJobProgress } from './projectEvents.js';
 
 export default function jobsService(pool) {
   return {
@@ -40,6 +41,15 @@ export default function jobsService(pool) {
           await updateMedia(client, job.mediaFileId, { status: 'done' });
         }
         await client.query('COMMIT');
+        // Best-effort SSE notification — DB is already committed, never propagate errors here
+        if (job) {
+          try {
+            const media = await getMedia(pool, job.mediaFileId);
+            if (media?.projectId) emitJobProgress(media.projectId, job.mediaFileId);
+          } catch {
+            // SSE emit failed; client falls back to polling after 30s
+          }
+        }
         return job;
       } catch (e) {
         await client.query('ROLLBACK');
@@ -56,6 +66,15 @@ export default function jobsService(pool) {
         const job = await setJobStatus(client, jobId, { status: 'error', errorMessage, setCompleted: true });
         if (job) await updateMedia(client, job.mediaFileId, { status: 'error', errorMessage });
         await client.query('COMMIT');
+        // Best-effort SSE notification — DB is already committed, never propagate errors here
+        if (job) {
+          try {
+            const media = await getMedia(pool, job.mediaFileId);
+            if (media?.projectId) emitJobProgress(media.projectId, job.mediaFileId);
+          } catch {
+            // SSE emit failed; client falls back to polling after 30s
+          }
+        }
         return job;
       } catch (e) {
         await client.query('ROLLBACK');
@@ -67,6 +86,8 @@ export default function jobsService(pool) {
 
     async progress(jobId, { processedMs, totalMs, etaSeconds }) {
       const job = await setJobProgress(pool, jobId, { processedMs, totalMs, etaSeconds });
+      // projectId is joined in setJobProgress — no second query needed
+      if (job?.projectId) emitJobProgress(job.projectId, job.mediaFileId);
       return job;
     },
   };

@@ -79,7 +79,27 @@ def log_warn(msg: str):
 
 def log_error(msg: str):
     _log('ERROR', msg)
+def request_with_backoff(fn, *, max_attempts: int = 6, initial_delay: float = 5.0):
+    """Call fn() and retry on HTTP 429 (Too Many Requests) with exponential backoff.
 
+    fn must be a zero-argument callable that returns a requests.Response.
+    Non-429 errors are re-raised immediately without retrying.
+    """
+    delay = initial_delay
+    for attempt in range(max(1, max_attempts)):
+        resp: requests.Response = fn()
+        if resp.status_code != 429:
+            return resp
+        if attempt >= max_attempts - 1:
+            # Exhausted retries — return the 429 so the caller can raise_for_status
+            return resp
+        retry_after = resp.headers.get('Retry-After')
+        wait = float(retry_after) if retry_after else delay
+        log_warn(f"429 rate-limited (attempt {attempt + 1}/{max_attempts}), waiting {wait:.0f}s before retry")
+        time.sleep(wait)
+        delay = min(delay * 2, 120.0)
+    # Unreachable (loop always runs ≥1 iteration), but prevents static analysis warnings
+    raise RuntimeError("request_with_backoff: loop exhausted unexpectedly")
 def resolve_base_url(original: str) -> str:
     """Attempt a quick health check; if unreachable and AUTO_FALLBACK enabled, try host.docker.internal using LOCAL_BACKEND_PORT."""
     # If original already points to host.docker.internal just return
@@ -130,7 +150,7 @@ BASE_URLS = build_base_list()
 def lease_job(base_url: str):
     url = f"{base_url}/transcribe-jobs/lease"
     t0 = time.perf_counter()
-    resp = _session.post(url, timeout=15)
+    resp = request_with_backoff(lambda: _session.post(url, timeout=15))
     dur = int((time.perf_counter() - t0) * 1000)
     if resp.status_code == 204:
         log_debug(f"LEASE 204 in {dur}ms url={url}")
@@ -144,7 +164,7 @@ def lease_job(base_url: str):
 def complete_job(base_url: str, job_id):
     url = f"{base_url}/transcribe-jobs/{job_id}/complete"
     t0 = time.perf_counter()
-    resp = _session.post(url, timeout=30)
+    resp = request_with_backoff(lambda: _session.post(url, timeout=30))
     dur = int((time.perf_counter() - t0) * 1000)
     if not resp.ok:
         log_error(f"COMPLETE {resp.status_code} in {dur}ms url={url} body={resp.text[:400]}")
@@ -155,7 +175,7 @@ def complete_job(base_url: str, job_id):
 def fail_job(base_url: str, job_id, message: str):
     url = f"{base_url}/transcribe-jobs/{job_id}/error"
     t0 = time.perf_counter()
-    resp = _session.post(url, json={"errorMessage": message[:500]}, timeout=30)
+    resp = request_with_backoff(lambda: _session.post(url, json={"errorMessage": message[:500]}, timeout=30))
     dur = int((time.perf_counter() - t0) * 1000)
     if not resp.ok:
         log_error(f"ERROR {resp.status_code} in {dur}ms url={url} body={resp.text[:400]}")
@@ -176,7 +196,7 @@ def patch_progress(base_url: str, job_id, processed_ms=None, total_ms=None, eta_
         return None
     try:
         t0 = time.perf_counter()
-        r = _session.patch(url, json=payload, timeout=10)
+        r = request_with_backoff(lambda: _session.patch(url, json=payload, timeout=10))
         dur = int((time.perf_counter() - t0) * 1000)
         if not r.ok:
             log_warn(f"PROGRESS {r.status_code} in {dur}ms url={url} body={r.text[:200]}")
@@ -357,7 +377,9 @@ def main():
             if DIARIZATION_AVAILABLE:
                 try:
                     num_speakers = job.get('numSpeakers') or None
-                    run_diarization(base, media, num_speakers=num_speakers)
+                    # Pass the already-fetched audio bytes to avoid a second full download
+                    audio_bytes_for_diar = content if isinstance(content, bytes) else None
+                    run_diarization(base, media, num_speakers=num_speakers, audio_bytes=audio_bytes_for_diar)
                 except Exception as e:
                     log_warn(f"Diarization error: {e}")
             done = complete_job(base, job['id'])
@@ -477,7 +499,7 @@ def transcribe_real(base_url: str, media, text_content, job, total_ms_hint=None)
             chunk_index += 1
     return segs if segs else build_fake_segments(text_content)
 
-def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  # pragma: no cover - heavy
+def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, audio_bytes: Optional[bytes] = None):  # pragma: no cover - heavy
     if not DIARIZATION_AVAILABLE:
         return
     
@@ -518,7 +540,10 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
     if pipeline is None or not callable(getattr(pipeline, '__call__', None)):
         log_error("Diarization pipeline is invalid or not callable")
         return
-    audio_bytes = _session.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
+    # Re-use bytes from the main() fetch when available to avoid a second full download
+    if audio_bytes is None:
+        log_info("Diarization: fetching audio (not already in memory)")
+        audio_bytes = _session.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
     # Write original bytes then transcode to 16k mono WAV to ensure readable format
     src_path = None
     wav_path = None
@@ -559,11 +584,13 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
         t0 = time.perf_counter()
         pipeline_kwargs = {}
         if num_speakers is not None:
-            # Use the suggestion as a lower-bound hint only — no upper cap.
-            # This lets pyannote detect as many speakers as it actually finds while
-            # still being guided toward the expected minimum.
             pipeline_kwargs['min_speakers'] = max(1, num_speakers - 2)
-            log_info(f"Diarization: hinting min={pipeline_kwargs['min_speakers']} speakers (suggested={num_speakers}, no upper cap)")
+            pipeline_kwargs['max_speakers'] = num_speakers + 2
+            log_info(f"Diarization: hinting min={pipeline_kwargs['min_speakers']}, max={pipeline_kwargs['max_speakers']} speakers (suggested={num_speakers})")
+        else:
+            # Cap unconstrained diarization to prevent spurious ghost participants
+            import os as _os
+            pipeline_kwargs['max_speakers'] = int(_os.getenv('DIARIZATION_MAX_SPEAKERS', '20'))
         diar = pipeline(final_wav_path or wav_path, **pipeline_kwargs)
         t_ms = int((time.perf_counter() - t0) * 1000)
         log_info(f"Diarization inference done in {t_ms}ms")
@@ -616,10 +643,9 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
             if label not in first_seen:
                 first_seen[label] = len(ordered_labels)
                 ordered_labels.append(label)
-        # Map labels to participant IDs; create if missing, name as "Participant N" but keep canonicalKey=original label
+        # Map labels to participant IDs; create if missing, name as "Participant N"
         label_to_part = {}
         for label in ordered_labels:
-            # Prefer existing by canonicalKey; if renamed by user, keep their name
             existing = next((p for p in participants if p.get('canonicalKey') == label), None)
             if not existing:
                 display_index = (first_seen.get(label, len(label_to_part)) or 0) + 1
@@ -633,78 +659,70 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None):  
                 existing = cr.json()
                 participants.append(existing)
             label_to_part[label] = existing['id']
-        # Assign by each diarized segment (turn)
-        for (segment, _track, label) in turns:
-            pid = label_to_part.get(label)
+
+        # Pre-compute sorted turn centers for O(log M) nearest-turn lookup via bisect.
+        import bisect as _bisect
+        raw_turns = [(int((seg.start + seg.end) * 500), label) for (seg, _track, label) in turns]
+        raw_turns.sort(key=lambda t: t[0])
+        sorted_centers: list[int] = [t[0] for t in raw_turns]
+        sorted_labels: list[str]  = [t[1] for t in raw_turns]
+
+        # Fetch all transcript segments once, assign ALL of them to the nearest
+        # diarization turn in a single pass.  This produces at most N_speakers HTTP
+        # calls instead of one per diarization turn (which can be hundreds for long files).
+        seg_r = _session.get(f"{base_url}/media/{media['id']}/segments", timeout=60)
+        seg_r.raise_for_status()
+        seg_list = seg_r.json() or []
+        assign_map: dict[str, list[str]] = {}  # pid -> list[segmentId]
+        for s in seg_list:
+            mid = int(((s.get('startMs') or 0) + (s.get('endMs') or 0)) / 2)
+            if not sorted_centers:
+                continue
+            pos = _bisect.bisect_left(sorted_centers, mid)
+            best_label = None
+            best_d = float('inf')
+            for i in (pos - 1, pos):   # check the two candidates straddling mid
+                if 0 <= i < len(sorted_centers):
+                    d = abs(sorted_centers[i] - mid)
+                    if d < best_d:
+                        best_d = d
+                        best_label = sorted_labels[i]
+            if best_label is None:
+                continue
+            pid = label_to_part.get(best_label)
             if not pid:
                 continue
-            start_ms = int(segment.start * 1000)
-            end_ms = int(segment.end * 1000)
+            assign_map.setdefault(pid, []).append(s['id'])
+
+        # One POST per participant — N_speakers calls total.
+        # Lambda captures use default args to avoid late-binding over the loop variable.
+        assigned_total = 0
+        for pid, seg_ids in assign_map.items():
+            if not seg_ids:
+                continue
             try:
-                ar = _session.post(
-                    f"{base_url}/media/{media['id']}/segments/assign-participant",
-                    json={"participantId": pid, "startMs": start_ms, "endMs": end_ms},
-                    timeout=30,
+                br = request_with_backoff(
+                    lambda _pid=pid, _ids=seg_ids: _session.post(
+                        f"{base_url}/media/{media['id']}/segments/assign-participant",
+                        json={"participantId": _pid, "segmentIds": _ids},
+                        timeout=60,
+                    )
                 )
-                if not ar.ok:
-                    log_warn(f"assign-participant {ar.status_code} body={ar.text[:200]}")
+                if not br.ok:
+                    log_warn(f"assign-participant {br.status_code} body={br.text[:200]}")
+                else:
+                    assigned_total += len(seg_ids)
             except Exception as e:
                 log_warn(f"assign-participant error: {e}")
-        print(f"Auto-assigned diarization labels to segments for media {media['id']}")
-
-        # Fill any remaining unassigned segments by nearest diarization turn label
-        try:
-            seg_r = _session.get(f"{base_url}/media/{media['id']}/segments", timeout=30)
-            seg_r.raise_for_status()
-            seg_list = seg_r.json() or []
-            unassigned = [s for s in seg_list if not s.get('participantId')]
-            if unassigned and turns:
-                # Pre-compute centers for diarization turns
-                turn_data = []  # list of tuples: (center_ms, label)
-                for (segment, _track, label) in turns:
-                    center_ms = int(((segment.start + segment.end) * 1000) / 2)
-                    turn_data.append((center_ms, label))
-                # Assign each unassigned segment to nearest turn center
-                assign_map = {}  # pid -> list of segmentIds
-                for s in unassigned:
-                    mid = int(((s.get('startMs') or 0) + (s.get('endMs') or 0)) / 2)
-                    # Find nearest turn
-                    best = None
-                    best_d = None
-                    for (c_ms, lab) in turn_data:
-                        d = abs(c_ms - mid)
-                        if best_d is None or d < best_d:
-                            best_d = d
-                            best = lab
-                    if best is None:
-                        continue
-                    pid = label_to_part.get(best)
-                    if not pid:
-                        continue
-                    assign_map.setdefault(pid, []).append(s['id'])
-                # Batch-assign by segmentIds per participant
-                for pid, seg_ids in assign_map.items():
-                    if not seg_ids:
-                        continue
-                    try:
-                        br = _session.post(
-                            f"{base_url}/media/{media['id']}/segments/assign-participant",
-                            json={"participantId": pid, "segmentIds": seg_ids},
-                            timeout=60,
-                        )
-                        if not br.ok:
-                            log_warn(f"assign-participant fill {br.status_code} body={br.text[:200]}")
-                    except Exception as e:
-                        log_warn(f"assign-participant fill error: {e}")
-                print(f"Filled {sum(len(v) for v in assign_map.values())} previously unassigned segments by nearest speaker for media {media['id']}")
-        except Exception as e:
-            log_warn(f"post-assign fill failed: {e}")
+        log_info(f"Auto-assigned {assigned_total}/{len(seg_list)} segments across {len(assign_map)} speakers for media {media['id']}")
         # Merge consecutive same-speaker runs to reduce fragmentation
         try:
-            mr = _session.post(
-                f"{base_url}/media/{media['id']}/segments/merge-speaker-runs",
-                json={"gapThresholdMs": MERGE_GAP_MS, "maxDurationMs": MERGE_MAX_MS},
-                timeout=60,
+            mr = request_with_backoff(
+                lambda: _session.post(
+                    f"{base_url}/media/{media['id']}/segments/merge-speaker-runs",
+                    json={"gapThresholdMs": MERGE_GAP_MS, "maxDurationMs": MERGE_MAX_MS},
+                    timeout=60,
+                )
             )
             if mr.ok:
                 result = mr.json()

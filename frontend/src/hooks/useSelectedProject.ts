@@ -73,6 +73,19 @@ export function useProjectEvents(projectId: string | null | undefined): void {
       }
     });
 
+    // Job progress/complete/error: invalidate the latestJob query for the specific media file.
+    // This replaces the 5-second polling loop while a file is transcribing.
+    es.addEventListener('job-progress', (e: MessageEvent) => {
+      try {
+        const { mediaFileId } = JSON.parse(e.data) as { mediaFileId: string };
+        if (mediaFileId) {
+          qc.invalidateQueries({ queryKey: ['latestJob', mediaFileId] });
+        }
+      } catch {
+        // malformed event — ignore
+      }
+    });
+
     // onerror: EventSource auto-reconnects with exponential backoff — no action needed
     return () => es.close();
   }, [projectId, qc]);

@@ -130,11 +130,17 @@ export default function CanvasV2Page() {
         return nodes;
     }, [highlights, themes, insights, annotations]);
 
-    const handleUpdate = useCallback(() => {
-        qc.invalidateQueries({ queryKey: ['highlights', projectId] });
-        qc.invalidateQueries({ queryKey: ['themes', projectId] });
-        qc.invalidateQueries({ queryKey: ['insights', projectId] });
-        qc.invalidateQueries({ queryKey: ['annotations', projectId] });
+    const handleUpdate = useCallback((entityType?: string) => {
+        if (entityType) {
+            // Only the changed entity type needs refreshing; SSE covers the rest reactively.
+            qc.invalidateQueries({ queryKey: [entityType, projectId] });
+        } else {
+            // Unknown / multi-entity mutation — invalidate all canvas entity types.
+            qc.invalidateQueries({ queryKey: ['highlights', projectId] });
+            qc.invalidateQueries({ queryKey: ['themes', projectId] });
+            qc.invalidateQueries({ queryKey: ['insights', projectId] });
+            qc.invalidateQueries({ queryKey: ['annotations', projectId] });
+        }
     }, [qc, projectId]);
 
     const handleAddNote = useCallback(async () => {
@@ -145,7 +151,7 @@ export default function CanvasV2Page() {
                 position: { x: 200, y: 200 },
                 projectId,
             });
-            handleUpdate();
+            handleUpdate('annotations');
         } catch {
             // silently fail — user will see no note appear
         }
@@ -216,8 +222,8 @@ export default function CanvasV2Page() {
                             aria-pressed={!hidden}
                             onClick={() => toggleKindVisibility(kind)}
                             className={`flex items-center gap-1 px-2 py-1 border rounded-none text-xs uppercase tracking-wide transition-colors ${hidden
-                                    ? 'border-gray-300 bg-gray-100 text-gray-400 line-through'
-                                    : `border-gray-400 bg-white ${color}`
+                                ? 'border-gray-300 bg-gray-100 text-gray-400 line-through'
+                                : `border-gray-400 bg-white ${color}`
                                 }`}
                         >
                             {hidden ? (

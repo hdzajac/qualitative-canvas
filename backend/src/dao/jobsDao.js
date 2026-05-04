@@ -2,6 +2,7 @@ export function mapJob(r) {
   return {
     id: r.id,
     mediaFileId: r.media_file_id,
+    projectId: r.project_id ?? undefined,
     model: r.model ?? undefined,
     languageHint: r.language_hint ?? undefined,
     numSpeakers: r.num_speakers ?? undefined,
@@ -65,13 +66,16 @@ export async function leaseNextQueuedJob(pool) {
 }
 
 export async function setJobProgress(pool, id, { processedMs, totalMs, etaSeconds }) {
+  // Join media_files to include project_id so callers can emit SSE without a second query.
   const r = await pool.query(
-    `UPDATE transcription_jobs
-     SET processed_ms = COALESCE($2, processed_ms),
-         total_ms = COALESCE($3, total_ms),
-         eta_seconds = COALESCE($4, eta_seconds),
+    `UPDATE transcription_jobs t
+     SET processed_ms = COALESCE($2, t.processed_ms),
+         total_ms = COALESCE($3, t.total_ms),
+         eta_seconds = COALESCE($4, t.eta_seconds),
          updated_at = now()
-     WHERE id = $1 RETURNING *`,
+     FROM media_files m
+     WHERE t.id = $1 AND m.id = t.media_file_id
+     RETURNING t.*, m.project_id AS project_id`,
     [id, processedMs ?? null, totalMs ?? null, etaSeconds ?? null]
   );
   return r.rows[0] ? mapJob(r.rows[0]) : null;
