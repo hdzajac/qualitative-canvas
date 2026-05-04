@@ -394,53 +394,34 @@ async function removeChildAndMaybeDeleteParent(
         const theme = themes.find((t) => t.id === parentId);
         if (!theme) return;
         const newIds = (theme.highlightIds ?? []).filter((id) => id !== childId);
-        if (newIds.length === 0) {
-            // Last child — delete theme, then recursively check owning insight
-            await deleteTheme(parentId);
-            setNodes((nds) => nds.filter((n) => n.id !== `theme:${parentId}`));
-            for (const insight of insights) {
-                if ((insight.themeIds ?? []).includes(parentId)) {
-                    await removeChildAndMaybeDeleteParent(
-                        parentId, 'insight', insight.id, themes, insights, setNodes, onUpdate
-                    );
+        await updateTheme(parentId, { highlightIds: newIds });
+        setNodes((nds) =>
+            nds.map((n) => {
+                if (n.id === `code:${childId}`) {
+                    const cd = n.data as import('./nodes/CodeCard').CodeCardData;
+                    return { ...n, data: { ...n.data, parentThemes: (cd.parentThemes ?? []).filter((p) => p.themeId !== parentId) } };
                 }
-            }
-        } else {
-            await updateTheme(parentId, { highlightIds: newIds });
-            // Optimistic patch
-            setNodes((nds) =>
-                nds.map((n) => {
-                    if (n.id === `code:${childId}`) {
-                        const cd = n.data as import('./nodes/CodeCard').CodeCardData;
-                        return { ...n, data: { ...n.data, parentThemes: (cd.parentThemes ?? []).filter((p) => p.themeId !== parentId) } };
-                    }
-                    if (n.id === `theme:${parentId}`) {
-                        const td = n.data as import('./nodes/ThemeCard').ThemeCardData;
-                        return { ...n, data: { ...n.data, theme: { ...td.theme, highlightIds: newIds } } };
-                    }
-                    return n;
-                })
-            );
-        }
+                if (n.id === `theme:${parentId}`) {
+                    const td = n.data as import('./nodes/ThemeCard').ThemeCardData;
+                    return { ...n, data: { ...n.data, theme: { ...td.theme, highlightIds: newIds } } };
+                }
+                return n;
+            })
+        );
     } else {
         const insight = insights.find((i) => i.id === parentId);
         if (!insight) return;
         const newIds = (insight.themeIds ?? []).filter((id) => id !== childId);
-        if (newIds.length === 0) {
-            await deleteInsight(parentId);
-            setNodes((nds) => nds.filter((n) => n.id !== `insight:${parentId}`));
-        } else {
-            await updateInsight(parentId, { themeIds: newIds });
-            setNodes((nds) =>
-                nds.map((n) => {
-                    if (n.id === `insight:${parentId}`) {
-                        const id = n.data as import('./nodes/InsightCard').InsightCardData;
-                        return { ...n, data: { ...n.data, insight: { ...id.insight, themeIds: newIds } } };
-                    }
-                    return n;
-                })
-            );
-        }
+        await updateInsight(parentId, { themeIds: newIds });
+        setNodes((nds) =>
+            nds.map((n) => {
+                if (n.id === `insight:${parentId}`) {
+                    const id = n.data as import('./nodes/InsightCard').InsightCardData;
+                    return { ...n, data: { ...n.data, insight: { ...id.insight, themeIds: newIds } } };
+                }
+                return n;
+            })
+        );
     }
     onUpdate();
 }
@@ -461,6 +442,11 @@ interface FlowCanvasProps {
     projectId?: string;
     /** Current user ID — used to distinguish own locks from peer locks. */
     userId?: string;
+    /**
+     * Populated by FlowCanvas with a function that converts the current viewport centre
+     * to world coordinates — use this to place newly created cards in the visible area.
+     */
+    getNewCardPositionRef?: React.MutableRefObject<(() => { x: number; y: number }) | null>;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -476,6 +462,7 @@ export function FlowCanvas({
     onSelectionChange,
     projectId,
     userId,
+    getNewCardPositionRef,
 }: FlowCanvasProps) {
     // Stable callbacks passed into node data — defined before node building
     const handleOpen = useCallback((kind: string, id: string) => {
@@ -519,6 +506,20 @@ export function FlowCanvas({
     const containerRef = useRef<HTMLDivElement>(null);
     const viewportRef = useRef({ x: 0, y: 0, zoom: 1 });
 
+    // Populate the parent's ref with a stable function that maps viewport centre → world coords.
+    useEffect(() => {
+        if (!getNewCardPositionRef) return;
+        getNewCardPositionRef.current = () => {
+            const { x: vpX, y: vpY, zoom } = viewportRef.current;
+            const rect = containerRef.current?.getBoundingClientRect();
+            if (!rect) return { x: 200, y: 200 };
+            // Container centre in world coordinates
+            const worldX = (rect.width / 2 - vpX) / zoom;
+            const worldY = (rect.height / 2 - vpY) / zoom;
+            // Offset so card centre lands at viewport centre, not its top-left corner
+            return { x: worldX - DEFAULT_W / 2, y: worldY - DEFAULT_H / 2 };
+        };
+    }, [getNewCardPositionRef]);
     const onRemoteNodeMoves = useCallback(
         (moves: Array<{ nodeId: string; position: { x: number; y: number } }>) => {
             // Update ref first (synchronous) so buildNodes sees the latest positions
@@ -967,7 +968,9 @@ export function FlowCanvas({
                         return p === 0 ? n : { ...n, data: { ...n.data, proximity: 0 } };
                     })
                 );
-                return;
+                // For themes: still fall through to the snap-in / snap-out logic below so
+                // dragging a theme (with its code children) in or out of an insight is handled.
+                if (draggedKind !== 'theme') return;
             }
 
             if (draggedKind !== 'code' && draggedKind !== 'theme') return;
@@ -1031,23 +1034,14 @@ export function FlowCanvas({
 
                         await updateTheme(targetId, { highlightIds: newIds });
 
-                        // Phase 4: Non-overlap placement — compute offset inside field ring
+                        // Phase 4: Keep code at drop position; record offset relative to theme
                         const parentNode = allNodes.find((n) => n.id === `theme:${targetId}`)!;
-                        const existingOffsets = (theme.highlightIds ?? [])
-                            .filter((id) => id !== draggedEntityId)
-                            .map((id) => {
-                                const cn = allNodes.find((n) => n.id === `code:${id}`);
-                                return cn
-                                    ? { dx: cn.position.x - parentNode.position.x, dy: cn.position.y - parentNode.position.y }
-                                    : { dx: 0, dy: 0 };
-                            });
-                        const newOffset = placeNewChild(existingOffsets, dw, dh);
-                        const snappedPos = {
-                            x: parentNode.position.x + newOffset.dx,
-                            y: parentNode.position.y + newOffset.dy,
+                        const dropOffset = {
+                            dx: draggedNode.position.x - parentNode.position.x,
+                            dy: draggedNode.position.y - parentNode.position.y,
                         };
 
-                        // Optimistic: move code to snapped position, add badge, update theme member count
+                        // Optimistic: add badge, update theme member count (no position change)
                         const newParent: CodeCardParent = { themeId: targetId, themeName: theme.name ?? 'Untitled', color: THEME_COLOR };
                         setNodes((nds) =>
                             nds.map((n) => {
@@ -1056,11 +1050,10 @@ export function FlowCanvas({
                                     const filtered = (cd.parentThemes ?? []).filter((p) => p.themeId !== targetId);
                                     return {
                                         ...n,
-                                        position: snappedPos,
                                         data: {
                                             ...n.data,
                                             parentThemes: [...filtered, newParent],
-                                            _relOffset: newOffset,
+                                            _relOffset: dropOffset,
                                             _parentNodeId: `theme:${targetId}`,
                                         },
                                     };
@@ -1077,8 +1070,6 @@ export function FlowCanvas({
                                 return n;
                             })
                         );
-                        // Persist the snapped position to DB
-                        persistPosition('code', draggedEntityId, snappedPos).catch(() => toast.error('Failed to save position'));
                         if (!existingParent) toast.success(`Added to "${theme.name ?? 'theme'}"`);
 
                         onUpdate();
@@ -1089,20 +1080,11 @@ export function FlowCanvas({
                         if (newIds.length === (insight.themeIds ?? []).length) return;
                         await updateInsight(targetId, { themeIds: newIds });
 
-                        // Phase 4: Non-overlap placement for theme inside insight ring
+                        // Phase 4: Keep theme at drop position; record offset relative to insight
                         const parentNode = allNodes.find((n) => n.id === `insight:${targetId}`)!;
-                        const existingOffsets = (insight.themeIds ?? [])
-                            .filter((id) => id !== draggedEntityId)
-                            .map((id) => {
-                                const tn = allNodes.find((n) => n.id === `theme:${id}`);
-                                return tn
-                                    ? { dx: tn.position.x - parentNode.position.x, dy: tn.position.y - parentNode.position.y }
-                                    : { dx: 0, dy: 0 };
-                            });
-                        const newOffset = placeNewChild(existingOffsets, dw, dh);
-                        const snappedPos = {
-                            x: parentNode.position.x + newOffset.dx,
-                            y: parentNode.position.y + newOffset.dy,
+                        const dropOffset = {
+                            dx: draggedNode.position.x - parentNode.position.x,
+                            dy: draggedNode.position.y - parentNode.position.y,
                         };
 
                         setNodes((nds) =>
@@ -1110,8 +1092,7 @@ export function FlowCanvas({
                                 if (n.id === `theme:${draggedEntityId}`) {
                                     return {
                                         ...n,
-                                        position: snappedPos,
-                                        data: { ...n.data, _relOffset: newOffset, _parentNodeId: `insight:${targetId}` },
+                                        data: { ...n.data, _relOffset: dropOffset, _parentNodeId: `insight:${targetId}` },
                                     };
                                 }
                                 if (n.id === `insight:${targetId}`) {
@@ -1121,7 +1102,6 @@ export function FlowCanvas({
                                 return n;
                             })
                         );
-                        persistPosition('theme', draggedEntityId, snappedPos).catch(() => toast.error('Failed to save position'));
                         toast.success(`Added to "${insights.find(i => i.id === targetId)?.name ?? 'insight'}"`);
 
                         onUpdate();

@@ -29,8 +29,8 @@ export const InsightCreator = ({ themes, projectId, preSelectedIds, onInsightCre
   };
 
   const handleCreateInsight = async () => {
-    if (!insightName.trim() || selectedThemes.length === 0) {
-      toast.error('Please provide an insight name and select at least one theme');
+    if (!insightName.trim()) {
+      toast.error('Please provide an insight name');
       return;
     }
 

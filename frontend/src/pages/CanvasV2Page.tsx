@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState, useRef } from 'react';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { getFiles, getHighlights, getThemes, getInsights, getAnnotations, createAnnotation, updateTheme } from '@/services/api';
+import { getFiles, getHighlights, getThemes, getInsights, getAnnotations, createAnnotation, updateTheme, updateInsight } from '@/services/api';
 import type { Highlight, Theme, Insight, Annotation } from '@/types';
 import { FlowCanvas } from '@/components/canvas/FlowCanvas';
 import { CanvasEntityPanel } from '@/components/canvas/CanvasEntityPanel';
@@ -153,69 +153,32 @@ export default function CanvasV2Page() {
         setOpenEntity({ kind: kind as NodeKind, id });
     }, []);
 
-    // Store a pending theme position to set after creation
-    const [pendingThemePosition, setPendingThemePosition] = useState<{ themeName: string; codeIds: string[]; position: { x: number; y: number } } | null>(null);
-
-    // Patch new theme position after creation if needed
-    useEffect(() => {
-        if (!pendingThemePosition) return;
-        // Find the new theme by name and code membership
-        const newTheme = themes.find(t => t.name?.trim() === pendingThemePosition.themeName.trim() &&
-            pendingThemePosition.codeIds.every(id => (t.highlightIds ?? []).includes(id))
-        );
-        if (newTheme && (!newTheme.position || newTheme.position.x !== pendingThemePosition.position.x || newTheme.position.y !== pendingThemePosition.position.y)) {
-            updateTheme(newTheme.id, { position: pendingThemePosition.position }).then(() => {
-                setPendingThemePosition(null);
-                handleUpdate();
-            });
-        }
-    }, [themes, pendingThemePosition, handleUpdate]);
-
-    // Helper to compute average position of selected codes
-    const getAverageCodePosition = useCallback(() => {
-        const codeNodes = document.querySelectorAll('[data-id^="code:"]');
-        let sumX = 0, sumY = 0, count = 0;
-        selectedCodeIds.forEach(id => {
-            const el = document.querySelector(`[data-id="code:${id}"]`);
-            if (el) {
-                const rect = el.getBoundingClientRect();
-                sumX += rect.left + rect.width / 2;
-                sumY += rect.top + rect.height / 2;
-                count++;
-            }
-        });
-        if (count === 0) return { x: 200, y: 200 };
-        // Convert screen to canvas coordinates (approx)
-        const canvas = document.querySelector('.react-flow__viewport');
-        const canvasRect = canvas?.getBoundingClientRect();
-        return {
-            x: canvasRect ? (sumX / count - canvasRect.left) : 200,
-            y: canvasRect ? (sumY / count - canvasRect.top) : 200,
-        };
-    }, [selectedCodeIds]);
+    // Ref populated by FlowCanvas with a function that returns world coords of the viewport centre.
+    // Used to place newly created theme/insight cards in the visible area.
+    const getNewCardPositionRef = useRef<(() => { x: number; y: number }) | null>(null);
 
     return (
         <div className="fixed inset-0 top-[56px]">
             {/* Floating toolbar */}
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex gap-2 flex-wrap justify-center">
-                {selectedCodeIds.length >= 1 && (
-                    <Button
-                        variant="outline"
-                        className="border-2 border-emerald-600 rounded-none bg-emerald-50 uppercase tracking-wide text-xs px-3 py-1 text-emerald-700"
-                        onClick={() => setShowThemeDialog(true)}
-                    >
-                        + Theme from {selectedCodeIds.length} Code{selectedCodeIds.length !== 1 ? 's' : ''}
-                    </Button>
-                )}
-                {selectedThemeIds.length >= 1 && (
-                    <Button
-                        variant="outline"
-                        className="border-2 border-amber-500 rounded-none bg-amber-50 uppercase tracking-wide text-xs px-3 py-1 text-amber-700"
-                        onClick={() => setShowInsightDialog(true)}
-                    >
-                        + Insight from {selectedThemeIds.length} Theme{selectedThemeIds.length !== 1 ? 's' : ''}
-                    </Button>
-                )}
+                <Button
+                    variant="outline"
+                    className="border-2 border-emerald-600 rounded-none bg-emerald-50 uppercase tracking-wide text-xs px-3 py-1 text-emerald-700"
+                    onClick={() => setShowThemeDialog(true)}
+                >
+                    {selectedCodeIds.length >= 1
+                        ? `+ Theme from ${selectedCodeIds.length} Code${selectedCodeIds.length !== 1 ? 's' : ''}`
+                        : '+ New Theme'}
+                </Button>
+                <Button
+                    variant="outline"
+                    className="border-2 border-amber-500 rounded-none bg-amber-50 uppercase tracking-wide text-xs px-3 py-1 text-amber-700"
+                    onClick={() => setShowInsightDialog(true)}
+                >
+                    {selectedThemeIds.length >= 1
+                        ? `+ Insight from ${selectedThemeIds.length} Theme${selectedThemeIds.length !== 1 ? 's' : ''}`
+                        : '+ New Insight'}
+                </Button>
                 <Button
                     variant="outline"
                     className="border-2 border-black rounded-none bg-white uppercase tracking-wide text-xs px-3 py-1"
@@ -237,17 +200,19 @@ export default function CanvasV2Page() {
                         highlights={highlights}
                         projectId={projectId ?? undefined}
                         preSelectedIds={selectedCodeIds}
-                        onThemeCreated={(themeName) => {
-                            // If creating from selected codes, set pending position
-                            if (selectedCodeIds.length > 0) {
-                                setPendingThemePosition({
-                                    themeName,
-                                    codeIds: [...selectedCodeIds],
-                                    position: getAverageCodePosition(),
-                                });
-                            }
+                        onThemeCreated={async (themeName) => {
                             setShowThemeDialog(false);
                             setSelectedCodeIds([]);
+                            const pos = getNewCardPositionRef.current?.();
+                            if (pos) {
+                                // Fetch fresh list to find the just-created theme by name
+                                const freshThemes = await qc.fetchQuery<Theme[]>({
+                                    queryKey: ['themes', projectId],
+                                    queryFn: () => getThemes(projectId),
+                                });
+                                const newTheme = freshThemes.find(t => t.name?.trim() === themeName.trim());
+                                if (newTheme) await updateTheme(newTheme.id, { position: pos });
+                            }
                             handleUpdate();
                         }}
                     />
@@ -266,9 +231,19 @@ export default function CanvasV2Page() {
                         themes={themes}
                         projectId={projectId ?? undefined}
                         preSelectedIds={selectedThemeIds}
-                        onInsightCreated={() => {
+                        onInsightCreated={async () => {
                             setShowInsightDialog(false);
                             setSelectedThemeIds([]);
+                            const pos = getNewCardPositionRef.current?.();
+                            if (pos) {
+                                const freshInsights = await qc.fetchQuery<Insight[]>({
+                                    queryKey: ['insights', projectId],
+                                    queryFn: () => getInsights(projectId),
+                                });
+                                // Most recently created insight is last in the list
+                                const newInsight = freshInsights[freshInsights.length - 1];
+                                if (newInsight) await updateInsight(newInsight.id, { position: pos });
+                            }
                             handleUpdate();
                         }}
                     />
@@ -286,6 +261,8 @@ export default function CanvasV2Page() {
                 onSelectionChange={handleSelectionChange}
                 projectId={projectId ?? undefined}
                 userId={user?.id}
+                getNewCardPositionRef={getNewCardPositionRef}
+                getNewCardPositionRef={getNewCardPositionRef}
             />
             <CanvasEntityPanel
                 entity={openEntity}

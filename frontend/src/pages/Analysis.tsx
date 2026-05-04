@@ -334,20 +334,10 @@ export default function AnalysisPage() {
     };
 
     const handleCreateThemeFromSelection = () => {
-        const selectedCodes = Array.from(selectedIds).filter(id => highlightMap.has(id));
-        if (selectedCodes.length === 0) {
-            toast.error('Select at least one code');
-            return;
-        }
         setShowCreateTheme(true);
     };
 
     const handleCreateInsightFromSelection = () => {
-        const selectedThemes = Array.from(selectedIds).filter(id => themeMap.has(id));
-        if (selectedThemes.length === 0) {
-            toast.error('Select at least one theme');
-            return;
-        }
         setShowCreateInsight(true);
     };
 
@@ -401,18 +391,14 @@ export default function AnalysisPage() {
             <div className="flex items-center justify-between">
                 <h1 className="text-xl font-extrabold uppercase tracking-wide">Analysis</h1>
                 <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                    {selectedCodes.length > 0 && (
-                        <Button size="sm" onClick={handleCreateThemeFromSelection}>
-                            <Plus className="w-4 h-4 mr-1" />
-                            Create Theme ({selectedCodes.length})
-                        </Button>
-                    )}
-                    {selectedThemes.length > 0 && (
-                        <Button size="sm" onClick={handleCreateInsightFromSelection}>
-                            <Plus className="w-4 h-4 mr-1" />
-                            Create Insight ({selectedThemes.length})
-                        </Button>
-                    )}
+                    <Button size="sm" onClick={handleCreateThemeFromSelection}>
+                        <Plus className="w-4 h-4 mr-1" />
+                        {selectedCodes.length > 0 ? `Create Theme (${selectedCodes.length})` : 'New Theme'}
+                    </Button>
+                    <Button size="sm" onClick={handleCreateInsightFromSelection}>
+                        <Plus className="w-4 h-4 mr-1" />
+                        {selectedThemes.length > 0 ? `Create Insight (${selectedThemes.length})` : 'New Insight'}
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => setShowExport(true)}>
                         <Download className="w-4 h-4 mr-1" />
                         Export
