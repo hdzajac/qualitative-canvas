@@ -112,6 +112,37 @@ function placeNewChild(
     return { dx: existingOffsets.length * (childW + 16), dy: 0 };
 }
 
+/**
+ * Find a non-overlapping position outside `minRadius` from the parent.
+ * Used when a child is removed from a group via the Analysis page so it scatters away
+ * rather than remaining visually inside the orbital ring it no longer belongs to.
+ */
+function placeOutsideRadius(
+    allNodePositions: Array<{ x: number; y: number }>,
+    parentPos: { x: number; y: number },
+    minRadius: number,
+    childW: number = DEFAULT_W,
+    childH: number = DEFAULT_H,
+): { x: number; y: number } {
+    const STEP_R = Math.max(childW, childH) + 20;
+    const N_ANGLES = 12;
+    const startRing = Math.max(1, Math.ceil(minRadius / STEP_R) + 1);
+    for (let ring = startRing; ring <= startRing + 8; ring++) {
+        const r = ring * STEP_R;
+        for (let a = 0; a < N_ANGLES; a++) {
+            const angle = (2 * Math.PI * a) / N_ANGLES - Math.PI / 2;
+            const cx = parentPos.x + Math.cos(angle) * r;
+            const cy = parentPos.y + Math.sin(angle) * r;
+            const overlaps = allNodePositions.some(
+                (pos) => Math.abs(pos.x - cx) < childW + 16 && Math.abs(pos.y - cy) < childH + 16,
+            );
+            if (!overlaps) return { x: cx, y: cy };
+        }
+    }
+    // Fallback: place to the right of the ring
+    return { x: parentPos.x + minRadius + childW + 20, y: parentPos.y };
+}
+
 // ─── buildNodes ────────────────────────────────────────────────────────────────
 
 function buildNodes(
@@ -500,6 +531,15 @@ export function FlowCanvas({
     const hiddenKindsRef = useRef<Set<string> | undefined>(hiddenKinds);
     useEffect(() => { hiddenKindsRef.current = hiddenKinds; }, [hiddenKinds]);
 
+    // Track code→theme and theme→insight memberships across rebuilds so we can detect when
+    // a relationship was changed via the Analysis page (not via canvas drag).  Canvas-initiated
+    // changes pre-update these refs to prevent the subsequent SSE refetch from triggering a
+    // spurious auto-reposition.
+    const prevCodeThemesRef = useRef<Map<string, Set<string>>>(new Map()); // themeId → Set<codeId>
+    const prevThemeInsightsRef = useRef<Map<string, Set<string>>>(new Map()); // insightId → Set<themeId>
+    // False until the first successful buildNodes run — skips repositioning on cold load.
+    const hasHydratedRef = useRef(false);
+
     // Track which nodes the LOCAL user is actively dragging so buildNodes keeps their live position
     // rather than overwriting with server data mid-drag.
     const localDraggingIdsRef = useRef<Set<string>>(new Set());
@@ -648,6 +688,10 @@ export function FlowCanvas({
         async (highlightId: string, themeId: string) => {
             const theme = themes.find((t) => t.id === themeId);
             if (!theme) return;
+            // Pre-emptively update tracking ref so the SSE-triggered rebuild doesn't interpret
+            // this canvas action as an Analysis-page removal and reposition the card.
+            const prevThemeSet = prevCodeThemesRef.current.get(themeId);
+            if (prevThemeSet) prevThemeSet.delete(highlightId);
             try {
                 await removeChildAndMaybeDeleteParent(
                     highlightId, 'theme', themeId, themes, insights, setNodes, onUpdate
@@ -679,6 +723,120 @@ export function FlowCanvas({
     );
 
     useEffect(() => {
+        // ─── Detect Analysis-page relationship changes and auto-reposition ─────────
+        // Only runs after the first successful hydration so cold-load positions are
+        // not disturbed.  Canvas-initiated changes (drag snap-in/ungroup, context menu)
+        // pre-update prevCodeThemesRef / prevThemeInsightsRef so they are invisible here.
+        if (hasHydratedRef.current) {
+            // ── Code → Theme ──────────────────────────────────────────────────────
+            themes.forEach((theme) => {
+                const currCodes = new Set(theme.highlightIds ?? []);
+                const prevCodes = prevCodeThemesRef.current.get(theme.id) ?? new Set<string>();
+                const themeNode = nodesRef.current.find((n) => n.id === `theme:${theme.id}`);
+                const parentPos = themeNode?.position ?? (theme.position as { x: number; y: number } | undefined) ?? { x: 200, y: 200 };
+                const fieldRadius = (themeNode?.data as { fieldRadius?: number })?.fieldRadius ?? BASE_FIELD_RADIUS;
+
+                // Newly added codes — move them near the parent
+                currCodes.forEach((codeId) => {
+                    if (prevCodes.has(codeId)) return;
+                    const codeNode = nodesRef.current.find((n) => n.id === `code:${codeId}`);
+                    if (!codeNode) return;
+                    // Skip codes already inside the ring — these were dropped from the canvas
+                    const dist = Math.hypot(codeNode.position.x - parentPos.x, codeNode.position.y - parentPos.y);
+                    if (dist < fieldRadius) return;
+
+                    // Compute a non-overlapping orbit position around the parent
+                    const existingOffsets = Array.from(currCodes)
+                        .filter((hId) => hId !== codeId)
+                        .flatMap((hId) => {
+                            const n = nodesRef.current.find((nd) => nd.id === `code:${hId}`);
+                            if (!n) return [];
+                            return [{ dx: n.position.x - parentPos.x, dy: n.position.y - parentPos.y }];
+                        });
+                    const offset = placeNewChild(existingOffsets);
+                    const newPos = { x: parentPos.x + offset.dx, y: parentPos.y + offset.dy };
+                    pinnedPositionsRef.current.set(`code:${codeId}`, newPos);
+                    setTimeout(() => pinnedPositionsRef.current.delete(`code:${codeId}`), 3000);
+                    persistPosition('code', codeId, newPos).catch(() => toast.error('Failed to save position'));
+                });
+
+                // Newly removed codes — scatter them outside the ring
+                prevCodes.forEach((codeId) => {
+                    if (currCodes.has(codeId)) return;
+                    const codeNode = nodesRef.current.find((n) => n.id === `code:${codeId}`);
+                    if (!codeNode) return;
+                    // Skip codes already outside the ring — they were ungrouped from the canvas
+                    const dist = Math.hypot(codeNode.position.x - parentPos.x, codeNode.position.y - parentPos.y);
+                    if (dist > fieldRadius + DEFAULT_W) return;
+
+                    const allPositions = nodesRef.current
+                        .filter((n) => n.id !== `code:${codeId}`)
+                        .map((n) => n.position);
+                    const newPos = placeOutsideRadius(allPositions, parentPos, fieldRadius + FIELD_PADDING);
+                    pinnedPositionsRef.current.set(`code:${codeId}`, newPos);
+                    setTimeout(() => pinnedPositionsRef.current.delete(`code:${codeId}`), 3000);
+                    persistPosition('code', codeId, newPos).catch(() => toast.error('Failed to save position'));
+                });
+            });
+
+            // ── Theme → Insight ───────────────────────────────────────────────────
+            insights.forEach((insight) => {
+                const currThemes = new Set(insight.themeIds ?? []);
+                const prevThemes = prevThemeInsightsRef.current.get(insight.id) ?? new Set<string>();
+                const insightNode = nodesRef.current.find((n) => n.id === `insight:${insight.id}`);
+                const parentPos = insightNode?.position ?? (insight.position as { x: number; y: number } | undefined) ?? { x: 200, y: 200 };
+                const fieldRadius = (insightNode?.data as { fieldRadius?: number })?.fieldRadius ?? BASE_FIELD_RADIUS;
+
+                // Newly added themes — move them near the insight
+                currThemes.forEach((themeId) => {
+                    if (prevThemes.has(themeId)) return;
+                    const themeNode = nodesRef.current.find((n) => n.id === `theme:${themeId}`);
+                    if (!themeNode) return;
+                    const dist = Math.hypot(themeNode.position.x - parentPos.x, themeNode.position.y - parentPos.y);
+                    if (dist < fieldRadius) return;
+
+                    const existingOffsets = Array.from(currThemes)
+                        .filter((tId) => tId !== themeId)
+                        .flatMap((tId) => {
+                            const n = nodesRef.current.find((nd) => nd.id === `theme:${tId}`);
+                            if (!n) return [];
+                            return [{ dx: n.position.x - parentPos.x, dy: n.position.y - parentPos.y }];
+                        });
+                    const offset = placeNewChild(existingOffsets);
+                    const newPos = { x: parentPos.x + offset.dx, y: parentPos.y + offset.dy };
+                    pinnedPositionsRef.current.set(`theme:${themeId}`, newPos);
+                    setTimeout(() => pinnedPositionsRef.current.delete(`theme:${themeId}`), 3000);
+                    persistPosition('theme', themeId, newPos).catch(() => toast.error('Failed to save position'));
+                });
+
+                // Newly removed themes — scatter them outside the insight ring
+                prevThemes.forEach((themeId) => {
+                    if (currThemes.has(themeId)) return;
+                    const themeNode = nodesRef.current.find((n) => n.id === `theme:${themeId}`);
+                    if (!themeNode) return;
+                    const dist = Math.hypot(themeNode.position.x - parentPos.x, themeNode.position.y - parentPos.y);
+                    if (dist > fieldRadius + DEFAULT_W) return;
+
+                    const allPositions = nodesRef.current
+                        .filter((n) => n.id !== `theme:${themeId}`)
+                        .map((n) => n.position);
+                    const newPos = placeOutsideRadius(allPositions, parentPos, fieldRadius + FIELD_PADDING);
+                    pinnedPositionsRef.current.set(`theme:${themeId}`, newPos);
+                    setTimeout(() => pinnedPositionsRef.current.delete(`theme:${themeId}`), 3000);
+                    persistPosition('theme', themeId, newPos).catch(() => toast.error('Failed to save position'));
+                });
+            });
+        }
+
+        // Update membership snapshots for the next diff
+        const newCodeThemes = new Map<string, Set<string>>();
+        themes.forEach((t) => newCodeThemes.set(t.id, new Set(t.highlightIds ?? [])));
+        prevCodeThemesRef.current = newCodeThemes;
+        const newThemeInsights = new Map<string, Set<string>>();
+        insights.forEach((i) => newThemeInsights.set(i.id, new Set(i.themeIds ?? [])));
+        prevThemeInsightsRef.current = newThemeInsights;
+        hasHydratedRef.current = true;
+
         setNodes((prev) => {
             const next = buildNodes(highlights, themes, insights, annotations, files, handleOpen, handleAnnotationCommit, handleAnnotationDelete, handleAnnotationColorChange, handleRemoveFromTheme, handleAnnotationResize, localDraggingIdsRef.current, pinnedPositionsRef.current, remotePositionsRef.current, lockedBy, userId, prev);
             // Re-apply hidden flag to preserve visibility state across rebuilds
@@ -1036,11 +1194,17 @@ export function FlowCanvas({
                         const newIds = Array.from(new Set([...(theme.highlightIds ?? []), draggedEntityId]));
                         if (newIds.length === (theme.highlightIds ?? []).length) return; // already a member
 
+                        // Pre-update tracking ref so the SSE refetch doesn't re-trigger auto-placement
+                        const snapInSet = prevCodeThemesRef.current.get(targetId);
+                        if (snapInSet) snapInSet.add(draggedEntityId);
+
                         // If the code already belongs to a different theme, remove it first
                         const existingParent = themes.find(
                             (t) => t.id !== targetId && (t.highlightIds ?? []).includes(draggedEntityId)
                         );
                         if (existingParent) {
+                            const prevExParent = prevCodeThemesRef.current.get(existingParent.id);
+                            if (prevExParent) prevExParent.delete(draggedEntityId);
                             const cleanedIds = (existingParent.highlightIds ?? []).filter((id) => id !== draggedEntityId);
                             await updateTheme(existingParent.id, { highlightIds: cleanedIds });
                             toast.success(`Moved from "${existingParent.name ?? 'theme'}" to "${theme.name ?? 'theme'}"`);
@@ -1092,6 +1256,9 @@ export function FlowCanvas({
                         if (!insight) return;
                         const newIds = Array.from(new Set([...(insight.themeIds ?? []), draggedEntityId]));
                         if (newIds.length === (insight.themeIds ?? []).length) return;
+                        // Pre-update tracking ref so SSE refetch doesn't re-trigger auto-placement
+                        const snapInInsightSet = prevThemeInsightsRef.current.get(targetId);
+                        if (snapInInsightSet) snapInInsightSet.add(draggedEntityId);
                         await updateInsight(targetId, { themeIds: newIds });
 
                         // Phase 4: Keep theme at drop position; record offset relative to insight
@@ -1151,6 +1318,9 @@ export function FlowCanvas({
                     const dist = Math.hypot(dragCx - parentCx, dragCy - parentCy);
 
                     if (dist > fieldRad) {
+                        // Pre-update tracking ref so the SSE refetch doesn't reposition the card
+                        const prevThemeSet = prevCodeThemesRef.current.get(theme.id);
+                        if (prevThemeSet) prevThemeSet.delete(draggedEntityId);
                         try {
                             await removeChildAndMaybeDeleteParent(
                                 draggedEntityId, 'theme', theme.id, themes, insights, setNodes, onUpdate
@@ -1183,6 +1353,9 @@ export function FlowCanvas({
                     const dist = Math.hypot(dragCx - parentCx, dragCy - parentCy);
 
                     if (dist > fieldRad) {
+                        // Pre-update tracking ref so the SSE refetch doesn't reposition the theme
+                        const prevInsightSet = prevThemeInsightsRef.current.get(insight.id);
+                        if (prevInsightSet) prevInsightSet.delete(draggedEntityId);
                         try {
                             await removeChildAndMaybeDeleteParent(
                                 draggedEntityId, 'insight', insight.id, themes, insights, setNodes, onUpdate

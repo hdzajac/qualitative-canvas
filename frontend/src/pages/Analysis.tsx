@@ -292,9 +292,17 @@ export default function AnalysisPage() {
         if (draggedType === 'code' && targetRow.type === 'theme') {
             const theme = targetRow.data as Theme;
             if (!theme.highlightIds.includes(draggedId)) {
+                // Move: remove from old parent theme first
+                const oldParent = themes.find(t => t.id !== theme.id && t.highlightIds.includes(draggedId));
+                if (oldParent) {
+                    await updateThemeMut.mutateAsync({
+                        id: oldParent.id,
+                        highlightIds: oldParent.highlightIds.filter(id => id !== draggedId),
+                    });
+                }
                 await updateThemeMut.mutateAsync({
                     id: theme.id,
-                    highlightIds: [...theme.highlightIds, draggedId]
+                    highlightIds: [...theme.highlightIds, draggedId],
                 });
             }
         }
@@ -302,9 +310,17 @@ export default function AnalysisPage() {
         else if (draggedType === 'theme' && targetRow.type === 'insight') {
             const insight = targetRow.data as Insight;
             if (!insight.themeIds.includes(draggedId)) {
+                // Move: remove from old parent insight first
+                const oldParent = insights.find(i => i.id !== insight.id && i.themeIds.includes(draggedId));
+                if (oldParent) {
+                    await updateInsightMut.mutateAsync({
+                        id: oldParent.id,
+                        themeIds: oldParent.themeIds.filter(id => id !== draggedId),
+                    });
+                }
                 await updateInsightMut.mutateAsync({
                     id: insight.id,
-                    themeIds: [...insight.themeIds, draggedId]
+                    themeIds: [...insight.themeIds, draggedId],
                 });
             }
         }
@@ -312,21 +328,43 @@ export default function AnalysisPage() {
         else if (selectedIds.size > 0 && targetRow.type === 'theme') {
             const theme = targetRow.data as Theme;
             const selectedCodes = Array.from(selectedIds).filter(id => highlightMap.has(id));
+            // Batch removals per old parent theme
+            const oldParentRemovals = new Map<string, string[]>(); // themeId → remaining ids
+            for (const codeId of selectedCodes) {
+                const oldParent = themes.find(t => t.id !== theme.id && t.highlightIds.includes(codeId));
+                if (oldParent) {
+                    if (!oldParentRemovals.has(oldParent.id)) {
+                        oldParentRemovals.set(oldParent.id, [...oldParent.highlightIds]);
+                    }
+                    oldParentRemovals.set(oldParent.id, oldParentRemovals.get(oldParent.id)!.filter(id => id !== codeId));
+                }
+            }
+            for (const [parentId, newIds] of oldParentRemovals) {
+                await updateThemeMut.mutateAsync({ id: parentId, highlightIds: newIds });
+            }
             const newIds = [...new Set([...theme.highlightIds, ...selectedCodes])];
-            await updateThemeMut.mutateAsync({
-                id: theme.id,
-                highlightIds: newIds
-            });
+            await updateThemeMut.mutateAsync({ id: theme.id, highlightIds: newIds });
         }
         // Can drop multiple themes from selection
         else if (selectedIds.size > 0 && targetRow.type === 'insight') {
             const insight = targetRow.data as Insight;
             const selectedThemes = Array.from(selectedIds).filter(id => themeMap.has(id));
+            // Batch removals per old parent insight
+            const oldParentRemovals = new Map<string, string[]>(); // insightId → remaining ids
+            for (const themeId of selectedThemes) {
+                const oldParent = insights.find(i => i.id !== insight.id && i.themeIds.includes(themeId));
+                if (oldParent) {
+                    if (!oldParentRemovals.has(oldParent.id)) {
+                        oldParentRemovals.set(oldParent.id, [...oldParent.themeIds]);
+                    }
+                    oldParentRemovals.set(oldParent.id, oldParentRemovals.get(oldParent.id)!.filter(id => id !== themeId));
+                }
+            }
+            for (const [parentId, newIds] of oldParentRemovals) {
+                await updateInsightMut.mutateAsync({ id: parentId, themeIds: newIds });
+            }
             const newIds = [...new Set([...insight.themeIds, ...selectedThemes])];
-            await updateInsightMut.mutateAsync({
-                id: insight.id,
-                themeIds: newIds
-            });
+            await updateInsightMut.mutateAsync({ id: insight.id, themeIds: newIds });
         }
 
         setDraggedId(null);
