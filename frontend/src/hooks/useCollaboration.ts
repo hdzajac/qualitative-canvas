@@ -21,6 +21,8 @@ interface UseCollaborationOptions {
   userId: string | undefined;
   /** Called for each remote live-drag position update so FlowCanvas can apply it immediately. */
   onRemoteNodeMoves: (moves: Array<{ nodeId: string; position: { x: number; y: number } }>) => void;
+  /** Called when remote peers release their drag lock so FlowCanvas can immediately clear visual indicators. */
+  onNodesReleased?: (nodeIds: string[]) => void;
 }
 
 export interface UseCollaborationResult {
@@ -46,6 +48,7 @@ export function useCollaboration({
   projectId,
   userId,
   onRemoteNodeMoves,
+  onNodesReleased,
 }: UseCollaborationOptions): UseCollaborationResult {
   const socketRef = useRef<Socket | null>(null);
   const [peers, setPeers] = useState<Map<string, PeerInfo>>(new Map());
@@ -53,12 +56,14 @@ export function useCollaboration({
   const lastCursorEmit = useRef(0);
   const onRemoteNodeMovesRef = useRef(onRemoteNodeMoves);
   onRemoteNodeMovesRef.current = onRemoteNodeMoves;
+  const onNodesReleasedRef = useRef(onNodesReleased);
+  onNodesReleasedRef.current = onNodesReleased;
 
   useEffect(() => {
     if (!projectId || !userId) return;
 
     const socket = io('/', {
-      path: '/socket.io',
+      path: '/api/socket.io',
       withCredentials: true,
       transports: ['websocket', 'polling'],
     });
@@ -127,6 +132,9 @@ export function useCollaboration({
         nodeIds.forEach((n) => m.delete(n));
         return m;
       });
+      // Fire callback immediately so FlowCanvas can directly patch node data without
+      // waiting for the buildNodes effect cycle to clear data.lockedBy.
+      onNodesReleasedRef.current?.(nodeIds);
     });
 
     return () => {

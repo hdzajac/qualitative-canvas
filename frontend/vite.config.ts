@@ -15,10 +15,6 @@ export default defineConfig(({ mode }) => ({
           "/api": {
             target: "http://localhost:5002",
             changeOrigin: true,
-          },
-          "/socket.io": {
-            target: "http://localhost:5002",
-            changeOrigin: true,
             ws: true,
           },
         },
@@ -33,10 +29,6 @@ export default defineConfig(({ mode }) => ({
       ? undefined
       : {
           "/api": {
-            target: "http://localhost:5002",
-            changeOrigin: true,
-          },
-          "/socket.io": {
             target: "http://localhost:5002",
             changeOrigin: true,
             ws: true,

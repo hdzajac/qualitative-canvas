@@ -12,7 +12,7 @@ init()
 
     const io = new Server(httpServer, {
       cors: { origin: corsOrigin, credentials: true },
-      path: '/socket.io',
+      path: '/api/socket.io',
     });
 
     setupCollab(io);

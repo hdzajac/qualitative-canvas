@@ -130,6 +130,8 @@ function buildNodes(
     localDraggingIds: Set<string>,
     /** Positions pinned after drag-end — override stale server data until the PATCH confirms */
     pinnedPositions: Map<string, { x: number; y: number }>,
+    /** Live positions received from remote peers — synchronous ref, always current */
+    remotePositions: Map<string, { x: number; y: number }>,
     /** Nodes locked by a remote peer — rendered with a ring and not interactable */
     lockedBy: Map<string, NodeLock>,
     currentUserId: string | undefined,
@@ -144,10 +146,13 @@ function buildNodes(
     function lockOverride(nodeId: string): Partial<Node> {
         const lock = lockedBy.get(nodeId);
         if (!lock || lock.userId === currentUserId) return {};
+        // Do NOT inject style.outline here — it gets stored in styleMap (built from prevNodes)
+        // and bleeds through on the next buildNodes call after the lock is released.
+        // Card components (CodeCard, ParentCard, AnnotationNode) already render the colored
+        // border and name badge directly from data.lockedBy.
         return {
             draggable: false,
             selectable: false,
-            style: { outline: `2px solid ${lock.color}`, outlineOffset: '2px' },
             data: { lockedBy: lock } as Record<string, unknown>,
         };
     }
@@ -165,9 +170,11 @@ function buildNodes(
         layoutDefault: { x: number; y: number },
     ): { x: number; y: number } {
         if (localDraggingIds.has(nodeId)) return posMap.get(nodeId) ?? serverPos ?? layoutDefault;
-        // Use a pinned position (set at drag-end) while the server hasn't confirmed the new position yet.
         const pinned = pinnedPositions.get(nodeId);
         if (pinned) return pinned;
+        // Synchronous ref — always has the latest remote position regardless of React batch order
+        const remote = remotePositions.get(nodeId);
+        if (remote) return remote;
         if (serverPos) return serverPos;
         return posMap.get(nodeId) ?? layoutDefault;
     }
@@ -206,6 +213,11 @@ function buildNodes(
 
         if (localDraggingIds.has(nodeId) && posMap.has(nodeId)) {
             resolvedPos = posMap.get(nodeId)!;
+        } else if (pinnedPositions.has(nodeId)) {
+            resolvedPos = pinnedPositions.get(nodeId)!;
+        } else if (remotePositions.has(nodeId)) {
+            // Remote peer is dragging — synchronous ref, always current
+            resolvedPos = remotePositions.get(nodeId)!;
         } else if (h.position) {
             resolvedPos = { x: h.position.x, y: h.position.y };
         } else if (posMap.has(nodeId)) {
@@ -286,7 +298,10 @@ function buildNodes(
             fieldRadius,
         };
         const themeLock = lockOverride(nodeId);
-        const themeBaseStyle = styleMap.get(nodeId) ?? { width: t.size?.w ?? DEFAULT_W, height: t.size?.h ?? DEFAULT_H };
+        // Destructure to strip any `outline`/`outlineOffset` that an older build may have
+        // written into styleMap via the now-removed lockOverride style injection.
+        const { outline: _tO, outlineOffset: _tOO, ...themeBaseStyle } =
+            (styleMap.get(nodeId) ?? { width: t.size?.w ?? DEFAULT_W, height: t.size?.h ?? DEFAULT_H }) as Record<string, unknown>;
         nodes.push({
             id: nodeId,
             type: 'theme',
@@ -321,7 +336,8 @@ function buildNodes(
             fieldRadius,
         };
         const insightLock = lockOverride(nodeId);
-        const insightBaseStyle = styleMap.get(nodeId) ?? { width: i.size?.w ?? DEFAULT_W, height: i.size?.h ?? DEFAULT_H };
+        const { outline: _iO, outlineOffset: _iOO, ...insightBaseStyle } =
+            (styleMap.get(nodeId) ?? { width: i.size?.w ?? DEFAULT_W, height: i.size?.h ?? DEFAULT_H }) as Record<string, unknown>;
         nodes.push({
             id: nodeId,
             type: 'insight',
@@ -343,7 +359,8 @@ function buildNodes(
             onResize: onAnnotationResize,
         };
         const annotationLock = lockOverride(nodeId);
-        const annotationBaseStyle = styleMap.get(nodeId) ?? { width: a.size?.w ?? DEFAULT_ANNOTATION_W, height: a.size?.h ?? DEFAULT_ANNOTATION_H };
+        const { outline: _aO, outlineOffset: _aOO, ...annotationBaseStyle } =
+            (styleMap.get(nodeId) ?? { width: a.size?.w ?? DEFAULT_ANNOTATION_W, height: a.size?.h ?? DEFAULT_ANNOTATION_H }) as Record<string, unknown>;
         nodes.push({
             id: nodeId,
             type: 'annotation',
@@ -493,6 +510,10 @@ export function FlowCanvas({
     // Pin the final dropped position until the server confirms it, preventing a visible
     // jump when a stale GET refetch arrives before the PATCH round-trip completes.
     const pinnedPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+    // Live positions received from remote peers via nodes-moved. Updated synchronously
+    // (ref, not state) so buildNodes always sees the latest value even when React batches
+    // a concurrent setNodes update from a query refetch.
+    const remotePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
     // ─── Collaboration ────────────────────────────────────────────────────────
     const containerRef = useRef<HTMLDivElement>(null);
@@ -500,6 +521,9 @@ export function FlowCanvas({
 
     const onRemoteNodeMoves = useCallback(
         (moves: Array<{ nodeId: string; position: { x: number; y: number } }>) => {
+            // Update ref first (synchronous) so buildNodes sees the latest positions
+            // even if its setNodes updater runs before this one in React's queue.
+            moves.forEach(({ nodeId, position }) => remotePositionsRef.current.set(nodeId, position));
             setNodes((nds) =>
                 nds.map((n) => {
                     const move = moves.find((m) => m.nodeId === n.id);
@@ -510,8 +534,41 @@ export function FlowCanvas({
         [setNodes]
     );
 
+    // Directly clear data.lockedBy and restore draggability when a peer releases their lock.
+    // This runs synchronously with the socket event, before the buildNodes effect cycle,
+    // guaranteeing the visual disappears immediately on drop.
+    const onNodesReleased = useCallback(
+        (nodeIds: string[]) => {
+            const idSet = new Set(nodeIds);
+            setNodes((nds) =>
+                nds.map((n) => {
+                    if (!idSet.has(n.id)) return n;
+                    const { lockedBy: _removed, ...restData } = n.data as Record<string, unknown>;
+                    return { ...n, draggable: true, selectable: true, data: restData };
+                })
+            );
+        },
+        [setNodes]
+    );
+
     const { peers, lockedBy, emitCursorMove, emitDragStart, emitDragMove, emitDragEnd } =
-        useCollaboration({ projectId, userId, onRemoteNodeMoves });
+        useCollaboration({ projectId, userId, onRemoteNodeMoves, onNodesReleased });
+
+    // When a node is no longer locked by a remote peer, delay clearing its remote position.
+    // The dragging peer's PATCH fires ~500ms after drag-end; the server then emits an SSE
+    // entity-changed event; the observer needs that refetch to land before we stop overriding
+    // the server value — otherwise buildNodes falls back to the pre-drag stale position.
+    useEffect(() => {
+        const released: string[] = [];
+        remotePositionsRef.current.forEach((_, nodeId) => {
+            if (!lockedBy.has(nodeId)) released.push(nodeId);
+        });
+        if (released.length === 0) return;
+        const timer = setTimeout(() => {
+            released.forEach((nodeId) => remotePositionsRef.current.delete(nodeId));
+        }, 3000);
+        return () => clearTimeout(timer);
+    }, [lockedBy]);
 
     const handleCanvasMouseMove = useCallback(
         (e: React.MouseEvent<HTMLDivElement>) => {
@@ -613,7 +670,7 @@ export function FlowCanvas({
 
     useEffect(() => {
         setNodes((prev) => {
-            const next = buildNodes(highlights, themes, insights, annotations, files, handleOpen, handleAnnotationCommit, handleAnnotationDelete, handleAnnotationColorChange, handleRemoveFromTheme, handleAnnotationResize, localDraggingIdsRef.current, pinnedPositionsRef.current, lockedBy, userId, prev);
+            const next = buildNodes(highlights, themes, insights, annotations, files, handleOpen, handleAnnotationCommit, handleAnnotationDelete, handleAnnotationColorChange, handleRemoveFromTheme, handleAnnotationResize, localDraggingIdsRef.current, pinnedPositionsRef.current, remotePositionsRef.current, lockedBy, userId, prev);
             nodesRef.current = next;
             return next;
         });
