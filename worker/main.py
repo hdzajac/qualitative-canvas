@@ -379,7 +379,7 @@ def main():
                     num_speakers = job.get('numSpeakers') or None
                     # Pass the already-fetched audio bytes to avoid a second full download
                     audio_bytes_for_diar = content if isinstance(content, bytes) else None
-                    run_diarization(base, media, num_speakers=num_speakers, audio_bytes=audio_bytes_for_diar)
+                    run_diarization(base, media, job=job, num_speakers=num_speakers, audio_bytes=audio_bytes_for_diar)
                 except Exception as e:
                     log_warn(f"Diarization error: {e}")
             done = complete_job(base, job['id'])
@@ -499,7 +499,7 @@ def transcribe_real(base_url: str, media, text_content, job, total_ms_hint=None)
             chunk_index += 1
     return segs if segs else build_fake_segments(text_content)
 
-def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, audio_bytes: Optional[bytes] = None):  # pragma: no cover - heavy
+def run_diarization(base_url: str, media, job=None, num_speakers: Optional[int] = None, audio_bytes: Optional[bytes] = None):  # pragma: no cover - heavy
     if not DIARIZATION_AVAILABLE:
         return
     
@@ -605,7 +605,37 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, au
             pipeline_kwargs['max_speakers'] = int(_os.getenv('DIARIZATION_MAX_SPEAKERS', '20'))
             log_info(f"Diarization: no speaker hint, max_speakers cap={pipeline_kwargs['max_speakers']}")
         log_info(f"Diarization: running pipeline with kwargs={pipeline_kwargs}")
-        diar = pipeline(final_wav_path or wav_path, **pipeline_kwargs)
+        # pyannote fires hook(step_name, artifact, file, total) after each internal step.
+        # We use it for two purposes:
+        #   1. Log a heartbeat line so the container logs show progress during the long silence.
+        #   2. Patch the job progress endpoint so the UI progress bar advances during diarization.
+        # The three main steps reported by pyannote/audio's SpeakerDiarization pipeline are:
+        #   "speaker_diarization>segmentation", "speaker_diarization>embeddings", "speaker_diarization>clustering"
+        # total is None until pyannote knows it, so we track completed steps as a fraction.
+        _diar_step_count = [0]
+        _last_patch_step = [-1]
+        _PATCH_EVERY = 1  # patch after every step (there are only ~3 steps total)
+        def _diar_hook(step_name: str, step_artifact, file=None, total=None):
+            _diar_step_count[0] += 1
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            if total is not None and total > 0:
+                frac = min(_diar_step_count[0] / total, 1.0)
+                pct = int(frac * 100)
+                log_info(f"Diarization: step {_diar_step_count[0]}/{total} — {step_name} ({pct}%, {elapsed_ms}ms elapsed)")
+                if job and (_diar_step_count[0] - _last_patch_step[0]) >= _PATCH_EVERY:
+                    _last_patch_step[0] = _diar_step_count[0]
+                    total_ms_est = int(elapsed_ms / frac) if frac > 0 else None
+                    eta = int((total_ms_est - elapsed_ms) / 1000) if total_ms_est else None
+                    patch_progress(base_url, job['id'],
+                                   processed_ms=elapsed_ms,
+                                   total_ms=total_ms_est,
+                                   eta_seconds=eta)
+            else:
+                log_info(f"Diarization: step {_diar_step_count[0]} — {step_name} ({elapsed_ms}ms elapsed)")
+                if job and (_diar_step_count[0] - _last_patch_step[0]) >= _PATCH_EVERY:
+                    _last_patch_step[0] = _diar_step_count[0]
+                    patch_progress(base_url, job['id'], processed_ms=elapsed_ms)
+        diar = pipeline(final_wav_path or wav_path, hook=_diar_hook, **pipeline_kwargs)
         t_ms = int((time.perf_counter() - t0) * 1000)
         if duration_sec:
             rtf_actual = t_ms / max(1, duration_sec * 1000)

@@ -97,6 +97,15 @@ export default function mediaRoutes(pool) {
     res.status(201).json(created);
   }));
 
+  router.patch('/:id', asyncHandler(async (req, res) => {
+    const schema = z.object({ originalFilename: z.string().min(1).max(512) });
+    const parsed = schema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    const updated = await mediaService.rename(req.params.id, parsed.data.originalFilename);
+    if (!updated) return res.status(404).json({ error: 'Not found' });
+    res.json(updated);
+  }));
+
   router.delete('/:id', asyncHandler(async (req, res) => {
     const force = req.query.force === '1' || req.query.force === 'true';
     try {

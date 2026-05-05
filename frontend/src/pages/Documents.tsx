@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getFiles, deleteFile, getProjects, listMedia, deleteMedia, createTranscriptionJob, uploadMedia } from '@/services/api';
+import { getFiles, deleteFile, updateFile, getProjects, listMedia, deleteMedia, renameMedia, createTranscriptionJob, uploadMedia } from '@/services/api';
 import { getVttDownloadUrl } from '@/services/api';
 import type { UploadedFile, MediaFile } from '@/types';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
@@ -32,6 +32,35 @@ function DocumentRow({ item }: { item: DocumentItem }) {
   const navigate = useNavigate();
   const [pendingDocDelete, setPendingDocDelete] = useState<string | null>(null);
   const [pendingMediaDelete, setPendingMediaDelete] = useState<{ id: string; force: boolean } | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  const renameMut = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      item.type === 'document'
+        ? updateFile(id, { filename: name })
+        : renameMedia(id, name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [item.type === 'document' ? 'files' : 'media'] });
+      setRenamingId(null);
+    },
+    onError: () => toast.error('Rename failed'),
+  });
+
+  function startRename(id: string, currentName: string) {
+    setRenamingId(id);
+    setRenameValue(currentName);
+    setTimeout(() => renameInputRef.current?.select(), 0);
+  }
+
+  function commitRename() {
+    const trimmed = renameValue.trim();
+    if (!trimmed || !renamingId) { setRenamingId(null); return; }
+    const currentName = item.type === 'document' ? (item as UploadedFile).filename : (item as MediaFile).originalFilename;
+    if (trimmed === currentName) { setRenamingId(null); return; }
+    renameMut.mutate({ id: renamingId, name: trimmed });
+  }
 
   const handleDownloadAudio = async (mediaItem: MediaFile) => {
     try {
@@ -106,8 +135,30 @@ function DocumentRow({ item }: { item: DocumentItem }) {
         >
           <TableCell>
             <div className="flex items-center gap-2">
-              <FileText className="w-4 h-4 text-neutral-600" />
-              <span className="font-medium">{item.filename}</span>
+              <FileText className="w-4 h-4 text-neutral-600 shrink-0" />
+              {renamingId === item.id ? (
+                <input
+                  ref={renameInputRef}
+                  className="font-medium border-b-2 border-indigo-500 bg-transparent focus:outline-none w-full"
+                  value={renameValue}
+                  onChange={e => setRenameValue(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+                    if (e.key === 'Escape') setRenamingId(null);
+                  }}
+                  onClick={e => e.stopPropagation()}
+                  autoFocus
+                />
+              ) : (
+                <span
+                  className="font-medium cursor-text hover:underline decoration-dashed underline-offset-2"
+                  title="Click to rename"
+                  onClick={e => { e.stopPropagation(); startRename(item.id, item.filename); }}
+                >
+                  {item.filename}
+                </span>
+              )}
             </div>
           </TableCell>
           <TableCell className="text-xs text-neutral-600">
@@ -175,8 +226,30 @@ function DocumentRow({ item }: { item: DocumentItem }) {
       >
         <TableCell>
           <div className="flex items-center gap-2">
-            <Music className="w-4 h-4 text-neutral-600" />
-            <span className="font-medium">{item.originalFilename}</span>
+            <Music className="w-4 h-4 text-neutral-600 shrink-0" />
+            {renamingId === item.id ? (
+              <input
+                ref={renameInputRef}
+                className="font-medium border-b-2 border-indigo-500 bg-transparent focus:outline-none w-full"
+                value={renameValue}
+                onChange={e => setRenameValue(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+                  if (e.key === 'Escape') setRenamingId(null);
+                }}
+                onClick={e => e.stopPropagation()}
+                autoFocus
+              />
+            ) : (
+              <span
+                className="font-medium cursor-text hover:underline decoration-dashed underline-offset-2"
+                title="Click to rename"
+                onClick={e => { e.stopPropagation(); startRename(item.id, item.originalFilename); }}
+              >
+                {item.originalFilename}
+              </span>
+            )}
           </div>
         </TableCell>
         <TableCell className="text-xs text-neutral-600">

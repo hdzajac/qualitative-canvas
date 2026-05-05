@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
-import { createMedia, getMedia, listMedia, updateMedia, ensureDir, getMediaDir, deleteMedia } from '../dao/mediaDao.js';
+import { createMedia, getMedia, listMedia, updateMedia, renameMedia, ensureDir, getMediaDir, deleteMedia } from '../dao/mediaDao.js';
 import { getLatestJobForMedia } from '../dao/jobsDao.js';
 
 export default function mediaService(pool) {
@@ -29,6 +29,7 @@ export default function mediaService(pool) {
       return createMedia(pool, { id, projectId, originalFilename, mimeType, storagePath: destPath, sizeBytes });
     },
     update: (id, patch) => updateMedia(pool, id, patch),
+    rename: (id, originalFilename) => renameMedia(pool, id, originalFilename),
     async remove(id, { force } = {}) {
       const media = await getMedia(pool, id);
       if (!media) return false;

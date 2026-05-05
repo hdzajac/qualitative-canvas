@@ -178,6 +178,9 @@ export const getMedia = (id: string): Promise<MediaFile> => http<MediaFile>(`/me
 export const deleteMedia = (id: string, opts?: { force?: boolean }): Promise<void> =>
   http<void>(`/media/${id}${opts?.force ? '?force=1' : ''}`, { method: 'DELETE' });
 
+export const renameMedia = (id: string, originalFilename: string): Promise<MediaFile> =>
+  http<MediaFile>(`/media/${id}`, { method: 'PATCH', body: JSON.stringify({ originalFilename }) });
+
 // Raw media download/stream URL (no fetch performed); can be used as <audio src={...}> source.
 export const getMediaDownloadUrl = (id: string): string => `${BASE_URL}/media/${id}/download`;
 
