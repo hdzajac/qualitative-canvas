@@ -60,6 +60,10 @@ async function createAndLeaseJob(targetMediaId = mediaId) {
     .post('/api/transcribe-jobs/lease')
     .set('X-Worker-Secret', WORKER_SECRET);
   expect(lease.status).toBe(200);
+  // If we get someone else's job it means a previous test left a queued job behind.
+  // Fail here with a clear diagnostic rather than letting the wrong projectId/mediaFileId
+  // propagate to unrelated assertions further down.
+  expect(lease.body.mediaFileId).toBe(targetMediaId);
   return lease.body;
 }
 
