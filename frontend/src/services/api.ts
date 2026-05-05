@@ -88,6 +88,12 @@ async function httpMaybe<T>(path: string, init?: RequestInit): Promise<T | null>
 export const uploadFile = (filename: string, content: string, projectId?: string): Promise<UploadedFile> =>
   http<UploadedFile>('/files', { method: 'POST', body: JSON.stringify({ filename, content, projectId }) });
 
+// Health / version
+export const FRONTEND_VERSION: string = import.meta.env.VITE_APP_VERSION || 'dev';
+
+export const getHealth = (): Promise<{ ok: boolean; dbOk: boolean; version: string }> =>
+  fetch(`${BASE_URL}/health`).then(r => r.json());
+
 export const getFiles = (projectId?: string): Promise<UploadedFile[]> =>
   http<UploadedFile[]>(projectId ? `/files?projectId=${encodeURIComponent(projectId)}` : '/files');
 

@@ -107,9 +107,9 @@ export function buildApp() {
     try {
       const r = await pool.query('SELECT 1 as ok');
       const dbOk = r?.rows?.[0]?.ok === 1;
-      res.json({ ok: true, dbOk });
+      res.json({ ok: true, dbOk, version: process.env.APP_VERSION || 'dev' });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      res.status(500).json({ ok: false, error: e.message, version: process.env.APP_VERSION || 'dev' });
     }
   });
 

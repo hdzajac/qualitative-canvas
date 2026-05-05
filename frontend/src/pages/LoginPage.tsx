@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { getHealth, FRONTEND_VERSION } from '@/services/api';
 
 export default function LoginPage() {
     const { login } = useAuth();
@@ -15,6 +16,13 @@ export default function LoginPage() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [backendVersion, setBackendVersion] = useState<string | null>(null);
+
+    useEffect(() => {
+        getHealth()
+            .then(h => setBackendVersion(h.version))
+            .catch(() => setBackendVersion(null));
+    }, []);
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -77,6 +85,10 @@ export default function LoginPage() {
                     <Link to="/signup" className="underline font-medium">
                         Create one
                     </Link>
+                </p>
+                <p className="mt-6 text-xs text-center text-neutral-400 font-mono" aria-label="version information">
+                    ui&nbsp;{FRONTEND_VERSION}
+                    {backendVersion && <>&nbsp;·&nbsp;api&nbsp;{backendVersion}</>}
                 </p>
             </div>
         </div>
