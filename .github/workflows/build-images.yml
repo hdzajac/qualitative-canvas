@@ -4,9 +4,54 @@ on:
   push:
     branches: [ main, whisper ]
   workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type (only applies on main)'
+        required: false
+        default: patch
+        type: choice
+        options: [ patch, minor, major ]
 
 jobs:
+  bump-version:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new_tag: ${{ steps.bump.outputs.new_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump semver tag
+        id: bump
+        run: |
+          BUMP="${{ github.event.inputs.bump || 'patch' }}"
+          LATEST=$(git tag --list 'v*.*.*' --sort=-version:refname | head -n1)
+          LATEST=${LATEST:-v0.0.0}
+          VERSION="${LATEST#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            *)     PATCH=$((PATCH + 1)) ;;
+          esac
+          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "New tag: $NEW_TAG"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$NEW_TAG"
+          git push origin "$NEW_TAG"
+          echo "new_tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+
   build-push:
+    needs: [ bump-version ]
+    if: always()
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -38,6 +83,9 @@ jobs:
           images: ghcr.io/${{ github.repository_owner }}/qualitative-canvas-${{ matrix.service }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/whisper' }}
+            type=semver,pattern={{version}},value=${{ needs.bump-version.outputs.new_tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.bump-version.outputs.new_tag }}
+            type=semver,pattern={{major}},value=${{ needs.bump-version.outputs.new_tag }}
             type=sha
             type=ref,event=branch
 

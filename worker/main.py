@@ -543,19 +543,27 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, au
     # Re-use bytes from the main() fetch when available to avoid a second full download
     if audio_bytes is None:
         log_info("Diarization: fetching audio (not already in memory)")
+        t_dl0 = time.perf_counter()
         audio_bytes = _session.get(f"{base_url}/media/{media['id']}/download", timeout=120).content
+        log_info(f"Diarization: audio download complete ({len(audio_bytes)/1_048_576:.1f} MB, {int((time.perf_counter()-t_dl0)*1000)}ms)")
+    else:
+        log_info(f"Diarization: reusing in-memory audio ({len(audio_bytes)/1_048_576:.1f} MB, no download needed)")
     # Write original bytes then transcode to 16k mono WAV to ensure readable format
     src_path = None
     wav_path = None
     final_wav_path: Optional[str] = None
+    t_diar_start = time.perf_counter()
     try:
         with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as src:
             src.write(audio_bytes)
             src.flush()
             src_path = src.name
         wav_path = src_path + '.wav'
+        log_debug(f"Diarization: transcoding to 16kHz mono WAV…")
+        t_ff0 = time.perf_counter()
         try:
             subprocess.run(['ffmpeg', '-y', '-i', src_path, '-ar', '16000', '-ac', '1', wav_path], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            log_debug(f"Diarization: ffmpeg transcode done in {int((time.perf_counter()-t_ff0)*1000)}ms")
         except Exception as e:
             log_warn(f"ffmpeg conversion for diarization failed: {e}")
             return
@@ -578,9 +586,13 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, au
             except Exception as e:
                 log_warn(f"ffmpeg truncate failed (continuing with full length): {e}")
         if duration_sec:
-            log_info(f"Diarization: audio duration ~{duration_sec}s, starting inference…")
+            dur_h = duration_sec // 3600
+            dur_m = (duration_sec % 3600) // 60
+            dur_s = duration_sec % 60
+            dur_str = f"{dur_h}h{dur_m:02d}m{dur_s:02d}s" if dur_h else f"{dur_m}m{dur_s:02d}s"
+            log_info(f"Diarization: audio duration ~{dur_str} ({duration_sec}s), starting inference…")
         else:
-            log_info("Diarization: starting inference…")
+            log_info("Diarization: starting inference (duration unknown)…")
         t0 = time.perf_counter()
         pipeline_kwargs = {}
         if num_speakers is not None:
@@ -591,9 +603,15 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, au
             # Cap unconstrained diarization to prevent spurious ghost participants
             import os as _os
             pipeline_kwargs['max_speakers'] = int(_os.getenv('DIARIZATION_MAX_SPEAKERS', '20'))
+            log_info(f"Diarization: no speaker hint, max_speakers cap={pipeline_kwargs['max_speakers']}")
+        log_info(f"Diarization: running pipeline with kwargs={pipeline_kwargs}")
         diar = pipeline(final_wav_path or wav_path, **pipeline_kwargs)
         t_ms = int((time.perf_counter() - t0) * 1000)
-        log_info(f"Diarization inference done in {t_ms}ms")
+        if duration_sec:
+            rtf_actual = t_ms / max(1, duration_sec * 1000)
+            log_info(f"Diarization inference done in {t_ms}ms (RTF={rtf_actual:.2f}x, {t_ms//60000}m{(t_ms%60000)//1000}s)")
+        else:
+            log_info(f"Diarization inference done in {t_ms}ms")
     finally:
         # Best-effort cleanup
         try:
@@ -611,9 +629,18 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, au
                 os.remove(final_wav_path)
         except Exception:
             pass
-    # Placeholder: future step will map diarization speakers to participants and update segments
     turns = list(diar.itertracks(yield_label=True))
-    print(f"Diarization completed: {len(turns)} speaker turns")
+    # Log a per-speaker turn and duration breakdown
+    speaker_stats: dict[str, dict] = {}
+    for (seg, _track, label) in turns:
+        s = speaker_stats.setdefault(label, {'turns': 0, 'total_sec': 0.0})
+        s['turns'] += 1
+        s['total_sec'] += seg.end - seg.start
+    stats_str = ', '.join(
+        f"{lbl}: {v['turns']} turns {v['total_sec']:.0f}s"
+        for lbl, v in sorted(speaker_stats.items())
+    )
+    log_info(f"Diarization completed: {len(turns)} turns across {len(speaker_stats)} speakers [{stats_str}]")
     if not AUTO_DIARIZATION_ASSIGN:
         # Still merge consecutive runs even when auto-assign is disabled
         # (merges unassigned segments — null participantId matches null)
@@ -645,11 +672,13 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, au
                 ordered_labels.append(label)
         # Map labels to participant IDs; create if missing, name as "Participant N"
         label_to_part = {}
+        created_count = 0
         for label in ordered_labels:
             existing = next((p for p in participants if p.get('canonicalKey') == label), None)
             if not existing:
                 display_index = (first_seen.get(label, len(label_to_part)) or 0) + 1
                 display_name = f"Participant {display_index}"
+                log_debug(f"Diarization: creating participant '{display_name}' for speaker label '{label}'")
                 cr = _session.post(
                     f"{base_url}/media/{media['id']}/participants",
                     json={"name": display_name, "canonicalKey": label},
@@ -658,7 +687,9 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, au
                 cr.raise_for_status()
                 existing = cr.json()
                 participants.append(existing)
+                created_count += 1
             label_to_part[label] = existing['id']
+        log_info(f"Diarization: resolved {len(label_to_part)} speakers ({created_count} created, {len(label_to_part)-created_count} existing)")
 
         # Pre-compute sorted turn centers for O(log M) nearest-turn lookup via bisect.
         import bisect as _bisect
@@ -670,9 +701,11 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, au
         # Fetch all transcript segments once, assign ALL of them to the nearest
         # diarization turn in a single pass.  This produces at most N_speakers HTTP
         # calls instead of one per diarization turn (which can be hundreds for long files).
+        log_debug(f"Diarization: fetching transcript segments for assignment…")
         seg_r = _session.get(f"{base_url}/media/{media['id']}/segments", timeout=60)
         seg_r.raise_for_status()
         seg_list = seg_r.json() or []
+        log_info(f"Diarization: assigning {len(seg_list)} transcript segments to {len(label_to_part)} speakers via bisect lookup")
         assign_map: dict[str, list[str]] = {}  # pid -> list[segmentId]
         for s in seg_list:
             mid = int(((s.get('startMs') or 0) + (s.get('endMs') or 0)) / 2)
@@ -697,10 +730,14 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, au
         # One POST per participant — N_speakers calls total.
         # Lambda captures use default args to avoid late-binding over the loop variable.
         assigned_total = 0
+        speaker_names = {v: k for k, v in label_to_part.items()}  # pid -> label for logging
         for pid, seg_ids in assign_map.items():
             if not seg_ids:
                 continue
+            label = speaker_names.get(pid, pid[:8])
+            log_debug(f"Diarization: assigning {len(seg_ids)} segments to speaker '{label}' (pid={pid[:8]}…)")
             try:
+                t_assign0 = time.perf_counter()
                 br = request_with_backoff(
                     lambda _pid=pid, _ids=seg_ids: _session.post(
                         f"{base_url}/media/{media['id']}/segments/assign-participant",
@@ -708,12 +745,14 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, au
                         timeout=60,
                     )
                 )
+                t_assign_ms = int((time.perf_counter() - t_assign0) * 1000)
                 if not br.ok:
-                    log_warn(f"assign-participant {br.status_code} body={br.text[:200]}")
+                    log_warn(f"assign-participant '{label}' {br.status_code} in {t_assign_ms}ms body={br.text[:200]}")
                 else:
                     assigned_total += len(seg_ids)
+                    log_debug(f"assign-participant '{label}' ok: {len(seg_ids)} segs in {t_assign_ms}ms")
             except Exception as e:
-                log_warn(f"assign-participant error: {e}")
+                log_warn(f"assign-participant error for '{label}': {e}")
         log_info(f"Auto-assigned {assigned_total}/{len(seg_list)} segments across {len(assign_map)} speakers for media {media['id']}")
         # Merge consecutive same-speaker runs to reduce fragmentation
         try:
@@ -733,6 +772,9 @@ def run_diarization(base_url: str, media, num_speakers: Optional[int] = None, au
             log_warn(f"merge-speaker-runs call failed: {e}")
     except Exception as e:
         log_warn(f"Diarization auto-assign failed: {e}")
+    finally:
+        t_diar_total_ms = int((time.perf_counter() - t_diar_start) * 1000)
+        log_info(f"Diarization total wall time: {t_diar_total_ms}ms ({t_diar_total_ms//60000}m{(t_diar_total_ms%60000)//1000}s) for media {media['id']}")
 
 if __name__ == '__main__':
     main()
